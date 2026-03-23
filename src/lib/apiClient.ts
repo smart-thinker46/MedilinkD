@@ -8083,7 +8083,8 @@ export async function submitModuleRecord(input: WorkflowSubmitInput) {
       }
 
       if (formId === "opd_consultation_prescription") {
-        const nextQueueRoute = toText(input.formData?.next_queue_route).toLowerCase();
+        // `toText` returns `string | undefined`, so default before calling string methods.
+        const nextQueueRoute = (toText(input.formData?.next_queue_route) || "").toLowerCase();
         const routeToLab = nextQueueRoute.includes("lab");
         const routeToRadiology = nextQueueRoute.includes("radiology");
         const routeToPharmacy = nextQueueRoute.includes("pharmacy");
