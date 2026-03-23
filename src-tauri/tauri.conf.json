@@ -40,7 +40,7 @@
         "https://github.com/smart-thinker46/MedilinkD/releases/latest/download/latest.json"
       ],
       "dialog": false,
-      "pubkey": "REPLACE_WITH_TAURI_UPDATER_PUBLIC_KEY"
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEEwNERENEFEMUMzRkNGQjIKUldTeXp6OGNyZFJOb001MU1QTXpFUXBVRzd3Zng5K3lrMk55L2hXRlp3ZE1hQU5Odm45NFhnTi8K"
     }
   }
 }

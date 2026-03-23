@@ -112,45 +112,14 @@ export async function fetchLicenseStatus(facilityCode: string) {
   if (facilityCode) {
     url.searchParams.set("facilityCode", facilityCode);
   }
+  const deviceId = getDeviceId();
+  if (deviceId) {
+    url.searchParams.set("deviceId", deviceId);
+  }
   const response = await fetch(url.toString(), { method: "GET" });
   const body = await parseJsonSafe(response);
   if (!response.ok) {
     throw new Error(toErrorMessage(body, "License status check failed"));
-  }
-  return body;
-}
-
-export async function fetchLicenseDevices() {
-  const token = getAccessToken();
-  const response = await fetch(`${API_BASE_URL}/license/devices`, {
-    method: "GET",
-    headers: {
-      "Content-Type": "application/json",
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    },
-  });
-  const body = await parseJsonSafe(response);
-  if (!response.ok) {
-    throw new Error(toErrorMessage(body, "Failed to load devices"));
-  }
-  return body;
-}
-
-export async function revokeLicenseDevice(deviceId: string) {
-  const token = getAccessToken();
-  const response = await fetch(
-    `${API_BASE_URL}/license/devices/${encodeURIComponent(deviceId)}/revoke`,
-    {
-      method: "PATCH",
-      headers: {
-        "Content-Type": "application/json",
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      },
-    },
-  );
-  const body = await parseJsonSafe(response);
-  if (!response.ok) {
-    throw new Error(toErrorMessage(body, "Failed to revoke device"));
   }
   return body;
 }

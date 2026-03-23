@@ -2562,7 +2562,7 @@ body {
 }
 
 .auth-card {
-  padding: 28px;
+  padding: 22px 24px;
   width: min(900px, 96vw);
 }
 
@@ -2575,8 +2575,8 @@ body {
 .auth-card p {
   font-size: 0.86rem;
   color: #64748b;
-  margin-top: 3px;
-  margin-bottom: 14px;
+  margin-top: 2px;
+  margin-bottom: 10px;
 }
 
 .auth-link-row {
@@ -2992,12 +2992,15 @@ body {
 
 .landing-shell {
   width: min(1080px, 94vw);
-  min-height: min(700px, 88vh);
+  /* Slightly shorter shell + top-aligned content reduces "empty" vertical space
+     around the logo and CTA on desktop screens. */
+  min-height: min(640px, 84vh);
+  position: relative; /* anchor the theme picker to the card */
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 28px;
-  align-items: center;
-  padding: 34px;
+  align-items: start;
+  padding: 28px;
   border-radius: 28px;
   background: rgba(255, 255, 255, 0.94);
   border: 1px solid rgba(255, 255, 255, 0.72);
@@ -3010,13 +3013,20 @@ body {
 
 .landing-theme-picker {
   position: absolute;
-  top: 14px;
-  right: 14px;
+  top: 16px;
+  right: 16px;
+  z-index: 5;
   display: flex;
-  gap: 6px;
+  gap: 8px;
   flex-wrap: wrap;
   justify-content: flex-end;
   max-width: min(520px, 72%);
+  padding: 6px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.78);
+  border: 1px solid rgba(226, 232, 240, 0.9);
+  box-shadow: 0 14px 34px rgba(15, 23, 42, 0.12);
+  backdrop-filter: blur(10px);
 }
 
 .landing-theme-picker button {
@@ -3028,6 +3038,7 @@ body {
   font-size: 0.7rem;
   font-weight: 700;
   cursor: pointer;
+  white-space: nowrap;
 }
 
 .landing-theme-picker button.is-active {
@@ -3036,10 +3047,20 @@ body {
   color: #1e3a8a;
 }
 
+@media (max-width: 760px) {
+  .landing-theme-picker {
+    left: 16px;
+    right: 16px;
+    max-width: unset;
+    justify-content: center;
+    border-radius: 18px;
+  }
+}
+
 .landing-copy {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 8px;
   align-items: flex-start;
 }
 
@@ -3057,7 +3078,7 @@ body {
   height: auto;
   object-fit: contain;
   display: block;
-  margin: 2px 0 10px;
+  margin: 0 0 8px;
 }
 
 .auth-title-logo {
@@ -3066,7 +3087,7 @@ body {
   height: auto;
   object-fit: contain;
   display: block;
-  margin: 0 auto 8px;
+  margin: 0 auto 4px;
 }
 
 .landing-subtitle {
