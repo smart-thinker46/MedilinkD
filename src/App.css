@@ -25,6 +25,63 @@ body {
   overflow: hidden;
 }
 
+/* ─── UPDATER BANNER ─── */
+.hmis-update-banner {
+  position: fixed;
+  right: 18px;
+  top: 18px;
+  z-index: 9999;
+  width: min(520px, calc(100vw - 36px));
+  background: rgba(17, 24, 39, 0.92);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  color: rgba(255, 255, 255, 0.92);
+  border-radius: 16px;
+  padding: 14px 14px;
+  box-shadow: 0 18px 45px rgba(0, 0, 0, 0.25);
+  backdrop-filter: blur(10px);
+}
+
+.hmis-update-banner__title {
+  font-weight: 800;
+  font-size: 14px;
+  letter-spacing: 0.2px;
+}
+
+.hmis-update-banner__message {
+  margin-top: 6px;
+  font-size: 12px;
+  line-height: 1.35;
+  color: rgba(255, 255, 255, 0.74);
+}
+
+.hmis-update-banner__actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 12px;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+}
+
+.hmis-update-banner__btn {
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  background: rgba(255, 255, 255, 0.06);
+  color: rgba(255, 255, 255, 0.9);
+  padding: 8px 12px;
+  font-weight: 700;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.hmis-update-banner__btn.primary {
+  background: rgba(19, 216, 2, 0.16);
+  border-color: rgba(19, 216, 2, 0.45);
+}
+
+.hmis-update-banner__btn:hover {
+  transform: translateY(-1px);
+}
+
 /* ─── LAYOUT ─── */
 .layout {
   display: flex;

@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef, useCallback } from "react";
 import "./App.css";
 import { useAppStore, type Patient } from "./store/appStore";
 import { WorkflowModuleView } from "./components/WorkflowModuleView";
+import { DesktopUpdater } from "./components/DesktopUpdater";
 import { WORKFLOW_MODULE_BY_ID, WORKFLOW_MODULES } from "./modules/workflowCatalog";
 import {
   MEDILINK_AI_GREETING,
@@ -22,7 +23,6 @@ import {
   fetchSubscriptionPricing,
   fetchSecurityRbacCatalog,
   fetchSecurityMyAccess,
-  fetchLicenseDevices,
   fetchSuperAdminAnnouncements,
   fetchSuperAdminAuditStream,
   fetchSuperAdminFeatureFlags,
@@ -71,7 +71,6 @@ import {
   updateAdminSupportRequestStatus,
   updateTenantUserRole,
   updateTenantUserStatus,
-  revokeLicenseDevice,
 } from "./lib/apiClient";
 
 const MARKETING_BASE_URL =
@@ -3784,50 +3783,6 @@ function SettingsView({
 }) {
   const fileInputRef = React.useRef<HTMLInputElement>(null);
   const [settingsNotice, setSettingsNotice] = React.useState("");
-  const [deviceRows, setDeviceRows] = React.useState<
-    Array<{
-      id: string;
-      fingerprint: string;
-      label?: string | null;
-      status: string;
-      lastSeenAt?: string | null;
-      activatedAt?: string | null;
-    }>
-  >([]);
-  const [deviceLoading, setDeviceLoading] = React.useState(false);
-  const [deviceError, setDeviceError] = React.useState("");
-  const currentDeviceId = getDeviceId();
-
-  const loadDevices = async () => {
-    setDeviceLoading(true);
-    setDeviceError("");
-    try {
-      const rows = await fetchLicenseDevices();
-      setDeviceRows(Array.isArray(rows) ? rows : []);
-    } catch (err: any) {
-      setDeviceError(String(err?.message || "Failed to load devices."));
-      setDeviceRows([]);
-    } finally {
-      setDeviceLoading(false);
-    }
-  };
-
-  const handleRevokeDevice = async (deviceId: string) => {
-    if (!window.confirm("Revoke this device? It will be blocked from logging in.")) {
-      return;
-    }
-    setDeviceError("");
-    try {
-      await revokeLicenseDevice(deviceId);
-      await loadDevices();
-    } catch (err: any) {
-      setDeviceError(String(err?.message || "Failed to revoke device."));
-    }
-  };
-
-  React.useEffect(() => {
-    void loadDevices();
-  }, []);
 
   const handleLogoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -4053,73 +4008,14 @@ function SettingsView({
         </section>
 
         <section className="settings-card" style={{ gridColumn: "1 / -1" }}>
-          <div className="settings-card-title">Device Registry</div>
+          <div className="settings-card-title">Licensing & Devices</div>
           <p className="pv-subtitle" style={{ marginBottom: 12 }}>
-            Authorized computers for this facility. Revoke if a device is lost or shared outside the hospital.
+            Device management and seat limits are controlled by MediLink admin. If you need to add/remove a device or renew your license, visit the pricing page or contact support.
           </p>
-          {deviceError ? <div className="auth-error">{deviceError}</div> : null}
-          <div className="pv-table-wrap">
-            <table className="pv-table">
-              <thead>
-                <tr>
-                  <th>Device</th>
-                  <th>Fingerprint</th>
-                  <th>Status</th>
-                  <th>Last Seen</th>
-                  <th>Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {deviceLoading && (
-                  <tr>
-                    <td colSpan={5} className="pv-empty">Loading devices...</td>
-                  </tr>
-                )}
-                {!deviceLoading && deviceRows.length === 0 && (
-                  <tr>
-                    <td colSpan={5} className="pv-empty">No devices registered yet.</td>
-                  </tr>
-                )}
-                {deviceRows.map((device) => {
-                  const isCurrent = device.fingerprint === currentDeviceId;
-                  const shortFingerprint = `${device.fingerprint.slice(0, 6)}...${device.fingerprint.slice(-6)}`;
-                  return (
-                    <tr key={device.id}>
-                      <td className="pv-name">
-                        {device.label || "Workstation"}
-                        {isCurrent ? " (This device)" : ""}
-                      </td>
-                      <td>{shortFingerprint}</td>
-                      <td>
-                        <span className={`pv-badge ${device.status === "ACTIVE" ? "badge-male" : "badge-female"}`}>
-                          {device.status}
-                        </span>
-                      </td>
-                      <td>
-                        {device.lastSeenAt
-                          ? new Date(device.lastSeenAt).toLocaleString()
-                          : "-"}
-                      </td>
-                      <td>
-                        <button
-                          className="pv-del"
-                          onClick={() => handleRevokeDevice(device.id)}
-                          disabled={device.status !== "ACTIVE" || isCurrent}
-                          title={isCurrent ? "Cannot revoke the current device" : "Revoke device"}
-                        >
-                          Revoke
-                        </button>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
           <div className="modal-footer" style={{ marginTop: 12 }}>
-            <button type="button" className="btn-cancel" onClick={() => void loadDevices()} disabled={deviceLoading}>
-              Refresh Devices
-            </button>
+            <a className="btn-primary" href={MARKETING_PRICING_URL} target="_blank" rel="noreferrer">
+              Renew / Buy License
+            </a>
           </div>
         </section>
       </div>
@@ -8008,6 +7904,7 @@ export default function App() {
         } as any
       }
     >
+      <DesktopUpdater />
       <aside
         className={`sidebar ${sidebarCollapsed ? "sidebar-collapsed" : ""}`}
       >
