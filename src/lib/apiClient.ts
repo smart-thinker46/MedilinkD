@@ -8083,7 +8083,7 @@ export async function submitModuleRecord(input: WorkflowSubmitInput) {
       }
 
       if (formId === "opd_consultation_prescription") {
-        const nextQueueRoute = toText(input.formData.next_queue_route).toLowerCase();
+        const nextQueueRoute = toText(input.formData?.next_queue_route).toLowerCase();
         const routeToLab = nextQueueRoute.includes("lab");
         const routeToRadiology = nextQueueRoute.includes("radiology");
         const routeToPharmacy = nextQueueRoute.includes("pharmacy");

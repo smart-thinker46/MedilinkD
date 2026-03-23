@@ -2351,7 +2351,7 @@ export function WorkflowModuleView({
       try {
         const rows = await fetchStaff();
         if (cancelled) return;
-        const parsed = rows
+        const parsed: Array<{ name: string; roleText: string }> = (rows as any[])
           .map((row: any) => {
             const first = String(row?.firstName || "").trim();
             const last = String(row?.lastName || "").trim();
@@ -2372,8 +2372,11 @@ export function WorkflowModuleView({
           .filter((row: { name: string; roleText: string }) => row.roleText.includes("nurse"))
           .map((row: { name: string }) => row.name);
         const fallback = parsed.map((row: { name: string }) => row.name);
-        const chosen = taggedNurses.length > 0 ? taggedNurses : fallback;
-        setNurseOptions(Array.from(new Set(chosen)).sort((a, b) => a.localeCompare(b)));
+        const chosen: string[] = taggedNurses.length > 0 ? taggedNurses : fallback;
+        const uniqueSorted = Array.from(new Set<string>(chosen)).sort((a: string, b: string) =>
+          a.localeCompare(b),
+        );
+        setNurseOptions(uniqueSorted);
       } catch {
         if (!cancelled) {
           setNurseOptions([]);
@@ -7075,7 +7078,7 @@ export function WorkflowModuleView({
   }, [isWardModule, wards, selectedWardMap?.id]);
 
   const toggleWardMap = (ward: any) => {
-    setSelectedWardMap((prev) => (prev?.id === ward.id ? null : ward));
+    setSelectedWardMap((prev: any) => (prev?.id === ward.id ? null : ward));
   };
 
   const handleCreateWard = async (e: React.FormEvent) => {
@@ -8006,8 +8009,10 @@ export function WorkflowModuleView({
       goalsAtRisk,
     };
   }, [strategicDashboard, strategicRisks, strategicGoals]);
-  const strategicRankingChartRows = useMemo(() => {
-    const rows = (Array.isArray((strategicDashboard as any)?.facilityComparison)
+  type StrategicRankingChartRow = { label: string; value: number; rank: number };
+
+  const strategicRankingChartRows = useMemo<StrategicRankingChartRow[]>(() => {
+    const rows: StrategicRankingChartRow[] = (Array.isArray((strategicDashboard as any)?.facilityComparison)
       ? (strategicDashboard as any)?.facilityComparison
       : strategicRankings
     )
@@ -8017,10 +8022,14 @@ export function WorkflowModuleView({
         value: Number(row?.score || row?.comparativeValue || 0),
         rank: Number(row?.rankPosition || 0),
       }));
-    return rows.sort((a, b) => b.value - a.value);
+    return rows.sort((a: StrategicRankingChartRow, b: StrategicRankingChartRow) => b.value - a.value);
   }, [strategicDashboard, strategicRankings]);
   const strategicRankingMax = useMemo(
-    () => Math.max(1, ...strategicRankingChartRows.map((row) => Number(row.value || 0))),
+    () =>
+      Math.max(
+        1,
+        ...strategicRankingChartRows.map((row: StrategicRankingChartRow) => Number(row.value || 0)),
+      ),
     [strategicRankingChartRows],
   );
   const strategicRiskMixRows = useMemo(() => {

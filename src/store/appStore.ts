@@ -22,7 +22,13 @@ export interface Patient {
 interface AppState {
   theme: "light" | "dark";
   facility: { id: string; name: string } | null;
-  user: { name: string; role: string; email: string } | null;
+  user: {
+    name: string;
+    role: string;
+    email: string;
+    facilityId?: string;
+    tenantId?: string;
+  } | null;
   toggleTheme: () => void;
   setFacility: (facility: any) => void;
   setUser: (user: any) => void;
