@@ -1,6 +1,7 @@
 name: Release Desktop
 
 on:
+  workflow_dispatch:
   push:
     tags:
       - "v*"
@@ -23,23 +24,46 @@ jobs:
         with:
           node-version: 20
           cache: npm
-          cache-dependency-path: package-lock.json
+          cache-dependency-path: hmis-platform/apps/desktop/package-lock.json
 
       - uses: dtolnay/rust-toolchain@stable
+
+      - name: Install Linux system dependencies
+        if: matrix.platform == 'ubuntu-latest'
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libglib2.0-dev \
+            libgtk-3-dev \
+            libwebkit2gtk-4.1-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            patchelf \
+            pkg-config
 
       - name: Install JS dependencies
         # Use npm install so adding new deps doesn't require a lockfile update
         # before the first release. (You should still commit the updated
         # package-lock.json after running `npm install` locally.)
+        working-directory: hmis-platform/apps/desktop
         run: npm install --no-audit --no-fund
+
+      - name: Prepare Tauri signing key env
+        shell: bash
+        run: |
+          # The tauri action expects a base64-encoded key; some base64 encoders wrap lines.
+          # Strip whitespace so decoding works reliably across runners.
+          sanitized_key="$(printf '%s' "${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}" | tr -d '[:space:]')"
+          echo "TAURI_SIGNING_PRIVATE_KEY=$sanitized_key" >> "$GITHUB_ENV"
+          echo "TAURI_SIGNING_PRIVATE_KEY_PASSWORD=${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}" >> "$GITHUB_ENV"
 
       - name: Build and publish
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
+          projectPath: hmis-platform/apps/desktop
           tagName: ${{ github.ref_name }}
           releaseName: "Medilink HMIS ${{ github.ref_name }}"
           releaseBody: "Automated release for Medilink HMIS desktop."
