@@ -24,9 +24,31 @@ jobs:
         with:
           node-version: 20
 
+      - name: Resolve desktop project path
+        id: desktop
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -f "hmis-platform/apps/desktop/package.json" ]; then
+            echo "projectPath=hmis-platform/apps/desktop" >> "$GITHUB_OUTPUT"
+          elif [ -f "package.json" ]; then
+            echo "projectPath=." >> "$GITHUB_OUTPUT"
+          else
+            echo "Unable to locate a desktop project (missing package.json)." >&2
+            echo "Repository root contents:" >&2
+            ls -la >&2
+            exit 1
+          fi
+
       - name: Create npm cache dir
+        if: runner.os != 'Windows'
         shell: bash
         run: mkdir -p .npm-cache
+
+      - name: Create npm cache dir (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: New-Item -ItemType Directory -Force -Path .npm-cache | Out-Null
 
       - name: Cache npm
         uses: actions/cache@v4
@@ -56,7 +78,7 @@ jobs:
         # Use npm install so adding new deps doesn't require a lockfile update
         # before the first release. (You should still commit the updated
         # package-lock.json after running `npm install` locally.)
-        working-directory: hmis-platform/apps/desktop
+        working-directory: ${{ steps.desktop.outputs.projectPath }}
         env:
           npm_config_cache: ${{ github.workspace }}/.npm-cache
         run: npm install --no-audit --no-fund
@@ -75,7 +97,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          projectPath: hmis-platform/apps/desktop
+          projectPath: ${{ steps.desktop.outputs.projectPath }}
           tagName: ${{ github.ref_name }}
           releaseName: "Medilink HMIS ${{ github.ref_name }}"
           releaseBody: "Automated release for Medilink HMIS desktop."
