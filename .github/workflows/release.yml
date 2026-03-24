@@ -23,8 +23,18 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 20
-          cache: npm
-          cache-dependency-path: hmis-platform/apps/desktop/package-lock.json
+
+      - name: Create npm cache dir
+        shell: bash
+        run: mkdir -p .npm-cache
+
+      - name: Cache npm
+        uses: actions/cache@v4
+        with:
+          path: .npm-cache
+          key: npm-${{ runner.os }}-${{ hashFiles('**/package-lock.json') }}
+          restore-keys: |
+            npm-${{ runner.os }}-
 
       - uses: dtolnay/rust-toolchain@stable
 
@@ -47,6 +57,8 @@ jobs:
         # before the first release. (You should still commit the updated
         # package-lock.json after running `npm install` locally.)
         working-directory: hmis-platform/apps/desktop
+        env:
+          npm_config_cache: ${{ github.workspace }}/.npm-cache
         run: npm install --no-audit --no-fund
 
       - name: Prepare Tauri signing key env
