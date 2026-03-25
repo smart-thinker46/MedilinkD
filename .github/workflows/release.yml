@@ -60,6 +60,17 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
 
+      - name: Validate desktop backend URL
+        shell: bash
+        env:
+          VITE_API_BASE_URL: ${{ vars.DESKTOP_API_BASE_URL || secrets.DESKTOP_API_BASE_URL }}
+        run: |
+          set -euo pipefail
+          if [ -z "${VITE_API_BASE_URL:-}" ]; then
+            echo "Missing DESKTOP_API_BASE_URL (set it in GitHub Actions Variables or Secrets)." >&2
+            exit 1
+          fi
+
       - name: Install Linux system dependencies
         if: matrix.platform == 'ubuntu-latest'
         shell: bash
@@ -96,6 +107,7 @@ jobs:
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VITE_API_BASE_URL: ${{ vars.DESKTOP_API_BASE_URL || secrets.DESKTOP_API_BASE_URL }}
         with:
           projectPath: ${{ steps.desktop.outputs.projectPath }}
           tagName: ${{ github.ref_name }}

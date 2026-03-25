@@ -74,8 +74,17 @@ import {
 } from "./lib/apiClient";
 
 const MARKETING_BASE_URL =
-  (import.meta as any).env?.VITE_MARKETING_URL || "https://medilink.co.ke";
+  (import.meta as any).env?.VITE_MARKETING_URL || "https://medilinkke.onrender.com";
 const MARKETING_PRICING_URL = `${String(MARKETING_BASE_URL).replace(/\/$/, "")}/pricing`;
+
+async function openExternalUrl(url: string) {
+  try {
+    const { openUrl } = await import("@tauri-apps/plugin-opener");
+    await openUrl(url);
+  } catch {
+    window.open(url, "_blank", "noopener,noreferrer");
+  }
+}
 
 const iconByModuleId: Record<number, string> = {
   1: "person",
@@ -4013,7 +4022,16 @@ function SettingsView({
             Device management and seat limits are controlled by MediLink admin. If you need to add/remove a device or renew your license, visit the pricing page or contact support.
           </p>
           <div className="modal-footer" style={{ marginTop: 12 }}>
-            <a className="btn-primary" href={MARKETING_PRICING_URL} target="_blank" rel="noreferrer">
+            <a
+              className="btn-primary"
+              href={MARKETING_PRICING_URL}
+              target="_blank"
+              rel="noreferrer"
+              onClick={(event) => {
+                event.preventDefault();
+                void openExternalUrl(MARKETING_PRICING_URL);
+              }}
+            >
               Renew / Buy License
             </a>
           </div>
@@ -4581,7 +4599,15 @@ function LicenseActivationScreen({
         </div>
         <div className="auth-link-row">
           Don't have a license key?{" "}
-          <a href={MARKETING_PRICING_URL} target="_blank" rel="noreferrer">
+          <a
+            href={MARKETING_PRICING_URL}
+            target="_blank"
+            rel="noreferrer"
+            onClick={(event) => {
+              event.preventDefault();
+              void openExternalUrl(MARKETING_PRICING_URL);
+            }}
+          >
             Obtain One
           </a>
         </div>
@@ -7060,6 +7086,51 @@ export default function App() {
     }, 2400);
     return () => window.clearTimeout(id);
   }, [authScreen, ensureLicenseActive]);
+
+  useEffect(() => {
+    if (authScreen !== "license") return;
+    const code = String(licenseFacilityCode || "").trim();
+    if (!code) return;
+    const id = window.setInterval(() => {
+      void (async () => {
+        const ok = await ensureLicenseActive(code);
+        if (ok) {
+          setAuthScreen("app");
+        }
+      })();
+    }, 30_000);
+    return () => window.clearInterval(id);
+  }, [authScreen, licenseFacilityCode, ensureLicenseActive]);
+
+  useEffect(() => {
+    if (authScreen !== "app") return;
+    const code = String(getStoredFacilityCode() || licenseFacilityCode || "").trim();
+    if (!code) return;
+
+    const tick = () => {
+      void (async () => {
+        try {
+          const status = (await fetchLicenseStatus(code)) as LicenseState;
+          setLicenseStatus(status);
+          if (!status?.active) {
+            setAuthScreen("license");
+          }
+        } catch {
+          // ignore background check failures
+        }
+      })();
+    };
+
+    tick();
+    const id = window.setInterval(tick, 60_000);
+    window.addEventListener("focus", tick);
+    window.addEventListener("online", tick);
+    return () => {
+      window.clearInterval(id);
+      window.removeEventListener("focus", tick);
+      window.removeEventListener("online", tick);
+    };
+  }, [authScreen, licenseFacilityCode]);
 
   useEffect(() => {
     if (authScreen !== "app") return;
