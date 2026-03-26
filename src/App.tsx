@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import "./App.css";
 import { useAppStore, type Patient } from "./store/appStore";
-import { WorkflowModuleView } from "./components/WorkflowModuleView";
 import { DesktopUpdater } from "./components/DesktopUpdater";
+import { MigrationCenterView } from "./components/MigrationCenterView";
 import { WORKFLOW_MODULE_BY_ID, WORKFLOW_MODULES } from "./modules/workflowCatalog";
 import {
   MEDILINK_AI_GREETING,
@@ -86,6 +86,12 @@ async function openExternalUrl(url: string) {
   }
 }
 
+const LazyWorkflowModuleView = React.lazy(() =>
+  import("./components/WorkflowModuleView").then((m) => ({
+    default: m.WorkflowModuleView,
+  })),
+);
+
 const iconByModuleId: Record<number, string> = {
   1: "person",
   2: "bed",
@@ -160,6 +166,7 @@ const SIDEBAR_NAV_ITEMS = [
   { index: 9, ...NAV_ITEMS[9] },
   { index: 10, ...NAV_ITEMS[10] },
   { index: 12, ...NAV_ITEMS[12] },
+  { index: 42, label: "Migration", iconType: "upload" },
 ];
 
 type RoleKey =
@@ -175,8 +182,8 @@ type RoleKey =
   | "patient";
 
 const ROLE_ALLOWED_NAV: Record<RoleKey, number[]> = {
-  super_admin: [41],
-  hospital_admin: [0, 1, 3, 5, 7, 8, 9, 10, 12, 40],
+  super_admin: [41, 42],
+  hospital_admin: [0, 1, 3, 5, 7, 8, 9, 10, 12, 40, 42],
   pharmacy_admin: [0, 1, 9, 10],
   doctor: [0, 1, 3, 5],
   nurse: [0, 1, 5],
@@ -319,6 +326,7 @@ function Icon({ type, size = 28 }: { type?: string; size?: number }) {
     stars: "stars",
     microscope: "biotech",
     users: "group",
+    upload: "cloud_upload",
   };
   if (type && materialByType[type]) {
     return (
@@ -6999,6 +7007,19 @@ export default function App() {
     allowedNavSet.has(item.index),
   );
 
+  const getNavLabel = useCallback(
+    (navIndex: number) => {
+      if (navIndex === 99 && activeWorkflowModuleId) {
+        return String(WORKFLOW_MODULE_BY_ID[activeWorkflowModuleId]?.name || "Module");
+      }
+      if (navIndex === 40) return "Subscriptions";
+      const fromSidebar = SIDEBAR_NAV_ITEMS.find((item) => item.index === navIndex)?.label;
+      if (fromSidebar) return fromSidebar;
+      return String(NAV_ITEMS[navIndex]?.label || "Dashboard");
+    },
+    [activeWorkflowModuleId],
+  );
+
   useEffect(() => {
     localStorage.setItem("hmis_primary", primaryColor);
     localStorage.setItem("hmis_text_color", textColor);
@@ -7295,7 +7316,7 @@ export default function App() {
       : "";
     const activeScreen = activeWorkflowModuleId
       ? "Workflow Module View"
-      : String(NAV_ITEMS[activeNav]?.label || "Dashboard");
+      : getNavLabel(activeNav);
     const helpContext: HelpAssistantContext = {
       userRole: String(user?.role || ""),
       module: activeModuleName || activeScreen,
@@ -7945,16 +7966,24 @@ export default function App() {
         ) : (
           <div className="p-4">Super Admin dashboard is restricted to super admin accounts.</div>
         );
+      case 42:
+        return roleKey === "hospital_admin" || roleKey === "super_admin" ? (
+          <MigrationCenterView />
+        ) : (
+          <div className="p-4">Migration Center is available for Hospital Admin only.</div>
+        );
       case 99: {
         const module = activeWorkflowModuleId
           ? WORKFLOW_MODULE_BY_ID[activeWorkflowModuleId]
           : null;
         return module && allowedModuleSet.has(module.id) ? (
-          <WorkflowModuleView
-            module={module}
-            patients={patients}
-            onPatientsRefresh={refreshPatientsFromBackend}
-          />
+          <React.Suspense fallback={<div className="p-4">Loading module...</div>}>
+            <LazyWorkflowModuleView
+              module={module}
+              patients={patients}
+              onPatientsRefresh={refreshPatientsFromBackend}
+            />
+          </React.Suspense>
         ) : (
           <div className="p-4">You do not have access to this module.</div>
         );
@@ -8082,13 +8111,7 @@ export default function App() {
                 <span
                   style={{ fontWeight: 600, color: "#ffffff", fontSize: "1rem" }}
                 >
-                  {activeNav === 99 && activeWorkflowModuleId
-                    ? WORKFLOW_MODULE_BY_ID[activeWorkflowModuleId]?.name
-                    : activeNav === 40
-                      ? "Subscriptions"
-                    : activeNav === 41
-                      ? "Super Admin"
-                    : NAV_ITEMS[activeNav]?.label}
+                  {getNavLabel(activeNav)}
                 </span>
               </div>
             )}

@@ -45,6 +45,9 @@ export default defineConfig(async ({ mode }) => {
     build: {
       sourcemap: false,
       minify: "esbuild",
+      // This desktop app intentionally ships feature-rich screens (e.g. workflow modules),
+      // which can exceed Rollup's default warning threshold even after code-splitting.
+      chunkSizeWarningLimit: 900,
     },
     esbuild: isProd
       ? {

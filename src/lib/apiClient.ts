@@ -9360,3 +9360,130 @@ export async function submitModuleRecord(input: WorkflowSubmitInput) {
 
   return { ...body, _resolvedPatientId: resolvedPatientId };
 }
+
+// ─────────────────────────────────────────────
+// Migration (staging pipeline)
+// ─────────────────────────────────────────────
+export type MigrationEntity = "PATIENTS" | "VISITS" | "PRESCRIPTIONS";
+
+export type MigrationStagingResult = {
+  migrationId: string;
+  entity: MigrationEntity;
+  fileType: "CSV" | "EXCEL" | "JSON";
+  totalRecords: number;
+  stagedRecords: number;
+  headers: string[];
+};
+
+export type MigrationDryRunResult = {
+  migrationId: string;
+  entity: MigrationEntity;
+  status: string;
+  totalChecked: number;
+  valid: number;
+  invalid: number;
+  sampleErrors: Array<{ row: number; message: string }>;
+};
+
+export type MigrationMappingRow = {
+  id?: string;
+  sourceField: string;
+  targetField: string;
+  transformFunction?: string | null;
+  params?: any;
+};
+
+export async function migrationUpload(entity: MigrationEntity, file: File) {
+  const form = new FormData();
+  form.append("file", file);
+  const res = await apiFetch(`/api/migration/upload?entity=${encodeURIComponent(entity)}`, {
+    method: "POST",
+    body: form,
+  });
+  const body = await parseJsonSafe(res);
+  if (!res.ok) {
+    throw new Error(toErrorMessage(body, "Failed to upload migration file"));
+  }
+  return body as MigrationStagingResult;
+}
+
+export async function migrationListRuns(limit = 20) {
+  const res = await apiFetch(`/api/migration/runs?limit=${encodeURIComponent(String(limit))}`);
+  const body = await parseJsonSafe(res);
+  if (!res.ok) {
+    throw new Error(toErrorMessage(body, "Failed to list migration runs"));
+  }
+  return Array.isArray(body) ? body : [];
+}
+
+export async function migrationGetErrors(migrationId: string, limit = 200) {
+  const res = await apiFetch(
+    `/api/migration/errors?migrationId=${encodeURIComponent(migrationId)}&limit=${encodeURIComponent(String(limit))}`,
+  );
+  const body = await parseJsonSafe(res);
+  if (!res.ok) {
+    throw new Error(toErrorMessage(body, "Failed to load migration errors"));
+  }
+  return Array.isArray(body) ? body : [];
+}
+
+export async function migrationDryRun(migrationId: string) {
+  const res = await apiFetch(`/api/migration/dry-run`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ migrationId }),
+  });
+  const body = await parseJsonSafe(res);
+  if (!res.ok) {
+    throw new Error(toErrorMessage(body, "Dry-run validation failed"));
+  }
+  return body as MigrationDryRunResult;
+}
+
+export async function migrationRun(migrationId: string, batchSize: number) {
+  const res = await apiFetch(`/api/migration/run`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ migrationId, batchSize }),
+  });
+  const body = await parseJsonSafe(res);
+  if (!res.ok) {
+    throw new Error(toErrorMessage(body, "Failed to start migration"));
+  }
+  return body as any;
+}
+
+export async function migrationSuggestMappings(migrationId: string) {
+  const res = await apiFetch(`/api/migration/mappings/suggest`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ migrationId }),
+  });
+  const body = await parseJsonSafe(res);
+  if (!res.ok) {
+    throw new Error(toErrorMessage(body, "Failed to suggest mappings"));
+  }
+  return body;
+}
+
+export async function migrationGetMappings(migrationId: string) {
+  const res = await apiFetch(`/api/migration/mappings?migrationId=${encodeURIComponent(migrationId)}`);
+  const body = await parseJsonSafe(res);
+  if (!res.ok) {
+    throw new Error(toErrorMessage(body, "Failed to load mappings"));
+  }
+  return Array.isArray(body) ? (body as MigrationMappingRow[]) : [];
+}
+
+export async function migrationReplaceMappings(migrationId: string, mappings: MigrationMappingRow[]) {
+  const res = await apiFetch(`/api/migration/mappings/replace`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ migrationId, mappings }),
+  });
+  const body = await parseJsonSafe(res);
+  if (!res.ok) {
+    throw new Error(toErrorMessage(body, "Failed to save mappings"));
+  }
+  return body;
+}
