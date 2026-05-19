@@ -11,11 +11,11 @@ import {
 import { generateLocalHelpFallbackReply } from "./ai/localHelpFallback";
 import {
   clearTokens,
+  completeFacilitySetup,
   createBed,
   createStaffProfile,
   createWard,
   createTenantPatient,
-  createFacility,
   createTenantRole,
   createTenantUser,
   deleteTenantRole,
@@ -37,16 +37,18 @@ import {
   initiateMpesaStkPush,
   activateLicense,
   fetchLicenseStatus,
+  fetchFacilityBranding,
   fetchWards,
   fetchTenantPatients,
   fetchTenantRoles,
   fetchTenantUsers,
+  API_BASE_URL,
   getAccessToken,
   getStoredFacilityCode,
   loginHospitalAdmin,
   loginStaff,
+  normalizeBaseUrl,
   refreshAccessToken,
-  registerHospitalAdmin,
   recordBillingPayment,
   resetTenantUserPassword,
   SESSION_STORAGE_KEY,
@@ -73,8 +75,10 @@ import {
   updateTenantUserStatus,
 } from "./lib/apiClient";
 
-const MARKETING_BASE_URL =
-  (import.meta as any).env?.VITE_MARKETING_URL || "https://medilinkke.onrender.com";
+const MARKETING_BASE_URL = normalizeBaseUrl(
+  (import.meta as any).env?.VITE_MARKETING_URL,
+  "https://medilinkke.onrender.com",
+);
 const MARKETING_PRICING_URL = `${String(MARKETING_BASE_URL).replace(/\/$/, "")}/pricing`;
 
 async function openExternalUrl(url: string) {
@@ -327,6 +331,8 @@ function Icon({ type, size = 28 }: { type?: string; size?: number }) {
     microscope: "biotech",
     users: "group",
     upload: "cloud_upload",
+    bell: "notifications",
+    logout: "logout",
   };
   if (type && materialByType[type]) {
     return (
@@ -884,6 +890,8 @@ function PatientsView() {
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [formOpen, setFormOpen] = useState(false);
+  const [formTab, setFormTab] = useState<"personal" | "medical" | "kin" | "insurance">("personal");
+  const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [form, setForm] = useState({
@@ -910,6 +918,7 @@ function PatientsView() {
   useEffect(() => {
     let cancelled = false;
     const load = async () => {
+      setLoading(true);
       try {
         const backendPatients = await fetchTenantPatients(search.trim() || undefined);
         if (!cancelled) {
@@ -917,6 +926,10 @@ function PatientsView() {
         }
       } catch {
         // keep local data fallback
+      } finally {
+        if (!cancelled) {
+          setLoading(false);
+        }
       }
     };
     void load();
@@ -925,7 +938,27 @@ function PatientsView() {
     };
   }, [setPatients]);
 
+  useEffect(() => {
+    const handleSidebarFormOpen = (event: Event) => {
+      const detail = (event as CustomEvent<{ moduleId?: number; formId?: string }>).detail;
+      if (Number(detail?.moduleId) !== 1) return;
+      const formId = String(detail?.formId || "").toLowerCase();
+      setFormOpen(true);
+      if (formId.includes("kin")) {
+        setFormTab("kin");
+      } else if (formId.includes("insurance")) {
+        setFormTab("insurance");
+      } else {
+        setFormTab("personal");
+      }
+    };
+
+    window.addEventListener("hmis:open-workflow-form", handleSidebarFormOpen);
+    return () => window.removeEventListener("hmis:open-workflow-form", handleSidebarFormOpen);
+  }, []);
+
   const handleResetForm = () => {
+    setFormTab("personal");
     setForm({
       firstName: "",
       lastName: "",
@@ -976,29 +1009,80 @@ function PatientsView() {
     }
   };
 
+  const patientStats = {
+    total: patients.length,
+    thisMonth: patients.filter((patient) => {
+      const date = new Date(patient.visitDate);
+      const now = new Date();
+      return (
+        Number.isFinite(date.getTime()) &&
+        date.getFullYear() === now.getFullYear() &&
+        date.getMonth() === now.getMonth()
+      );
+    }).length,
+    male: patients.filter((patient) => patient.gender === "Male").length,
+    female: patients.filter((patient) => patient.gender === "Female").length,
+  };
+
+  const exportCSV = () => {
+    const headers = [
+      "Patient ID",
+      "Name",
+      "Gender",
+      "Blood Group",
+      "Phone",
+      "National ID",
+      "Registered",
+    ];
+    const rows = filtered.map((patient) => [
+      patient.regNo,
+      patient.name,
+      patient.gender,
+      (patient as any).bloodGroup || "",
+      patient.phone || "",
+      patient.nationalId || "",
+      patient.visitDate || "",
+    ]);
+    const csv = [headers, ...rows]
+      .map((row) => row.map((cell) => `"${String(cell).replace(/"/g, '""')}"`).join(","))
+      .join("\n");
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = "patients.csv";
+    anchor.click();
+    URL.revokeObjectURL(url);
+  };
+
   return (
     <div className="patients-view">
       <div className="pv-header">
         <div>
-          <h2 className="pv-title">Patient Registry</h2>
-          <p className="pv-subtitle">
-            Register and manage all facility patients
-          </p>
+          <div className="pv-title">
+            <Icon type="users" size={18} /> Patient Registry
+          </div>
+          <div className="pv-subtitle">Register and manage all facility patients</div>
         </div>
-        <button className="btn-primary" onClick={() => setFormOpen(true)}>
-          <svg
-            width="14"
-            height="14"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2.5"
-          >
-            <line x1="12" y1="5" x2="12" y2="19" />
-            <line x1="5" y1="12" x2="19" y2="12" />
-          </svg>
-          Register Patient
-        </button>
+        <div className="pv-header-actions">
+          <button type="button" onClick={exportCSV} className="topbar-logout-btn pv-export-btn">
+            <Icon type="chart" size={15} /> Export CSV
+          </button>
+          <button className="pv-primary-btn" onClick={() => setFormOpen(true)}>
+            <svg
+              width="14"
+              height="14"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2.5"
+            >
+              <line x1="12" y1="5" x2="12" y2="19" />
+              <line x1="5" y1="12" x2="19" y2="12" />
+            </svg>
+            Register Patient
+          </button>
+        </div>
       </div>
 
       <div className="pv-stats">
@@ -1006,18 +1090,23 @@ function PatientsView() {
           [
             {
               label: "Total Patients",
-              value: patients.length,
-              color: "#3b82f6",
+              value: patientStats.total,
+              color: "#1e3a8a",
             },
             {
-              label: "Male",
-              value: patients.filter((p) => p.gender === "Male").length,
-              color: "#0ea5e9",
+              label: "Registered This Month",
+              value: patientStats.thisMonth,
+              color: "#0d9488",
             },
             {
-              label: "Female",
-              value: patients.filter((p) => p.gender === "Female").length,
-              color: "#ec4899",
+              label: "Male Patients",
+              value: patientStats.male,
+              color: "#0284c7",
+            },
+            {
+              label: "Female Patients",
+              value: patientStats.female,
+              color: "#db2777",
             },
           ] as const
         ).map((s) => (
@@ -1027,61 +1116,79 @@ function PatientsView() {
             style={{ borderLeftColor: s.color }}
           >
             <p className="pv-stat-label">{s.label}</p>
-            <p className="pv-stat-value" style={{ color: s.color }}>
-              {s.value}
-            </p>
+            <p className="pv-stat-value">{s.value}</p>
           </div>
         ))}
       </div>
 
-      <div className="pv-search-wrap">
-        <svg
-          width="16"
-          height="16"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="#94a3b8"
-          strokeWidth="2"
-          style={{
-            position: "absolute",
-            left: 12,
-            top: "50%",
-            transform: "translateY(-50%)",
-          }}
-        >
-          <circle cx="11" cy="11" r="8" />
-          <path d="M21 21l-4.35-4.35" />
-        </svg>
-        <input
-          className="pv-search"
-          placeholder="Search by name, ID, phone..."
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-        />
+      <div className="pv-search-bar">
+        <div className="pv-search-wrap">
+          <svg
+            width="16"
+            height="16"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="#94a3b8"
+            strokeWidth="2"
+            style={{
+              position: "absolute",
+              left: 12,
+              top: "50%",
+              transform: "translateY(-50%)",
+            }}
+          >
+            <circle cx="11" cy="11" r="8" />
+            <path d="M21 21l-4.35-4.35" />
+          </svg>
+          <input
+            className="pv-search"
+            placeholder="Search by name, ID, phone..."
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+          />
+        </div>
+      </div>
+
+      <div className="pv-table-meta">
+        <div className="pv-title pv-table-title">Patient Records</div>
+        <span className="pv-badge">
+          {filtered.length} record{filtered.length !== 1 ? "s" : ""}
+        </span>
       </div>
 
       <div className="pv-table-wrap">
         <table className="pv-table">
           <thead>
             <tr>
-              <th>Reg No</th>
-              <th>Patient Name</th>
-              <th>National ID</th>
+              <th>Patient ID</th>
+              <th>Name</th>
               <th>Gender</th>
-              <th>Age</th>
-              <th>Phone</th>
-              <th>Status</th>
+              <th>Blood</th>
+              <th>Contact</th>
+              <th>Registered</th>
+              <th>Actions</th>
             </tr>
           </thead>
           <tbody>
-            {filtered.map((p) => (
-              <tr key={p.id}>
+            {loading ? (
+              <tr>
+                <td colSpan={7} className="pv-empty">
+                  Loading patients...
+                </td>
+              </tr>
+            ) : filtered.length === 0 ? (
+              <tr>
+                <td colSpan={7} className="pv-empty">
+                  No patients found.
+                </td>
+              </tr>
+            ) : filtered.map((p) => (
+                  <tr key={p.id}>
                 <td className="pv-code">{p.regNo}</td>
                 <td className="pv-name">
                   <div className="pv-avatar">{p.name[0]}</div>
                   <span>{p.name}</span>
                 </td>
-                <td>{p.nationalId}</td>
                 <td>
                   <span
                     className={`pv-badge ${p.gender === "Male" ? "badge-male" : "badge-female"}`}
@@ -1089,216 +1196,172 @@ function PatientsView() {
                     {p.gender}
                   </span>
                 </td>
-                <td>{p.age}</td>
-                <td>{p.phone || "—"}</td>
+                <td>{(p as any).bloodGroup || "—"}</td>
                 <td>
-                  <span className="pv-badge badge-male">{p.queueStatus}</span>
+                  <div>{p.phone || "—"}</div>
+                  <small className="pv-muted">{p.nationalId || "No ID"}</small>
+                </td>
+                <td>{p.visitDate ? new Date(p.visitDate).toLocaleDateString() : "—"}</td>
+                <td>
+                  <div className="pv-row-actions">
+                  <button
+                    type="button"
+                    className="pv-del"
+                    title="Edit patient"
+                    onClick={() => {
+                      const parts = p.name.split(" ");
+                      setForm((current) => ({
+                        ...current,
+                        firstName: parts[0] || "",
+                        lastName: parts.slice(1).join(" "),
+                        gender: p.gender,
+                        nationalId: p.nationalId || "",
+                        phone: p.phone || "",
+                        age: String(p.age || ""),
+                      }));
+                      setFormOpen(true);
+                    }}
+                  >
+                    <Icon type="ehr" size={16} />
+                  </button>
+                  <button
+                    type="button"
+                    className="pv-del"
+                    title="Delete patient"
+                    onClick={() => setDeleteId(p.id)}
+                  >
+                    ×
+                  </button>
+                  </div>
                 </td>
               </tr>
             ))}
-            {filtered.length === 0 && (
-              <tr>
-                <td colSpan={7} className="pv-empty">
-                  No patients found.
-                </td>
-              </tr>
-            )}
           </tbody>
         </table>
+        <div className="pv-table-footer">
+          Showing {filtered.length} of {patients.length} patients
+        </div>
       </div>
 
       {formOpen && (
-        <div className="modal-overlay" onClick={() => setFormOpen(false)}>
-          <div className="modal-box" onClick={(e) => e.stopPropagation()}>
-            <div className="modal-header">
-              <h3>Register New Patient</h3>
+        <div className="patient-form-modal" onClick={() => setFormOpen(false)}>
+          <div className="patient-form-panel" onClick={(e) => e.stopPropagation()}>
+            <div className="patient-form-header">
+              <div className="patient-form-header-main">
+                <div className="patient-form-icon">
+                  <Icon type="person" size={20} />
+                </div>
+                <div>
+                  <h2 className="form-title">Register New Patient</h2>
+                  <p className="form-title-note">Capture complete demographic, clinical, and insurance details</p>
+                </div>
+              </div>
               <button
-                className="modal-close"
+                className="modal-close-btn"
                 onClick={() => setFormOpen(false)}
               >
                 ✕
               </button>
             </div>
-            <form onSubmit={handleRegister} className="modal-form">
-              {error && <div className="auth-error">{error}</div>}
-              <div className="form-row">
-                <label>
-                  First Name *
-                  <input
-                    required
-                    className="form-input"
-                    value={form.firstName}
-                    onChange={(e) =>
-                      setForm((f) => ({ ...f, firstName: e.target.value }))
-                    }
-                    placeholder="John"
-                  />
-                </label>
-                <label>
-                  Last Name *
-                  <input
-                    required
-                    className="form-input"
-                    value={form.lastName}
-                    onChange={(e) =>
-                      setForm((f: any) => ({ ...f, lastName: e.target.value }))
-                    }
-                    placeholder="Doe"
-                  />
-                </label>
-              </div>
-              <div className="form-row">
-                <label>
-                  National ID *
-                  <input
-                    required
-                    className="form-input"
-                    value={form.nationalId}
-                    onChange={(e) =>
-                      setForm((f: any) => ({
-                        ...f,
-                        nationalId: e.target.value,
-                      }))
-                    }
-                    placeholder="12345678"
-                  />
-                </label>
-                <label>
-                  Age *
-                  <input
-                    required
-                    type="number"
-                    className="form-input"
-                    value={form.age}
-                    onChange={(e) =>
-                      setForm((f: any) => ({ ...f, age: e.target.value }))
-                    }
-                    placeholder="25"
-                  />
-                </label>
-              </div>
-              <div className="form-row">
-                <label>
-                  Date of Birth
-                  <input
-                    type="date"
-                    className="form-input"
-                    value={form.dob}
-                    onChange={(e) => {
-                      setForm((f) => ({ ...f, dob: e.target.value }));
-                      e.currentTarget.blur();
-                    }}
-                  />
-                </label>
-                <label>
-                  Gender *
-                  <select
-                    required
-                    className="form-input"
-                    value={form.gender}
-                    onChange={(e) =>
-                      setForm((f) => ({ ...f, gender: e.target.value as any }))
-                    }
-                  >
-                    <option value="Male">Male</option>
-                    <option value="Female">Female</option>
-                    <option value="OTHER">Other</option>
-                  </select>
-                </label>
-              </div>
-              <div className="form-row">
-                <label>
-                  Phone
-                  <input
-                    type="tel"
-                    className="form-input"
-                    value={form.phone}
-                    onChange={(e) =>
-                      setForm((f) => ({ ...f, phone: e.target.value }))
-                    }
-                    placeholder="+254..."
-                  />
-                </label>
-                <label>
-                  Blood Group
-                  <select
-                    className="form-input"
-                    value={form.bloodGroup}
-                    onChange={(e) =>
-                      setForm((f) => ({ ...f, bloodGroup: e.target.value }))
-                    }
-                  >
-                    <option value="">Unknown</option>
-                    {["A+", "A-", "B+", "B-", "AB+", "AB-", "O+", "O-"].map(
-                      (g) => (
-                        <option key={g} value={g}>
-                          {g}
-                        </option>
-                      ),
-                    )}
-                  </select>
-                </label>
-              </div>
-              <label>
-                Address
-                <input
-                  className="form-input"
-                  value={form.address}
-                  onChange={(e) =>
-                    setForm((f) => ({ ...f, address: e.target.value }))
-                  }
-                  placeholder="Nairobi, Kenya"
-                />
-              </label>
-              <label>
-                Known Allergies
-                <input
-                  className="form-input"
-                  value={form.allergies}
-                  onChange={(e) =>
-                    setForm((f) => ({ ...f, allergies: e.target.value }))
-                  }
-                  placeholder="e.g. Penicillin"
-                />
-              </label>
-              <div className="form-row">
-                <label>
-                  Next of Kin
-                  <input
-                    className="form-input"
-                    value={form.nextOfKin}
-                    onChange={(e) =>
-                      setForm((f) => ({ ...f, nextOfKin: e.target.value }))
-                    }
-                    placeholder="Full name"
-                  />
-                </label>
-                <label>
-                  NOK Phone
-                  <input
-                    type="tel"
-                    className="form-input"
-                    value={form.nextOfKinPhone}
-                    onChange={(e) =>
-                      setForm((f) => ({ ...f, nextOfKinPhone: e.target.value }))
-                    }
-                    placeholder="+254..."
-                  />
-                </label>
-              </div>
-              <div className="modal-footer">
+
+            <div className="patient-form-tabs">
+              {[
+                ["personal", "👤 Personal"],
+                ["medical", "🩺 Medical"],
+                ["kin", "📞 Next of Kin"],
+                ["insurance", "🧾 Insurance"],
+              ].map(([key, label]) => (
                 <button
+                  key={key}
                   type="button"
-                  className="btn-cancel"
-                  onClick={() => setFormOpen(false)}
+                  className={`patient-form-tab ${formTab === key ? "is-active" : ""}`}
+                  onClick={() => setFormTab(key as typeof formTab)}
                 >
-                  Cancel
+                  {label}
                 </button>
-                <button type="submit" className="btn-primary">
-                  {saving ? "Registering..." : "Register & Queue (OPD)"}
-                </button>
-              </div>
+              ))}
+            </div>
+
+            <form id="patient-registration-form" onSubmit={handleRegister} className="patient-form-body">
+              {error && <div className="auth-error">{error}</div>}
+
+              {formTab === "personal" && (
+                <div className="patient-form-section">
+                  <div className="form-section-header">
+                    <h3 className="form-section-title">Patient Registration</h3>
+                    <p className="form-section-note">Basic demographic details used to identify and register the patient.</p>
+                  </div>
+                  <div className="patient-form-grid three">
+                    <label>First Name *<input required className="form-input" value={form.firstName} onChange={(e) => setForm((f) => ({ ...f, firstName: e.target.value }))} placeholder="John" /></label>
+                    <label>Middle Name<input className="form-input" placeholder="Omondi" /></label>
+                    <label>Last Name *<input required className="form-input" value={form.lastName} onChange={(e) => setForm((f: any) => ({ ...f, lastName: e.target.value }))} placeholder="Doe" /></label>
+                    <label>National ID *<input required className="form-input" value={form.nationalId} onChange={(e) => setForm((f: any) => ({ ...f, nationalId: e.target.value }))} placeholder="12345678" /></label>
+                    <label>Date of Birth<input type="date" className="form-input" value={form.dob} onChange={(e) => setForm((f) => ({ ...f, dob: e.target.value }))} /></label>
+                    <label>Gender *<select required className="form-input" value={form.gender} onChange={(e) => setForm((f) => ({ ...f, gender: e.target.value as any }))}><option value="Male">Male</option><option value="Female">Female</option><option value="OTHER">Other</option></select></label>
+                    <label>Phone<input type="tel" className="form-input" value={form.phone} onChange={(e) => setForm((f) => ({ ...f, phone: e.target.value }))} placeholder="+254..." /></label>
+                    <label>Email<input type="email" className="form-input" placeholder="patient@example.com" /></label>
+                    <label>Address<input className="form-input" value={form.address} onChange={(e) => setForm((f) => ({ ...f, address: e.target.value }))} placeholder="Nairobi, Kenya" /></label>
+                  </div>
+                </div>
+              )}
+
+              {formTab === "medical" && (
+                <div className="patient-form-section">
+                  <div className="form-section-header">
+                    <h3 className="form-section-title">Medical Profile</h3>
+                    <p className="form-section-note">Clinical defaults and risk markers used during encounters.</p>
+                  </div>
+                  <div className="patient-form-grid two">
+                    <label>Blood Group<select className="form-input" value={form.bloodGroup} onChange={(e) => setForm((f) => ({ ...f, bloodGroup: e.target.value }))}><option value="">Unknown</option>{["A+", "A-", "B+", "B-", "AB+", "AB-", "O+", "O-"].map((g) => <option key={g} value={g}>{g}</option>)}</select></label>
+                    <label>Age<input required type="number" className="form-input" value={form.age} onChange={(e) => setForm((f: any) => ({ ...f, age: e.target.value }))} placeholder="25" /></label>
+                    <label className="patient-form-span">Known Allergies<input className="form-input" value={form.allergies} onChange={(e) => setForm((f) => ({ ...f, allergies: e.target.value }))} placeholder="e.g. Penicillin" /></label>
+                  </div>
+                </div>
+              )}
+
+              {formTab === "kin" && (
+                <div className="patient-form-section">
+                  <div className="form-section-header">
+                    <h3 className="form-section-title">Next of Kin</h3>
+                    <p className="form-section-note">Emergency contact details for communication and consent workflows.</p>
+                  </div>
+                  <div className="patient-form-grid two">
+                    <label>Next of Kin<input className="form-input" value={form.nextOfKin} onChange={(e) => setForm((f) => ({ ...f, nextOfKin: e.target.value }))} placeholder="Full name" /></label>
+                    <label>NOK Phone<input type="tel" className="form-input" value={form.nextOfKinPhone} onChange={(e) => setForm((f) => ({ ...f, nextOfKinPhone: e.target.value }))} placeholder="+254..." /></label>
+                  </div>
+                </div>
+              )}
+
+              {formTab === "insurance" && (
+                <div className="patient-form-section">
+                  <div className="form-section-header">
+                    <h3 className="form-section-title">Insurance</h3>
+                    <p className="form-section-note">Optional cover details used for eligibility and billing workflows.</p>
+                  </div>
+                  <div className="patient-form-grid two">
+                    <label>Insurance Scheme<input className="form-input" placeholder="SHA / Private / Corporate" /></label>
+                    <label>Policy Number<input className="form-input" placeholder="Policy or member number" /></label>
+                    <label className="patient-form-check"><input type="checkbox" /> Request eligibility check after registration</label>
+                  </div>
+                </div>
+              )}
             </form>
+
+            <div className="patient-form-footer">
+              <div>
+                {formTab !== "personal" && (
+                  <button type="button" className="form-btn form-btn-secondary" onClick={() => setFormTab(formTab === "insurance" ? "kin" : formTab === "kin" ? "medical" : "personal")}>← Back</button>
+                )}
+              </div>
+              <div className="patient-form-footer-actions">
+                <button type="button" className="form-btn form-btn-cancel" onClick={() => setFormOpen(false)}>Cancel</button>
+                {formTab !== "insurance" ? (
+                  <button type="button" className="form-btn form-btn-primary" onClick={() => setFormTab(formTab === "personal" ? "medical" : formTab === "medical" ? "kin" : "insurance")}>Next →</button>
+                ) : (
+                  <button type="submit" form="patient-registration-form" className="form-btn form-btn-primary" disabled={saving}>{saving ? "Saving..." : "Register Patient"}</button>
+                )}
+              </div>
+            </div>
           </div>
         </div>
       )}
@@ -4072,6 +4135,86 @@ type LicenseState = {
 };
 
 const ACCOUNT_STORAGE_KEY = "hmis_hospital_admin_account";
+const SETUP_STORAGE_KEY = "hmis_first_setup";
+
+function isFacilityLevelLabel(value?: string | null) {
+  return /^level\s+\d\b/i.test(String(value || "").trim());
+}
+
+function pickHospitalName(...values: Array<string | null | undefined>) {
+  for (const value of values) {
+    const text = String(value || "").trim();
+    if (text && !isFacilityLevelLabel(text)) return text;
+  }
+  for (const value of values) {
+    const text = String(value || "").trim();
+    if (text) return text;
+  }
+  return "Hospital Facility";
+}
+
+function getSetupFacilityNameFallback() {
+  const readName = (storageKey: string) => {
+    const raw = localStorage.getItem(storageKey);
+    if (!raw) return "";
+    const saved = JSON.parse(raw);
+    return pickHospitalName(
+      saved?.values?.shortName,
+      saved?.values?.legalName,
+      saved?.values?.facilityName,
+      saved?.savedFacility?.shortName,
+      saved?.savedFacility?.legalName,
+      saved?.savedFacility?.facilityName,
+      saved?.savedFacility?.name,
+      saved?.facilityName,
+      saved?.name,
+    );
+  };
+
+  try {
+    const setupName = readName(SETUP_STORAGE_KEY);
+    if (setupName && !isFacilityLevelLabel(setupName)) return setupName;
+    const accountName = readName(ACCOUNT_STORAGE_KEY);
+    return accountName && !isFacilityLevelLabel(accountName) ? accountName : "";
+  } catch {
+    return "";
+  }
+}
+
+function resolveAssetUrl(value?: string | null) {
+  const url = String(value || "").trim();
+  if (!url) return "";
+  if (/^(https?:)?\/\//i.test(url) || url.startsWith("data:") || url.startsWith("blob:")) {
+    return url;
+  }
+  if (url.startsWith("/") && API_BASE_URL) {
+    return `${API_BASE_URL}${url}`;
+  }
+  return url;
+}
+
+function getSetupFacilityLogoFallback() {
+  const readLogo = (storageKey: string) => {
+    const raw = localStorage.getItem(storageKey);
+    if (!raw) return "";
+    const saved = JSON.parse(raw);
+    return String(
+      saved?.branding?.logoUrl ||
+        saved?.branding?.logo ||
+        saved?.savedFacility?.logoUrl ||
+        saved?.savedFacility?.logo ||
+        saved?.logoUrl ||
+        saved?.logo ||
+        "",
+    ).trim();
+  };
+
+  try {
+    return resolveAssetUrl(readLogo(SETUP_STORAGE_KEY) || readLogo(ACCOUNT_STORAGE_KEY));
+  } catch {
+    return "";
+  }
+}
 
 function SplashScreen() {
   const [progress, setProgress] = useState(0);
@@ -4208,148 +4351,264 @@ function AuthLanding({
   );
 }
 
-function FacilityRegisterScreen({
-  form,
-  setForm,
-  onSubmit,
+type SetupField = {
+  name: string;
+  label: string;
+  type?: "text" | "email" | "tel" | "number" | "password" | "select" | "textarea" | "file" | "checkboxes";
+  placeholder?: string;
+  options?: string[];
+  required?: boolean;
+};
+
+const setupCounties = [
+  "Baringo", "Bomet", "Bungoma", "Busia", "Embu", "Garissa", "Kiambu", "Kilifi", "Kisii", "Kisumu",
+  "Machakos", "Makueni", "Mombasa", "Nairobi", "Nakuru", "Nyeri", "Uasin Gishu", "Vihiga", "West Pokot",
+];
+
+const desktopSetupSteps: Array<{ title: string; subtitle: string; icon: string; fields: SetupField[] }> = [
+  {
+    title: "Facility Identity",
+    subtitle: "Tell Medilink who the hospital is.",
+    icon: "briefcase",
+    fields: [
+      { name: "legalName", label: "Facility full legal name", placeholder: "Nakuru Level Five County Referral Hospital", required: true },
+      { name: "shortName", label: "Facility short / trading name", placeholder: "Nakuru L5 Hospital", required: true },
+      { name: "logo", label: "Facility logo", type: "file" },
+      { name: "stamp", label: "Facility seal / stamp", type: "file" },
+      { name: "tagline", label: "Tagline", placeholder: "Care Beyond Excellence" },
+      { name: "mohLicense", label: "MOH facility licence number", placeholder: "MOH-..." },
+      { name: "mflCode", label: "Master Facility List code", placeholder: "12345", required: true },
+    ],
+  },
+  {
+    title: "Facility Profile",
+    subtitle: "Simple classification details for reports and routing.",
+    icon: "home",
+    fields: [
+      { name: "ownershipType", label: "Ownership type", type: "select", options: ["Public", "Private for Profit", "Private Not-for-Profit", "NGO", "Parastatal"], required: true },
+      { name: "facilityLevel", label: "MOH facility level", type: "select", options: ["Level 2", "Level 3", "Level 4", "Level 5", "Level 6"], required: true },
+      { name: "facilityType", label: "Facility type", type: "select", options: ["General Hospital", "Specialist Hospital", "Maternity Home", "Nursing Home", "Eye Centre", "Dental Clinic", "Diagnostic Centre", "Pharmacy Only", "Other"], required: true },
+      { name: "bedCapacity", label: "Licensed bed capacity", type: "number", placeholder: "80" },
+      { name: "accreditation", label: "Accreditation status", type: "select", options: ["None", "Awaiting Assessment", "KQMH Level 1", "KQMH Level 2", "KQMH Level 3", "KQMH Level 4", "KQMH Level 5", "ISO 9001", "SafeCare", "JCI"] },
+    ],
+  },
+  {
+    title: "Location and Contacts",
+    subtitle: "Where patients and referral partners find you.",
+    icon: "calendar",
+    fields: [
+      { name: "physicalAddress", label: "Physical address", type: "textarea", placeholder: "Building, street, estate or area", required: true },
+      { name: "county", label: "County", type: "select", options: setupCounties, required: true },
+      { name: "subCounty", label: "Sub-county", placeholder: "Nakuru East" },
+      { name: "ward", label: "Ward", placeholder: "Biashara" },
+      { name: "mainPhone", label: "Main switchboard number", type: "tel", placeholder: "+2547..." },
+      { name: "emergencyPhone", label: "Emergency / casualty line", type: "tel", placeholder: "+2547..." },
+      { name: "appointmentsPhone", label: "Appointments desk number", type: "tel", placeholder: "+2547..." },
+      { name: "generalEmail", label: "General email address", type: "email", placeholder: "info@hospital.co.ke" },
+      { name: "website", label: "Website URL", placeholder: "https://hospital.co.ke" },
+    ],
+  },
+  {
+    title: "Working Hours",
+    subtitle: "Use quick choices instead of long configuration forms.",
+    icon: "calendar",
+    fields: [
+      { name: "openDays", label: "Open days", type: "checkboxes", options: ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"] },
+      { name: "weekdayOpen", label: "Weekday opening time", type: "select", options: ["06:00", "07:00", "08:00", "09:00", "24 hours"] },
+      { name: "weekdayClose", label: "Weekday closing time", type: "select", options: ["17:00", "18:00", "19:00", "20:00", "24 hours"] },
+      { name: "publicHolidays", label: "Public holidays", type: "select", options: ["Closed", "Open normal hours", "Emergency only", "24 hours"] },
+      { name: "afterHours", label: "After-hours billing", type: "select", options: ["No surcharge", "Starts 5pm", "Starts 6pm", "Starts 7pm", "24-hour hospital"] },
+    ],
+  },
+  {
+    title: "Departments",
+    subtitle: "Create the first patient routing areas. More can be added later.",
+    icon: "briefcase",
+    fields: [
+      { name: "departments", label: "Initial departments", type: "checkboxes", options: ["Reception", "Outpatient", "Emergency", "Billing", "Pharmacy", "Laboratory", "Radiology", "Maternity", "Inpatient", "Theatre"] },
+      { name: "primaryDepartment", label: "Main patient entry department", type: "select", options: ["Reception", "Outpatient", "Emergency"] },
+    ],
+  },
+  {
+    title: "Hospital Admin",
+    subtitle: "Create the first admin account that will manage the system.",
+    icon: "person",
+    fields: [
+      { name: "adminName", label: "Hospital admin full name", placeholder: "Jane Wanjiku", required: true },
+      { name: "adminEmail", label: "Admin login email", type: "email", placeholder: "admin@hospital.co.ke", required: true },
+      { name: "adminPhone", label: "Admin phone number", type: "tel", placeholder: "+2547...", required: true },
+      { name: "adminPassword", label: "Admin password", type: "password", placeholder: "Minimum 6 characters", required: true },
+      { name: "adminConfirmPassword", label: "Confirm admin password", type: "password", placeholder: "Re-enter password", required: true },
+      { name: "adminPin", label: "Six-digit admin PIN", type: "password", placeholder: "123456" },
+    ],
+  },
+];
+
+function FirstTimeSetupScreen({
   onBack,
-  error,
-  loading,
+  onComplete,
   landingTheme,
 }: {
-  form: FacilityRegistration;
-  setForm: React.Dispatch<React.SetStateAction<FacilityRegistration>>;
-  onSubmit: (e: React.FormEvent) => void;
   onBack: () => void;
-  error: string;
-  loading: boolean;
+  onComplete: (payload: any, values: Record<string, string>) => void;
   landingTheme: "enterprise" | "clinical" | "luxury";
 }) {
+  const [activeStep, setActiveStep] = useState(0);
+  const [values, setValues] = useState<Record<string, string>>({});
+  const [checked, setChecked] = useState<Record<string, string[]>>({
+    openDays: ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"],
+    departments: ["Reception", "Outpatient", "Billing"],
+  });
+  const [fileNames, setFileNames] = useState<Record<string, string>>({});
+  const [fileObjects, setFileObjects] = useState<Record<string, File>>({});
   const [showPassword, setShowPassword] = useState(false);
+  const [completed, setCompleted] = useState(false);
+  const [setupResult, setSetupResult] = useState<any>(null);
+  const [error, setError] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const step = desktopSetupSteps[activeStep];
+  const completion = Math.round(((completed ? desktopSetupSteps.length + 1 : activeStep + 1) / (desktopSetupSteps.length + 1)) * 100);
+
+  const setValue = (name: string, value: string) => setValues((current) => ({ ...current, [name]: value }));
+  const toggleChecked = (name: string, option: string) => {
+    setChecked((current) => {
+      const list = current[name] || [];
+      return { ...current, [name]: list.includes(option) ? list.filter((item) => item !== option) : [...list, option] };
+    });
+  };
+  const onFileChange = (name: string, file?: File | null) => {
+    if (!file) return;
+    setFileNames((current) => ({ ...current, [name]: file.name }));
+    setFileObjects((current) => ({ ...current, [name]: file }));
+  };
+
+  const renderField = (field: SetupField) => {
+    if (field.type === "file") {
+      return (
+        <label className="setup-file-picker" key={field.name}>
+          <span>{field.label}</span>
+          <input type="file" accept="image/png,image/jpeg,image/svg+xml" onChange={(event) => onFileChange(field.name, event.target.files?.[0])} />
+          <b><Icon type="upload" size={16} /> {fileNames[field.name] || "Choose image"}</b>
+          <small>PNG, JPG, or SVG</small>
+        </label>
+      );
+    }
+    if (field.type === "select") {
+      return (
+        <label key={field.name}>{field.label}
+          <select required={field.required} value={values[field.name] || ""} onChange={(event) => setValue(field.name, event.target.value)}>
+            <option value="">Select...</option>
+            {field.options?.map((option) => <option key={option} value={option}>{option}</option>)}
+          </select>
+        </label>
+      );
+    }
+    if (field.type === "checkboxes") {
+      return (
+        <fieldset className="setup-choice-field" key={field.name}>
+          <legend>{field.label}</legend>
+          <div>{field.options?.map((option) => (
+            <label key={option}><input type="checkbox" checked={(checked[field.name] || []).includes(option)} onChange={() => toggleChecked(field.name, option)} />{option}</label>
+          ))}</div>
+        </fieldset>
+      );
+    }
+    if (field.type === "textarea") {
+      return <label key={field.name}>{field.label}<textarea required={field.required} placeholder={field.placeholder} value={values[field.name] || ""} onChange={(event) => setValue(field.name, event.target.value)} /></label>;
+    }
+    const isPassword = field.type === "password";
+    return (
+      <label key={field.name}>{field.label}
+        <span className={isPassword ? "setup-password-wrap" : undefined}>
+          <input type={isPassword && showPassword ? "text" : field.type || "text"} required={field.required} placeholder={field.placeholder} value={values[field.name] || ""} onChange={(event) => setValue(field.name, event.target.value)} />
+          {isPassword && <button type="button" onClick={() => setShowPassword((value) => !value)}>{showPassword ? "Hide" : "Show"}</button>}
+        </span>
+      </label>
+    );
+  };
+
+  const goNext = async () => {
+    setError("");
+    if (activeStep < desktopSetupSteps.length - 1) {
+      setActiveStep((value) => value + 1);
+      return;
+    }
+    if (values.adminPassword !== values.adminConfirmPassword) {
+      setError("Admin password and confirm password must match.");
+      return;
+    }
+    if ((values.adminPassword || "").length < 6 || /\s/.test(values.adminPassword || "")) {
+      setError("Admin password must be at least 6 characters and contain no spaces.");
+      return;
+    }
+    setSubmitting(true);
+    try {
+      const formData = new FormData();
+      Object.entries(values).forEach(([key, value]) => formData.append(key, value));
+      Object.entries(checked).forEach(([key, value]) => formData.append(key, JSON.stringify(value)));
+      if (fileObjects.logo) formData.append("logo", fileObjects.logo);
+      if (fileObjects.stamp) formData.append("stamp", fileObjects.stamp);
+      const response = await completeFacilitySetup(formData);
+      localStorage.setItem(SETUP_STORAGE_KEY, JSON.stringify({ values, checked, fileNames, savedFacility: response?.facility || null, branding: response?.branding || null, completedAt: new Date().toISOString() }));
+      setSetupResult(response);
+      setCompleted(true);
+    } catch (setupError: any) {
+      setError(String(setupError?.message || "Setup could not be saved. Check that the HMIS backend is running."));
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  if (completed) {
+    return (
+      <div className={`splash-root landing-theme-${landingTheme}`}>
+        <div className="splash-glow splash-glow-1" />
+        <div className="splash-glow splash-glow-2" />
+        <section className="setup-landing-shell setup-congrats">
+          <img src="/Loginlogo.png" alt="MediLink HMIS" className="auth-title-logo" />
+          <p className="setup-eyebrow">Setup Complete</p>
+          <h1>Congratulations, your hospital is ready.</h1>
+          <p className="setup-copy">Thank you for setting up Medilink HMIS. Use the Hospital Admin credentials you created to login and continue configuring users, modules, billing, wards, integrations, and go-live readiness.</p>
+          <button type="button" className="splash-btn-primary" onClick={() => onComplete(setupResult || {}, values)}>Continue to Admin Login</button>
+        </section>
+      </div>
+    );
+  }
 
   return (
-    <div className={`auth-root landing-theme-${landingTheme}`}>
-      <form className="auth-card" onSubmit={onSubmit}>
-        <img
-          src="/Loginlogo.png"
-          alt="MediLink HMIS"
-          className="auth-title-logo"
-        />
-        <p>Register your hospital and create Hospital Admin credentials.</p>
-        {error && <div className="auth-error">{error}</div>}
-        <div className="auth-grid">
-          <label>
-            Facility Name *
-            <input
-              className="auth-input"
-              value={form.facilityName}
-              onChange={(e) =>
-                setForm((f) => ({ ...f, facilityName: e.target.value }))
-              }
-              required
-            />
-          </label>
-          <label>
-            Registration Number *
-            <input
-              className="auth-input"
-              value={form.registrationNumber}
-              onChange={(e) =>
-                setForm((f) => ({ ...f, registrationNumber: e.target.value }))
-              }
-              required
-            />
-          </label>
-          <label>
-            Facility Email *
-            <input
-              className="auth-input"
-              type="email"
-              value={form.facilityEmail}
-              onChange={(e) =>
-                setForm((f) => ({ ...f, facilityEmail: e.target.value }))
-              }
-              required
-            />
-          </label>
-          <label>
-            Facility Phone *
-            <input
-              className="auth-input"
-              value={form.facilityPhone}
-              onChange={(e) =>
-                setForm((f) => ({ ...f, facilityPhone: e.target.value }))
-              }
-              required
-            />
-          </label>
-          <label>
-            Admin Full Name *
-            <input
-              className="auth-input"
-              value={form.adminName}
-              onChange={(e) =>
-                setForm((f) => ({ ...f, adminName: e.target.value }))
-              }
-              required
-            />
-          </label>
-          <label>
-            Admin Email *
-            <input
-              className="auth-input"
-              type="email"
-              value={form.adminEmail}
-              onChange={(e) =>
-                setForm((f) => ({ ...f, adminEmail: e.target.value }))
-              }
-              required
-            />
-          </label>
-          <label>
-            Admin Phone *
-            <input
-              className="auth-input"
-              value={form.adminPhone}
-              onChange={(e) =>
-                setForm((f) => ({ ...f, adminPhone: e.target.value }))
-              }
-              required
-            />
-          </label>
-          <label>
-            Password *
-            <div className="auth-password-wrap">
-              <input
-                className="auth-input"
-                type={showPassword ? "text" : "password"}
-                value={form.password}
-                onChange={(e) =>
-                  setForm((f) => ({ ...f, password: e.target.value }))
-                }
-                required
-                autoComplete="new-password"
-              />
-              <button
-                type="button"
-                className="auth-password-toggle"
-                onClick={() => setShowPassword((v) => !v)}
-                aria-label={showPassword ? "Hide password" : "Show password"}
-              >
-                {showPassword ? "Hide" : "Show"}
-              </button>
-            </div>
-          </label>
+    <div className={`splash-root landing-theme-${landingTheme}`}>
+      <div className="splash-glow splash-glow-1" />
+      <div className="splash-glow splash-glow-2" />
+      <main className="setup-landing-shell">
+        <header className="setup-landing-header">
+          <img src="/Loginlogo.png" alt="MediLink HMIS" className="auth-title-logo" />
+          <div>
+            <p className="setup-eyebrow">First-Time Hospital Registration</p>
+            <h1>Complete Medilink HMIS Setup</h1>
+            <p className="setup-copy">A short guided setup for the Hospital Admin. Advanced configuration stays inside HMIS after login.</p>
+          </div>
+          <div className="setup-progress"><span>{completion}%</span><div><i style={{ width: `${completion}%` }} /></div></div>
+        </header>
+        <div className="setup-pill-row">
+          {desktopSetupSteps.map((item, index) => (
+            <button key={item.title} type="button" className={index === activeStep ? "setup-pill is-active" : "setup-pill"} onClick={() => setActiveStep(index)}>
+              <Icon type={item.icon} size={16} /><span>{item.title}</span>
+            </button>
+          ))}
         </div>
-        <div className="auth-actions">
-          <button type="button" className="splash-btn-secondary" onClick={onBack}>
-            Back
-          </button>
-          <button type="submit" className="splash-btn-primary" disabled={loading}>
-            {loading ? "Registering..." : "Complete Registration"}
-          </button>
-        </div>
-      </form>
+        <form className="setup-form-card" onSubmit={(event) => { event.preventDefault(); void goNext(); }}>
+          <div className="setup-panel-heading">
+            <div className="setup-panel-icon"><Icon type={step.icon} size={24} /></div>
+            <div><p>Step {activeStep + 1} of {desktopSetupSteps.length}</p><h2>{step.title}</h2><span>{step.subtitle}</span></div>
+          </div>
+          <div className="setup-field-grid">{step.fields.map(renderField)}</div>
+          {error ? <div className="auth-error">{error}</div> : null}
+          <div className="setup-actions">
+            <button type="button" className="splash-btn-secondary" onClick={() => activeStep === 0 ? onBack() : setActiveStep((value) => Math.max(0, value - 1))}>Back</button>
+            <button type="submit" className="splash-btn-primary" disabled={submitting}>{submitting ? "Saving..." : activeStep === desktopSetupSteps.length - 1 ? "Finish Setup" : "Continue"}</button>
+          </div>
+        </form>
+      </main>
     </div>
   );
 }
@@ -4516,9 +4775,7 @@ function StaffLoginScreen({
 }
 
 function LicenseActivationScreen({
-  facilityCode,
   licenseKey,
-  setFacilityCode,
   setLicenseKey,
   onSubmit,
   onBack,
@@ -4527,9 +4784,7 @@ function LicenseActivationScreen({
   status,
   landingTheme,
 }: {
-  facilityCode: string;
   licenseKey: string;
-  setFacilityCode: (value: string) => void;
   setLicenseKey: (value: string) => void;
   onSubmit: (e: React.FormEvent) => void;
   onBack: () => void;
@@ -4577,16 +4832,6 @@ function LicenseActivationScreen({
           </div>
         )}
         {error && <div className="auth-error">{error}</div>}
-        <label>
-          Facility Code
-          <input
-            className="auth-input"
-            value={facilityCode}
-            onChange={(e) => setFacilityCode(e.target.value)}
-            placeholder="e.g. KDH-2026-001"
-            required
-          />
-        </label>
         <label>
           License Key
           <input
@@ -6845,16 +7090,6 @@ export default function App() {
   const { patients, user, facility, setUser, setFacility, setPatients } = useAppStore();
   const [authScreen, setAuthScreen] = useState<AuthScreen>("splash");
   const [authError, setAuthError] = useState("");
-  const [registrationForm, setRegistrationForm] = useState<FacilityRegistration>({
-    facilityName: "",
-    registrationNumber: "",
-    facilityEmail: "",
-    facilityPhone: "",
-    adminName: "",
-    adminEmail: "",
-    adminPhone: "",
-    password: "",
-  });
   const [loginEmail, setLoginEmail] = useState("");
   const [loginPassword, setLoginPassword] = useState("");
   const [authLoading, setAuthLoading] = useState(false);
@@ -6877,6 +7112,9 @@ export default function App() {
     return "clinical";
   });
   const [moduleSearch, setModuleSearch] = useState("");
+  const [moduleSearchFocused, setModuleSearchFocused] = useState(false);
+  const [notificationsOpen, setNotificationsOpen] = useState(false);
+  const [profileOpen, setProfileOpen] = useState(false);
   const [activeNav, setActiveNav] = useState(0);
   const [activeWorkflowModuleId, setActiveWorkflowModuleId] = useState<number | null>(
     null,
@@ -6955,16 +7193,17 @@ export default function App() {
   const ensureLicenseActive = useCallback(
     async (facilityCodeRaw: string) => {
       const facilityCode = normalizeFacilityCode(facilityCodeRaw);
-      if (!facilityCode) {
-        setLicenseStatus({ active: false, status: "MISSING_FACILITY_CODE" });
-        setLicenseError("Facility code is required to validate the license.");
-        return false;
-      }
-
       setLicenseLoading(true);
       try {
         const status = (await fetchLicenseStatus(facilityCode)) as LicenseState;
         setLicenseStatus(status);
+        const resolvedFacilityCode = normalizeFacilityCode(
+          String(status?.facilityCode || facilityCode || ""),
+        );
+        if (resolvedFacilityCode) {
+          setStoredFacilityCode(resolvedFacilityCode);
+          setLicenseFacilityCode(resolvedFacilityCode);
+        }
         if (status?.active) {
           setLicenseError("");
           return true;
@@ -7003,10 +7242,6 @@ export default function App() {
         ? ROLE_ALLOWED_MODULES[roleKey]
         : [];
   const allowedModuleSet = new Set<number>(effectiveAllowedModules);
-  const sidebarNavItems = SIDEBAR_NAV_ITEMS.filter((item) =>
-    allowedNavSet.has(item.index),
-  );
-
   const getNavLabel = useCallback(
     (navIndex: number) => {
       if (navIndex === 99 && activeWorkflowModuleId) {
@@ -7221,6 +7456,45 @@ export default function App() {
       .includes(moduleSearch.toLowerCase()),
   );
   const roleFilteredModules = filtered.filter((m) => allowedModuleSet.has(m.id));
+  const moduleSearchResults = roleFilteredModules.slice(0, 8);
+  const activeWorkflowModule = activeWorkflowModuleId
+    ? WORKFLOW_MODULE_BY_ID[activeWorkflowModuleId]
+    : null;
+  const activeSidebarForms = activeWorkflowModule?.forms || [];
+  const activeSidebarTitle = activeWorkflowModule?.name || "Current Module";
+  const setupFacilityNameFallback = getSetupFacilityNameFallback();
+  const dashboardFacilityName = pickHospitalName(
+    setupFacilityNameFallback,
+    facility?.name,
+  );
+  const sidebarFacilityName = dashboardFacilityName;
+  const sidebarFacilityLogo =
+    resolveAssetUrl(facilityLogo) ||
+    getSetupFacilityLogoFallback() ||
+    "/Medilink-hmis-icon.png";
+  const queueNotices = patients
+    .filter((patient) => String(patient.queueStatus || "").trim())
+    .slice(0, 10)
+    .map((patient) => ({
+      id: patient.id,
+      name: patient.name,
+      token: patient.regNo,
+      status: String(patient.queueStatus || "Queued"),
+    }));
+  const openSidebarForm = (formId: string) => {
+    if (!activeWorkflowModuleId) return;
+    window.dispatchEvent(
+      new CustomEvent("hmis:open-workflow-form", {
+        detail: { moduleId: activeWorkflowModuleId, formId },
+      }),
+    );
+  };
+  const openModuleFromSearch = (moduleId: number) => {
+    setModuleSearch("");
+    setModuleSearchFocused(false);
+    setActiveWorkflowModuleId(moduleId);
+    setActiveNav(99);
+  };
 
   const toggleSidebar = () => {
     setSidebarCollapsed((prev) => !prev);
@@ -7240,6 +7514,8 @@ export default function App() {
     setActiveNav(0);
     setAuthRoleKey("hospital_admin");
     setDynamicAllowedModuleIds(null);
+    setNotificationsOpen(false);
+    setProfileOpen(false);
     setHelpWidgetOpen(false);
     setHelpInput("");
     setHelpTyping(false);
@@ -7258,20 +7534,24 @@ export default function App() {
 
   const handleLicenseActivate = async (e: React.FormEvent) => {
     e.preventDefault();
-    const facilityCode = normalizeFacilityCode(licenseFacilityCode);
     const normalizedKey = normalizeLicenseKey(licenseKey);
-    if (!facilityCode || !normalizedKey) {
-      setLicenseError("Enter both facility code and license key.");
+    if (!normalizedKey) {
+      setLicenseError("Enter a valid license key.");
       return;
     }
     setLicenseLoading(true);
     try {
+      const currentFacilityCode = normalizeFacilityCode(licenseFacilityCode);
       const response = (await activateLicense({
-        facilityCode,
         licenseKey: normalizedKey,
       })) as LicenseState;
-      setStoredFacilityCode(facilityCode);
-      setLicenseFacilityCode(facilityCode);
+      const resolvedFacilityCode = normalizeFacilityCode(
+        String(response?.facilityCode || currentFacilityCode || ""),
+      );
+      if (resolvedFacilityCode) {
+        setStoredFacilityCode(resolvedFacilityCode);
+        setLicenseFacilityCode(resolvedFacilityCode);
+      }
       setLicenseStatus(response);
       setLicenseKey("");
       if (response?.active) {
@@ -7403,85 +7683,25 @@ export default function App() {
     }
   };
 
-  const handleRegisterFacility = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (registrationForm.password.length < 8) {
-      setAuthError("Password must be at least 8 characters.");
-      return;
-    }
-
-    setAuthLoading(true);
-    try {
-      const createdFacility = await createFacility({
-        name: registrationForm.facilityName.trim(),
-        code: registrationForm.registrationNumber.trim(),
-        phone: registrationForm.facilityPhone.trim(),
-        email: registrationForm.facilityEmail.trim(),
-        status: "PENDING",
-      });
-
-      const registeredCode = registrationForm.registrationNumber.trim();
-      if (registeredCode) {
-        setStoredFacilityCode(registeredCode);
-        setLicenseFacilityCode(registeredCode);
-      }
-
-      const facilityId = createdFacility?.id;
-      await registerHospitalAdmin({
-        email: registrationForm.adminEmail.trim(),
-        phone: registrationForm.adminPhone.trim(),
-        password: registrationForm.password,
-        role: "hospital_admin",
-        tenantId: facilityId || null,
-        tenantType: "HOSPITAL",
-      });
-
-      localStorage.setItem(
-        ACCOUNT_STORAGE_KEY,
-        JSON.stringify({
-          ...registrationForm,
-          backendFacilityId: facilityId,
-        }),
-      );
-      setAuthError("");
-      setLoginEmail(registrationForm.adminEmail);
-      setLoginPassword("");
-      setAuthScreen("login");
-    } catch (error: any) {
-      setAuthError(error?.message || "Unable to register facility.");
-    } finally {
-      setAuthLoading(false);
-    }
-  };
-
   const handleHospitalAdminLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     const raw = localStorage.getItem(ACCOUNT_STORAGE_KEY);
-    if (!raw) {
-      setAuthError("No facility registered yet. Register facility first.");
-      return;
-    }
-
-    let saved: FacilityRegistration;
-    try {
-      saved = JSON.parse(raw) as FacilityRegistration;
-    } catch {
-      setAuthError("Saved registration data is invalid. Re-register facility.");
-      return;
-    }
-    const facilityCode = String(saved.registrationNumber || "").trim();
-    if (facilityCode) {
-      setStoredFacilityCode(facilityCode);
-      setLicenseFacilityCode(facilityCode);
+    let saved: FacilityRegistration | null = null;
+    if (raw) {
+      try {
+        saved = JSON.parse(raw) as FacilityRegistration;
+      } catch {
+        saved = null;
+      }
     }
 
     setAuthLoading(true);
     try {
-      await loginHospitalAdmin({
+      const loginResponse = (await loginHospitalAdmin({
         email: loginEmail.trim(),
         password: loginPassword,
         audience: "hospital_admin",
-      });
+      })) as any;
 
       const token = getAccessToken();
       const claims = token ? decodeJwtPayload(token) : null;
@@ -7490,13 +7710,70 @@ export default function App() {
       const resolvedRoleKey = resolveRoleKeyForUi(normalizedRole);
       const isPlatformAdminRole =
         normalizedRole === "super_admin" || normalizedRole === "hospital_admin";
+      const tenantId = String(claims?.tenantId || saved?.backendFacilityId || "").trim();
+
+      const setupFacilityName = getSetupFacilityNameFallback();
+      let resolvedFacilityName = pickHospitalName(setupFacilityName, saved?.facilityName);
+      let resolvedFacilityId = tenantId || saved?.backendFacilityId || saved?.registrationNumber || "facility";
+      let resolvedFacilityCode =
+        String(saved?.registrationNumber || getStoredFacilityCode() || licenseFacilityCode || "")
+          .trim();
+      let resolvedAdminName = saved?.adminName || loginEmail.trim().split("@")[0] || "Hospital Admin";
+      let resolvedLogoUrl = "";
+      const loginFacility = loginResponse?.facility || null;
+
+      if (loginFacility) {
+        resolvedFacilityId = String(loginFacility?.id || resolvedFacilityId);
+        resolvedFacilityName = pickHospitalName(
+          loginFacility?.shortName,
+          loginFacility?.legalName,
+          loginFacility?.facilityName,
+          loginFacility?.name,
+          setupFacilityName,
+          saved?.facilityName,
+          resolvedFacilityName,
+        );
+        resolvedFacilityCode =
+          String(loginFacility?.licenseFacilityCode || loginFacility?.mflCode || resolvedFacilityCode)
+            .trim() || resolvedFacilityCode;
+        resolvedLogoUrl = String(loginFacility?.logoUrl || resolvedLogoUrl).trim();
+      }
+
+      if (!loginFacility && tenantId && tenantId !== "global") {
+        try {
+          const profile = await fetchFacilityBranding(tenantId);
+          resolvedFacilityId = String(profile?.id || tenantId);
+          resolvedFacilityName = pickHospitalName(
+            profile?.shortName,
+            profile?.legalName,
+            profile?.facilityName,
+            profile?.name,
+            setupFacilityName,
+            resolvedFacilityName,
+          );
+          resolvedFacilityCode =
+            String(profile?.mflCode || resolvedFacilityCode).trim() || resolvedFacilityCode;
+          resolvedLogoUrl =
+            String(profile?.branding?.logoUrl || profile?.logoUrl || "").trim();
+        } catch {
+          // Login can still continue; license validation below will decide access.
+        }
+      }
+
+      if (resolvedFacilityCode) {
+        setStoredFacilityCode(resolvedFacilityCode);
+        setLicenseFacilityCode(resolvedFacilityCode);
+      }
+      if (resolvedLogoUrl) {
+        setFacilityLogo(resolvedLogoUrl);
+      }
 
       setFacility({
-        id: saved.backendFacilityId || saved.registrationNumber,
-        name: saved.facilityName,
+        id: resolvedFacilityId,
+        name: resolvedFacilityName,
       });
       setUser({
-        name: saved.adminName,
+        name: resolvedAdminName,
         role: formatRoleLabel(role),
         email: loginEmail.trim(),
       });
@@ -7535,9 +7812,23 @@ export default function App() {
       }
       sessionStorage.setItem(SESSION_STORAGE_KEY, "active");
       setAuthError("");
-      const licenseOk = await ensureLicenseActive(
-        facilityCode || getStoredFacilityCode(),
-      );
+      if (resolvedFacilityCode && resolvedFacilityName !== "Hospital Facility") {
+        localStorage.setItem(
+          ACCOUNT_STORAGE_KEY,
+          JSON.stringify({
+            facilityName: resolvedFacilityName,
+            registrationNumber: resolvedFacilityCode,
+            facilityEmail: "",
+            facilityPhone: "",
+            backendFacilityId: resolvedFacilityId,
+            adminName: resolvedAdminName,
+            adminEmail: loginEmail.trim(),
+            adminPhone: "",
+            password: "",
+          }),
+        );
+      }
+      const licenseOk = await ensureLicenseActive(resolvedFacilityCode);
       setAuthScreen(licenseOk ? "app" : "license");
     } catch (error: any) {
       const msg = String(error?.message || "Unable to login.");
@@ -7557,10 +7848,10 @@ export default function App() {
     e.preventDefault();
     setAuthLoading(true);
     try {
-      await loginStaff({
+      const loginResponse = (await loginStaff({
         email: loginEmail.trim(),
         password: loginPassword,
-      });
+      })) as any;
 
       const token = getAccessToken();
       const claims = token ? decodeJwtPayload(token) : null;
@@ -7570,16 +7861,37 @@ export default function App() {
         normalizedRole === "super_admin" || normalizedRole === "hospital_admin";
       const savedRaw = localStorage.getItem(ACCOUNT_STORAGE_KEY);
       let savedFacilityName = "Hospital Facility";
+      const setupFacilityName = getSetupFacilityNameFallback();
       let savedFacilityId = claims?.tenantId || "facility";
       let savedFacilityCode = "";
+      const loginFacility = loginResponse?.facility || null;
       if (savedRaw) {
         try {
           const saved = JSON.parse(savedRaw) as FacilityRegistration;
-          savedFacilityName = saved.facilityName || savedFacilityName;
+          savedFacilityName = pickHospitalName(saved.facilityName, savedFacilityName);
           savedFacilityId = saved.backendFacilityId || saved.registrationNumber || savedFacilityId;
           savedFacilityCode = String(saved.registrationNumber || "").trim();
         } catch {
           // ignore malformed local registration cache
+        }
+      }
+      savedFacilityName = pickHospitalName(setupFacilityName, savedFacilityName);
+      if (loginFacility) {
+        savedFacilityName = pickHospitalName(
+          loginFacility?.shortName,
+          loginFacility?.legalName,
+          loginFacility?.facilityName,
+          loginFacility?.name,
+          setupFacilityName,
+          savedFacilityName,
+        );
+        savedFacilityId = String(loginFacility?.id || savedFacilityId);
+        savedFacilityCode = String(
+          loginFacility?.licenseFacilityCode || loginFacility?.mflCode || savedFacilityCode,
+        ).trim();
+        const logoUrl = String(loginFacility?.logoUrl || "").trim();
+        if (logoUrl) {
+          setFacilityLogo(logoUrl);
         }
       }
       if (savedFacilityCode) {
@@ -7750,17 +8062,50 @@ export default function App() {
 
     if (authScreen === "register") {
       return (
-        <FacilityRegisterScreen
-          form={registrationForm}
-          setForm={setRegistrationForm}
-          onSubmit={handleRegisterFacility}
-          loading={authLoading}
+        <FirstTimeSetupScreen
           landingTheme={landingTheme}
+          onComplete={(response, values) => {
+            const savedFacility = response?.facility || {};
+            const facilityId = savedFacility?.id || savedFacility?.mflCode || values.mflCode || "facility";
+            const facilityName = pickHospitalName(
+              values.shortName,
+              values.legalName,
+              savedFacility?.shortName,
+              savedFacility?.legalName,
+              savedFacility?.name,
+            );
+            const facilityCode = savedFacility?.mflCode || values.mflCode || "";
+            if (facilityCode) {
+              setStoredFacilityCode(facilityCode);
+              setLicenseFacilityCode(facilityCode);
+            }
+            if (response?.branding?.logoUrl || savedFacility?.logoUrl) {
+              setFacilityLogo(response?.branding?.logoUrl || savedFacility?.logoUrl);
+            }
+            setFacility({ id: facilityId, name: facilityName });
+            localStorage.setItem(
+              ACCOUNT_STORAGE_KEY,
+              JSON.stringify({
+                facilityName,
+                registrationNumber: facilityCode,
+                facilityEmail: values.generalEmail || "",
+                facilityPhone: values.mainPhone || "",
+                backendFacilityId: facilityId,
+                adminName: values.adminName || "",
+                adminEmail: values.adminEmail || "",
+                adminPhone: values.adminPhone || "",
+                password: "",
+              }),
+            );
+            setLoginEmail(values.adminEmail || "");
+            setLoginPassword("");
+            setAuthError("");
+            setAuthScreen("login");
+          }}
           onBack={() => {
             setAuthError("");
             setAuthScreen("landing");
           }}
-          error={authError}
         />
       );
     }
@@ -7768,9 +8113,7 @@ export default function App() {
     if (authScreen === "license") {
       return (
         <LicenseActivationScreen
-          facilityCode={licenseFacilityCode}
           licenseKey={licenseKey}
-          setFacilityCode={setLicenseFacilityCode}
           setLicenseKey={setLicenseKey}
           onSubmit={handleLicenseActivate}
           onBack={handleLicenseBack}
@@ -7842,8 +8185,8 @@ export default function App() {
             <div className="welcome">
               <h2>Welcome, {user?.name || "Hospital Admin"}</h2>
               <p>
-                {facility?.name
-                  ? `${facility.name} command center`
+                {dashboardFacilityName
+                  ? `${dashboardFacilityName} command center`
                   : "Select a module to manage your facility"}
               </p>
             </div>
@@ -7976,7 +8319,15 @@ export default function App() {
         const module = activeWorkflowModuleId
           ? WORKFLOW_MODULE_BY_ID[activeWorkflowModuleId]
           : null;
-        return module && allowedModuleSet.has(module.id) ? (
+        if (!module || !allowedModuleSet.has(module.id)) {
+          return <div className="p-4">You do not have access to this module.</div>;
+        }
+
+        if (module.id === 1) {
+          return <PatientsView />;
+        }
+
+        return (
           <React.Suspense fallback={<div className="p-4">Loading module...</div>}>
             <LazyWorkflowModuleView
               module={module}
@@ -7984,8 +8335,6 @@ export default function App() {
               onPatientsRefresh={refreshPatientsFromBackend}
             />
           </React.Suspense>
-        ) : (
-          <div className="p-4">You do not have access to this module.</div>
         );
       }
       default:
@@ -8008,28 +8357,53 @@ export default function App() {
       <aside
         className={`sidebar ${sidebarCollapsed ? "sidebar-collapsed" : ""}`}
       >
-        <div className="brand">
+        <div className="sidebar-brand-top brand">
           <img
             src="/MedilinkHMIS.png"
             alt="Medilink HMIS"
             className="brand-logo-main"
           />
+          <button
+            type="button"
+            className="sidebar-collapse-btn"
+            onClick={toggleSidebar}
+            aria-label={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+            title={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+          >
+            {sidebarCollapsed ? "›" : "‹"}
+          </button>
         </div>
-        <nav className="nav">
-          {sidebarNavItems.map((item) => (
-            <button
-              key={item.index}
-              onClick={() => {
-                setActiveWorkflowModuleId(null);
-                setActiveNav(item.index);
-              }}
-              className={`nav-item ${activeNav === item.index ? "nav-active" : ""}`}
-            >
-              <Icon type={item.iconType} size={18} />
-              <span>{item.label}</span>
-            </button>
-          ))}
+
+        <nav className="sidebar-form-section" aria-label="Module forms">
+          {!sidebarCollapsed && (
+            <div className="sidebar-section-heading">
+              <span>Forms</span>
+              <small>{activeSidebarTitle}</small>
+            </div>
+          )}
+          {activeSidebarForms.length > 0 ? (
+            <div className="sidebar-form-list">
+              {activeSidebarForms.map((form) => (
+                <button
+                  key={form.id}
+                  type="button"
+                  className="sidebar-form-btn"
+                  onClick={() => openSidebarForm(form.id)}
+                  title={form.title}
+                >
+                  <Icon type="ehr" size={16} />
+                  {!sidebarCollapsed && <span>{form.title}</span>}
+                </button>
+              ))}
+            </div>
+          ) : (
+            <div className="sidebar-empty-state" title="Open a module to see forms">
+              <Icon type="briefcase" size={18} />
+              {!sidebarCollapsed && <p>Open a module to see the available forms here.</p>}
+            </div>
+          )}
         </nav>
+
         {roleKey === "hospital_admin" && (
           <div className="sidebar-upgrade-wrap">
             <button
@@ -8053,30 +8427,37 @@ export default function App() {
             <span>Help AI</span>
           </button>
         </div>
-        <div className="sidebar-hospital-card">
+        <div className="sidebar-hospital-card sidebar-hospital-profile">
           <img
-            src={facilityLogo || "/Medilink-hmis-icon.png"}
+            src={sidebarFacilityLogo}
             className="sidebar-hospital-logo"
-            alt="Hospital logo"
+            alt={`${sidebarFacilityName} logo`}
+            title={sidebarFacilityName}
           />
-          <p>{facility?.name || "Hospital Facility"}</p>
+          {!sidebarCollapsed && (
+            <div className="sidebar-hospital-copy">
+              <span>Active Facility</span>
+              <strong title={sidebarFacilityName}>{sidebarFacilityName}</strong>
+            </div>
+          )}
         </div>
       </aside>
 
           <div className="main">
         <header className="topbar">
           <div className="topbar-left">
-            <button
-              className="sidebar-line-toggle"
-              onClick={toggleSidebar}
-              aria-label={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
-              title={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
-            >
-              <span />
-              <span />
-              <span />
-            </button>
-            {activeNav === 0 ? (
+            {activeNav !== 0 && (
+              <div className="topbar-module-title">
+                <button className="topbar-back-btn" onClick={goToDashboard}>
+                  ← Back
+                </button>
+                <span
+                  style={{ fontWeight: 600, color: "#ffffff", fontSize: "1rem" }}
+                >
+                  {getNavLabel(activeNav)}
+                </span>
+              </div>
+            )}
               <div className="search-wrap">
                 <svg
                   width="16"
@@ -8101,34 +8482,134 @@ export default function App() {
                   placeholder="Search modules..."
                   value={moduleSearch}
                   onChange={(e) => setModuleSearch(e.target.value)}
+                  onFocus={() => setModuleSearchFocused(true)}
+                  onBlur={() => window.setTimeout(() => setModuleSearchFocused(false), 140)}
                 />
+                {moduleSearchFocused && moduleSearch.trim() && (
+                  <div className="module-search-panel">
+                    {moduleSearchResults.length > 0 ? (
+                      moduleSearchResults.map((module) => (
+                        <button
+                          key={module.id}
+                          type="button"
+                          className="module-search-result"
+                          onMouseDown={(event) => event.preventDefault()}
+                          onClick={() => openModuleFromSearch(module.id)}
+                        >
+                          <Icon type={module.iconType} size={16} />
+                          <span>
+                            <strong>{module.name}</strong>
+                            <small>{module.premium ? "Premium module" : "Core module"}</small>
+                          </span>
+                        </button>
+                      ))
+                    ) : (
+                      <p className="module-search-empty">No module found.</p>
+                    )}
+                  </div>
+                )}
               </div>
-            ) : (
-              <div className="topbar-module-title">
-                <button className="topbar-back-btn" onClick={goToDashboard}>
-                  ← Back
-                </button>
-                <span
-                  style={{ fontWeight: 600, color: "#ffffff", fontSize: "1rem" }}
-                >
-                  {getNavLabel(activeNav)}
-                </span>
-              </div>
-            )}
           </div>
           <div className="topbar-right">
-            <div className={`notif-chip ${appNotifications ? "on" : "off"}`}>
-              {appNotifications ? "Alerts On" : "Alerts Off"}
+            <button
+              className="topbar-icon-btn"
+              onClick={() => setActiveNav(12)}
+              title="Settings"
+              aria-label="Open settings"
+            >
+              <Icon type="gears" size={17} />
+            </button>
+            <div className="topbar-popover-wrap">
+              <button
+                className="topbar-icon-btn topbar-notification-btn"
+                onClick={() => {
+                  setNotificationsOpen((open) => !open);
+                  setProfileOpen(false);
+                }}
+                title="Notifications"
+                aria-label="Open notifications"
+              >
+                <Icon type="bell" size={17} />
+                {queueNotices.length > 0 && <span className="topbar-alert-count">{queueNotices.length}</span>}
+              </button>
+              {notificationsOpen && (
+                <div className="topbar-panel notification-panel">
+                  <div className="topbar-panel-header">
+                    <div>
+                      <strong>Queue Notifications</strong>
+                      <span>{activeWorkflowModule?.name || "All active modules"}</span>
+                    </div>
+                    <button type="button" onClick={() => setNotificationsOpen(false)}>×</button>
+                  </div>
+                  <div className="notification-list">
+                    {queueNotices.length > 0 ? (
+                      queueNotices.map((notice) => (
+                        <div key={notice.id} className="notification-item">
+                          <div>
+                            <strong>{notice.name}</strong>
+                            <span>{notice.token} queued for HMIS service</span>
+                          </div>
+                          <small>{notice.status}</small>
+                        </div>
+                      ))
+                    ) : (
+                      <p className="topbar-panel-empty">No patient queued for this module right now.</p>
+                    )}
+                  </div>
+                </div>
+              )}
             </div>
             <button className="topbar-logout-btn" onClick={handleLogout}>
+              <Icon type="logout" size={15} />
               Logout
             </button>
-            <div className="user-pill">
+            <div className="topbar-popover-wrap">
+            <button
+              type="button"
+              className="user-pill"
+              onClick={() => {
+                setProfileOpen((open) => !open);
+                setNotificationsOpen(false);
+              }}
+            >
               <div className="avatar">A</div>
               <div>
                 <div className="user-name">{user?.name || "Hospital Admin"}</div>
                 <div className="user-role">{user?.role || "Hospital Admin"}</div>
               </div>
+            </button>
+            {profileOpen && (
+              <div className="topbar-panel profile-panel">
+                <div className="topbar-panel-header">
+                  <div>
+                    <strong>User Profile</strong>
+                    <span>Logged-in HMIS user</span>
+                  </div>
+                  <button type="button" onClick={() => setProfileOpen(false)}>×</button>
+                </div>
+                <div className="profile-panel-card">
+                  <div className="profile-panel-avatar">{(user?.name || "U").charAt(0).toUpperCase()}</div>
+                  <div>
+                    <strong>{user?.name || "Hospital Admin"}</strong>
+                    <span>{user?.email || "No email available"}</span>
+                  </div>
+                </div>
+                <dl className="profile-details">
+                  <div>
+                    <dt>Role</dt>
+                    <dd>{user?.role || "Hospital Admin"}</dd>
+                  </div>
+                  <div>
+                    <dt>Facility</dt>
+                    <dd>{dashboardFacilityName}</dd>
+                  </div>
+                  <div>
+                    <dt>Status</dt>
+                    <dd>Active</dd>
+                  </div>
+                </dl>
+              </div>
+            )}
             </div>
           </div>
         </header>

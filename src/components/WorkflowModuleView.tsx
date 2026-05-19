@@ -1304,6 +1304,129 @@ function AmbulanceLeafletBoardMap({
   return <div ref={mapContainerRef} className="ambulance-leaflet-map" />;
 }
 
+function WorkflowActionIcon({
+  type,
+  className = "workflow-action-icon",
+}: {
+  type:
+    | "admission"
+    | "discharge"
+    | "transfer"
+    | "refresh"
+    | "form"
+    | "calendar"
+    | "settings"
+    | "cancel"
+    | "triage"
+    | "consultation";
+  className?: string;
+}) {
+  const common = {
+    className,
+    viewBox: "0 0 24 24",
+    fill: "none",
+    stroke: "currentColor",
+    strokeWidth: 2,
+    strokeLinecap: "round" as const,
+    strokeLinejoin: "round" as const,
+    "aria-hidden": true,
+  };
+  if (type === "admission") {
+    return (
+      <svg {...common}>
+        <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" />
+        <circle cx="9" cy="7" r="4" />
+        <path d="M19 8v6" />
+        <path d="M22 11h-6" />
+      </svg>
+    );
+  }
+  if (type === "discharge") {
+    return (
+      <svg {...common}>
+        <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+        <path d="M16 17l5-5-5-5" />
+        <path d="M21 12H9" />
+      </svg>
+    );
+  }
+  if (type === "transfer") {
+    return (
+      <svg {...common}>
+        <path d="M7 7h11l-3-3" />
+        <path d="M18 7l-3 3" />
+        <path d="M17 17H6l3 3" />
+        <path d="M6 17l3-3" />
+      </svg>
+    );
+  }
+  if (type === "refresh") {
+    return (
+      <svg {...common}>
+        <path d="M21 12a9 9 0 0 1-15.5 6.2" />
+        <path d="M3 12A9 9 0 0 1 18.5 5.8" />
+        <path d="M18 2v4h4" />
+        <path d="M6 22v-4H2" />
+      </svg>
+    );
+  }
+  if (type === "calendar") {
+    return (
+      <svg {...common}>
+        <path d="M8 2v4" />
+        <path d="M16 2v4" />
+        <rect x="3" y="4" width="18" height="18" rx="2" />
+        <path d="M3 10h18" />
+        <path d="M8 14h.01" />
+        <path d="M12 14h.01" />
+        <path d="M16 14h.01" />
+      </svg>
+    );
+  }
+  if (type === "settings") {
+    return (
+      <svg {...common}>
+        <path d="M12 15.5A3.5 3.5 0 1 0 12 8a3.5 3.5 0 0 0 0 7.5z" />
+        <path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06A1.7 1.7 0 0 0 15 19.4a1.7 1.7 0 0 0-1 .6 1.7 1.7 0 0 0-.4 1.1V21a2 2 0 1 1-4 0v-.09A1.7 1.7 0 0 0 8.6 19.4a1.7 1.7 0 0 0-1.88.34l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.7 1.7 0 0 0 4.6 15a1.7 1.7 0 0 0-.6-1 1.7 1.7 0 0 0-1.1-.4H3a2 2 0 1 1 0-4h.09A1.7 1.7 0 0 0 4.6 8.6a1.7 1.7 0 0 0-.34-1.88l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.7 1.7 0 0 0 9 4.6a1.7 1.7 0 0 0 1-.6 1.7 1.7 0 0 0 .4-1.1V3a2 2 0 1 1 4 0v.09A1.7 1.7 0 0 0 15.4 4.6a1.7 1.7 0 0 0 1.88-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.7 1.7 0 0 0 19.4 9a1.7 1.7 0 0 0 .6 1 1.7 1.7 0 0 0 1.1.4H21a2 2 0 1 1 0 4h-.09a1.7 1.7 0 0 0-1.51.6z" />
+      </svg>
+    );
+  }
+  if (type === "cancel") {
+    return (
+      <svg {...common}>
+        <circle cx="12" cy="12" r="9" />
+        <path d="M15 9l-6 6" />
+        <path d="M9 9l6 6" />
+      </svg>
+    );
+  }
+  if (type === "triage") {
+    return (
+      <svg {...common}>
+        <path d="M9 11l2 2 4-5" />
+        <path d="M21 12c0 5-3.5 8-9 10-5.5-2-9-5-9-10V5l9-3 9 3v7z" />
+      </svg>
+    );
+  }
+  if (type === "consultation") {
+    return (
+      <svg {...common}>
+        <path d="M4.8 2.3v5.4a4.2 4.2 0 0 0 8.4 0V2.3" />
+        <path d="M8 14a6 6 0 0 0 12 0v-2" />
+        <circle cx="20" cy="10" r="2" />
+      </svg>
+    );
+  }
+  return (
+    <svg {...common}>
+      <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+      <path d="M14 2v6h6" />
+      <path d="M8 13h8" />
+      <path d="M8 17h6" />
+    </svg>
+  );
+}
+
 export function WorkflowModuleView({
   module,
   patients,
@@ -1331,6 +1454,7 @@ export function WorkflowModuleView({
   const isOrchestrationModule = module.id === 47;
   const isInsuranceModule = module.id === 14;
   const isPatientPortalModule = module.id === 24;
+  const isAppointmentModule = module.id === 4;
   const isRegistrationModule = module.id === 1;
   const isEmergencyModule = module.id === 25;
   const isOpdFlowModule = isTriageModule || isOpdModule;
@@ -1357,6 +1481,7 @@ export function WorkflowModuleView({
   const [search, setSearch] = useState("");
   const [activeStage, setActiveStage] = useState(module.stages[0]?.id || "stage_1");
   const [activeFormId, setActiveFormId] = useState(module.forms[0]?.id || "");
+  const [isFormPopupOpen, setIsFormPopupOpen] = useState(false);
   const [selectedPatientId, setSelectedPatientId] = useState<string>("");
   const [editingId, setEditingId] = useState<string | null>(null);
   const [records, setRecords] = useState<ModuleRecord[]>([]);
@@ -2181,6 +2306,7 @@ export function WorkflowModuleView({
     );
     const fromSnapshot = loadRegistrationSnapshot(patientId, registrationFields);
     setActiveFormId("new_patient_registration");
+    setIsFormPopupOpen(true);
     setLockedPrefillFieldKeys(new Set());
     setForm({
       ...base,
@@ -2201,9 +2327,119 @@ export function WorkflowModuleView({
 
   const activeForm =
     formsForDisplay.find((f) => f.id === activeFormId) || formsForDisplay[0];
+  const cleanWorkflowFormTitle = (value: string) =>
+    String(value || "Module Form").replace(/\s+Form$/i, "").trim();
+  const getRegistrationFormModeClass = (value: string): string => {
+    const normalized = String(value || "").toLowerCase();
+    if (normalized.includes("next of kin")) return "registration-mode-kin";
+    if (normalized.includes("insurance")) return "registration-mode-insurance";
+    return "registration-mode-patient";
+  };
+  const getWorkflowFormIconType = (value: string): "admission" | "discharge" | "transfer" | "form" => {
+    const normalized = String(value || "").toLowerCase();
+    if (normalized.includes("admission")) return "admission";
+    if (normalized.includes("discharge")) return "discharge";
+    if (normalized.includes("transfer")) return "transfer";
+    return "form";
+  };
+  const getInpatientFormModeClass = (value: string): string => {
+    const normalized = String(value || "").toLowerCase();
+    if (normalized.includes("discharge")) return "ipd-mode-discharge";
+    if (normalized.includes("transfer")) return "ipd-mode-transfer";
+    return "ipd-mode-admission";
+  };
+  const getAppointmentFormIconType = (value: string): "calendar" | "settings" | "cancel" | "form" => {
+    const normalized = String(value || "").toLowerCase();
+    if (normalized.includes("booking")) return "calendar";
+    if (normalized.includes("slot")) return "settings";
+    if (normalized.includes("cancel")) return "cancel";
+    return "form";
+  };
+  const getAppointmentFormModeClass = (value: string): string => {
+    const iconType = getAppointmentFormIconType(value);
+    if (iconType === "calendar") return "appointment-mode-booking";
+    if (iconType === "settings") return "appointment-mode-slots";
+    if (iconType === "cancel") return "appointment-mode-cancel";
+    return "";
+  };
+  const getOpdFormIconType = (value: string): "triage" | "consultation" | "transfer" | "form" => {
+    const normalized = String(value || "").toLowerCase();
+    if (normalized.includes("triage")) return "triage";
+    if (normalized.includes("consultation")) return "consultation";
+    if (normalized.includes("referral")) return "transfer";
+    return "form";
+  };
+  const getOpdFormModeClass = (value: string): string => {
+    const normalized = String(value || "").toLowerCase();
+    if (normalized.includes("triage")) return "opd-mode-triage";
+    if (normalized.includes("consultation")) return "opd-mode-consultation";
+    if (normalized.includes("referral")) return "opd-mode-referral";
+    return "";
+  };
+  const getWorkflowSubmitLabel = (value: string, isEditing: boolean): string => {
+    const normalized = String(value || "").toLowerCase();
+    const prefix = isEditing ? "Update" : "";
+    if (isOpdFlowModule) {
+      if (normalized.includes("triage")) return isEditing ? "Update Triage Assessment" : "Save Triage Assessment";
+      if (normalized.includes("consultation")) return isEditing ? "Update Consultation" : "Save Consultation";
+      if (normalized.includes("referral")) return isEditing ? "Update Referral" : "Create Referral";
+    }
+    if (isAppointmentModule) {
+      if (normalized.includes("booking")) return isEditing ? "Update Appointment" : "Schedule Appointment";
+      if (normalized.includes("slot")) return isEditing ? "Update Slot Configuration" : "Save Slot Configuration";
+      if (normalized.includes("cancel")) return isEditing ? "Update Cancellation" : "Cancel Appointment";
+    }
+    if (isInpatientModule) {
+      if (normalized.includes("admission")) return isEditing ? "Update Admission" : "Admit Patient";
+      if (normalized.includes("discharge")) return isEditing ? "Update Discharge" : "Discharge Patient";
+      if (normalized.includes("transfer")) return isEditing ? "Update Ward Transfer" : "Transfer Ward";
+    }
+    if (isRegistrationModule) {
+      if (normalized.includes("next of kin")) return isEditing ? "Update Next of Kin" : "Save Next of Kin";
+      if (normalized.includes("insurance")) return isEditing ? "Update Insurance Details" : "Save Insurance Details";
+      return isEditing ? "Update Patient" : "Register Patient";
+    }
+    return prefix ? `${prefix} Data` : "Save Data";
+  };
+  const openWorkflowForm = (formId: string) => {
+    const targetForm = module.forms.find((candidate) => candidate.id === formId);
+    if (!targetForm) return;
+    setActiveFormId(targetForm.id);
+    setEditingId(null);
+    setForm(emptyForm(targetForm.fields));
+    setFormError("");
+    setFormNotice(null);
+    setIsFormPopupOpen(true);
+  };
+  const activeFormRequiredCount = activeForm?.fields.filter((field) => field.required).length || 0;
+  const activeFormTitle = activeForm?.title || "Module Form";
+  const activeFormPresentationClass = [
+    isRegistrationModule ? `registration-form-modal ${getRegistrationFormModeClass(activeFormTitle)}` : "",
+    isInpatientModule ? `ipd-form-modal ${getInpatientFormModeClass(activeFormTitle)}` : "",
+    isAppointmentModule ? `appointment-form-modal ${getAppointmentFormModeClass(activeFormTitle)}` : "",
+    isOpdFlowModule ? `opd-form-modal ${getOpdFormModeClass(activeFormTitle)}` : "",
+  ]
+    .filter(Boolean)
+    .join(" ");
   const [form, setForm] = useState<Record<string, string>>(
     () => emptyForm(activeForm?.fields || []),
   );
+  useEffect(() => {
+    const handleOpenForm = (event: Event) => {
+      const detail = (event as CustomEvent<{ moduleId?: number; formId?: string }>).detail || {};
+      if (Number(detail.moduleId) !== module.id || !detail.formId) return;
+      const targetForm = module.forms.find((candidate) => candidate.id === detail.formId);
+      if (!targetForm) return;
+      setActiveFormId(targetForm.id);
+      setEditingId(null);
+      setForm(emptyForm(targetForm.fields));
+      setFormError("");
+      setFormNotice(null);
+      setIsFormPopupOpen(true);
+    };
+    window.addEventListener("hmis:open-workflow-form", handleOpenForm);
+    return () => window.removeEventListener("hmis:open-workflow-form", handleOpenForm);
+  }, [module.forms, module.id]);
   const [lockedPrefillFieldKeys, setLockedPrefillFieldKeys] = useState<Set<string>>(
     () => new Set(),
   );
@@ -8567,6 +8803,89 @@ export function WorkflowModuleView({
         .slice(0, 5),
     [patients],
   );
+  const appointmentRecords = useMemo(
+    () =>
+      records.filter((record) =>
+        [
+          "appointment_booking",
+          "appointment_slot_configuration",
+          "appointment_cancellation",
+        ].includes(record.formId),
+      ),
+    [records],
+  );
+  const appointmentRows = useMemo(() => {
+    const term = search.trim().toLowerCase();
+    return appointmentRecords
+      .map((record) => {
+        const data = record.data || {};
+        const patient =
+          data.patient_search ||
+          data.patient ||
+          data.patient_name ||
+          patients.find((row) => row.id === record.patientId)?.name ||
+          "Patient";
+        const doctor = data.preferred_doctor || data.doctor || "Doctor";
+        const date = data.appointment_date || data.date || "";
+        const time = data.appointment_time || data.start_time || "";
+        const status =
+          record.formId === "appointment_cancellation"
+            ? "CANCELLED"
+            : record.formId === "appointment_slot_configuration"
+              ? "SLOT CONFIGURED"
+              : "SCHEDULED";
+        return {
+          id: record.id,
+          patient,
+          doctor,
+          time: [date, time].filter(Boolean).join(" ") || new Date(record.createdAt).toLocaleString(),
+          status,
+        };
+      })
+      .filter((row) =>
+        !term
+          ? true
+          : `${row.patient} ${row.doctor} ${row.time} ${row.status}`.toLowerCase().includes(term),
+      );
+  }, [appointmentRecords, patients, search]);
+  const appointmentSummary = useMemo(
+    () => ({
+      total: appointmentRows.length,
+      pending: appointmentRows.filter((row) => /pending|scheduled/i.test(row.status)).length,
+      completed: appointmentRows.filter((row) => /completed/i.test(row.status)).length,
+      cancelled: appointmentRows.filter((row) => /cancelled/i.test(row.status)).length,
+    }),
+    [appointmentRows],
+  );
+  const outpatientRows = useMemo(() => {
+    const term = search.trim().toLowerCase();
+    return opdQueue
+      .map((row: any) => {
+        const patient =
+          `${row?.patient?.firstName || ""} ${row?.patient?.lastName || ""}`.trim() ||
+          row?.patientName ||
+          row?.patient?.patientCode ||
+          "-";
+        const doctor =
+          `${row?.doctor?.firstName || ""} ${row?.doctor?.lastName || ""}`.trim() ||
+          row?.doctorName ||
+          "-";
+        const status = String(row?.status || "Waiting");
+        const arrival = row?.arrivalTime || row?.createdAt || row?.visitDate || "";
+        return {
+          id: String(row?.id || `${patient}-${arrival}`),
+          patient,
+          doctor,
+          status,
+          arrival: arrival ? new Date(arrival).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "-",
+        };
+      })
+      .filter((row) =>
+        !term
+          ? true
+          : `${row.patient} ${row.doctor} ${row.status} ${row.arrival}`.toLowerCase().includes(term),
+      );
+  }, [opdQueue, search]);
 
   const selectedPatient = patients.find((p) => p.id === selectedPatientId) || null;
   const registrationType = String(form.registration_type || "NEW").toUpperCase();
@@ -8587,7 +8906,13 @@ export function WorkflowModuleView({
   const allowTeleSessionOnlyEdit =
     isTelemedicineModule && teleSessionScopedForms.has(activeFormId) && hasTeleSessionId;
   const canEdit =
-    isRegistrationModule || isCheckedIn || disablePatientSearch || allowTeleSessionOnlyEdit;
+    isRegistrationModule ||
+    isInpatientModule ||
+    isAppointmentModule ||
+    isOpdFlowModule ||
+    isCheckedIn ||
+    disablePatientSearch ||
+    allowTeleSessionOnlyEdit;
 
   const hrStaffFiltered = useMemo(() => {
     const term = hrSearch.trim().toLowerCase();
@@ -8941,6 +9266,8 @@ export function WorkflowModuleView({
     if (
       !selectedPatientId &&
       !isRegistrationModule &&
+      !isInpatientModule &&
+      !isAppointmentModule &&
       !disablePatientSearch &&
       !allowTeleSessionOnlyEdit
     ) {
@@ -9360,6 +9687,7 @@ export function WorkflowModuleView({
     setForm(emptyForm(activeForm.fields));
     setLockedPrefillFieldKeys(new Set());
     setFormError("");
+    setIsFormPopupOpen(false);
     if (isRegistrationModule) {
       setRegistrationDuplicateCheck(null);
     }
@@ -9422,6 +9750,7 @@ export function WorkflowModuleView({
     setSelectedPatientId(record.patientId);
     setActiveStage(record.stageId);
     setActiveFormId(record.formId);
+    setIsFormPopupOpen(true);
     setLockedPrefillFieldKeys(new Set());
     setForm(record.data);
   };
@@ -19305,66 +19634,151 @@ export function WorkflowModuleView({
   }
 
   return (
-    <div className="workflow-view">
+    <div className={`workflow-view ${isInpatientModule ? "ipd-web-view" : ""} ${isAppointmentModule ? "appointments-web-view" : ""} ${isOpdFlowModule ? "opd-web-view" : ""}`}>
       <div className="pv-header">
         <div>
-          <h2 className="pv-title">{module.name}</h2>
+          <h2 className="pv-title">
+            {isAppointmentModule
+              ? "Appointments & Schedules"
+              : isOpdFlowModule
+                ? "Outpatient Management"
+              : isInpatientModule
+                ? "Inpatient Management"
+                : module.name}
+          </h2>
           <p className="pv-subtitle">
-            {isWardModule
+            {isAppointmentModule
+              ? "Consultation scheduling and visit coordination"
+              : isOpdFlowModule
+                ? "Consultation pipeline and active encounters"
+              : isInpatientModule
+              ? "Admissions, ward allocation, and length of stay"
+              : isWardModule
               ? "Manage wards, occupancy, and bed map positions."
               : disablePatientSearch
                 ? "Stage cards and operational module forms."
                 : "Stage cards, patient search, and full module forms with add/edit."}
           </p>
         </div>
+        {isInpatientModule && (
+          <div className="ipd-action-bar">
+            <button
+              type="button"
+              className="ipd-action-btn is-admission"
+              onClick={() => openWorkflowForm("admission")}
+            >
+              <WorkflowActionIcon type="admission" /> Admission
+            </button>
+            <button
+              type="button"
+              className="ipd-action-btn is-discharge"
+              onClick={() => openWorkflowForm("discharge")}
+            >
+              <WorkflowActionIcon type="discharge" /> Discharge
+            </button>
+            <button
+              type="button"
+              className="ipd-action-btn is-transfer"
+              onClick={() => openWorkflowForm("ward_transfer")}
+            >
+              <WorkflowActionIcon type="transfer" /> Ward Transfer
+            </button>
+          </div>
+        )}
+        {isOpdFlowModule && (
+          <div className="opd-action-bar">
+            <button
+              type="button"
+              className="opd-action-btn is-triage"
+              onClick={() => openWorkflowForm("triage_assessment")}
+            >
+              <WorkflowActionIcon type="triage" /> Triage Assessment
+            </button>
+            <button
+              type="button"
+              className="opd-action-btn is-consultation"
+              onClick={() => openWorkflowForm("opd_consultation")}
+            >
+              <WorkflowActionIcon type="consultation" /> OPD Consultation
+            </button>
+            <button
+              type="button"
+              className="opd-action-btn is-referral"
+              onClick={() => openWorkflowForm("opd_referral")}
+            >
+              <WorkflowActionIcon type="transfer" /> OPD Referral
+            </button>
+          </div>
+        )}
+        {isAppointmentModule && (
+          <div className="appointment-action-bar">
+            <button
+              type="button"
+              className="appointment-action-btn is-booking"
+              onClick={() => openWorkflowForm("appointment_booking")}
+            >
+              <WorkflowActionIcon type="calendar" /> Appointment Booking
+            </button>
+            <button
+              type="button"
+              className="appointment-action-btn is-slots"
+              onClick={() => openWorkflowForm("appointment_slot_configuration")}
+            >
+              <WorkflowActionIcon type="settings" /> Appointment Slot Configuration
+            </button>
+            <button
+              type="button"
+              className="appointment-action-btn is-cancel"
+              onClick={() => openWorkflowForm("appointment_cancellation")}
+            >
+              <WorkflowActionIcon type="cancel" /> Appointment Cancellation
+            </button>
+          </div>
+        )}
       </div>
 
       {isInpatientModule && (
         <>
-          <div className="pv-header" style={{ marginBottom: 10 }}>
-            <div>
-              <p className="pv-subtitle">
-                Admission operations dashboard: active admissions, occupancy, discharge throughput,
-                and LOS.
-              </p>
-            </div>
+          <div className="ipd-refresh-row">
+            <span>Admission operations dashboard: active admissions, occupancy, discharge throughput, and LOS.</span>
             <button
               type="button"
-              className="btn-primary"
+              className="ipd-refresh-btn"
               onClick={() => void loadInpatientControlCenter()}
               disabled={ipdLoading}
             >
+              <WorkflowActionIcon type="refresh" />
               {ipdLoading ? "Refreshing..." : "Refresh IPD"}
             </button>
           </div>
 
           {ipdError && <div className="workflow-notice is-error">{ipdError}</div>}
 
-          <div className="ehr-summary-grid" style={{ marginBottom: 14 }}>
-            <article className="ehr-summary-card">
-              <span>Active Admissions</span>
+          <div className="pv-stats ipd-stat-grid">
+            <article className="pv-stat-card" style={{ borderLeftColor: "#1e3a8a" }}>
+              <p className="pv-stat-label">Admitted</p>
               <strong>{inpatientSummary.activeAdmissions}</strong>
             </article>
-            <article className="ehr-summary-card">
-              <span>Discharges Today</span>
+            <article className="pv-stat-card" style={{ borderLeftColor: "#7c3aed" }}>
+              <p className="pv-stat-label">Discharges</p>
               <strong>{inpatientSummary.dischargeToday}</strong>
             </article>
-            <article className="ehr-summary-card">
-              <span>Average LOS (days)</span>
+            <article className="pv-stat-card" style={{ borderLeftColor: "#0d9488" }}>
+              <p className="pv-stat-label">Average LOS</p>
               <strong>{inpatientSummary.averageLengthOfStayDays.toFixed(2)}</strong>
             </article>
-            <article className="ehr-summary-card">
-              <span>Bed Occupancy</span>
+            <article className="pv-stat-card" style={{ borderLeftColor: "#0891b2" }}>
+              <p className="pv-stat-label">Bed Occupancy</p>
               <strong>{inpatientSummary.occupancyRate.toFixed(1)}%</strong>
             </article>
-            <article className="ehr-summary-card">
-              <span>Beds Occupied</span>
+            <article className="pv-stat-card" style={{ borderLeftColor: "#16a34a" }}>
+              <p className="pv-stat-label">Beds Occupied</p>
               <strong>
                 {inpatientSummary.bedsOccupied} / {inpatientSummary.bedsTotal}
               </strong>
             </article>
-            <article className="ehr-summary-card">
-              <span>Beds Available</span>
+            <article className="pv-stat-card" style={{ borderLeftColor: "#2563eb" }}>
+              <p className="pv-stat-label">Beds Available</p>
               <strong>{inpatientSummary.bedsAvailable}</strong>
             </article>
           </div>
@@ -19416,6 +19830,70 @@ export function WorkflowModuleView({
                   <tr>
                     <td colSpan={6} className="pv-empty">
                       No active inpatient admissions found.
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </section>
+        </>
+      )}
+
+      {isAppointmentModule && (
+        <>
+          <div className="pv-stats appointment-stat-grid">
+            <article className="pv-stat-card" style={{ borderLeftColor: "#1e3a8a" }}>
+              <p className="pv-stat-label">Today's Visits</p>
+              <strong>{appointmentSummary.total}</strong>
+            </article>
+            <article className="pv-stat-card" style={{ borderLeftColor: "#2563eb" }}>
+              <p className="pv-stat-label">Pending</p>
+              <strong>{appointmentSummary.pending}</strong>
+            </article>
+            <article className="pv-stat-card" style={{ borderLeftColor: "#0d9488" }}>
+              <p className="pv-stat-label">Completed</p>
+              <strong>{appointmentSummary.completed}</strong>
+            </article>
+            <article className="pv-stat-card" style={{ borderLeftColor: "#7c3aed" }}>
+              <p className="pv-stat-label">Cancelled</p>
+              <strong>{appointmentSummary.cancelled}</strong>
+            </article>
+          </div>
+
+          <div className="workflow-top-search appointment-top-search">
+            <input
+              className="pv-search"
+              placeholder="Search appointments"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+            />
+          </div>
+
+          <section className="pv-table-wrap" style={{ marginBottom: 14 }}>
+            <table className="pv-table">
+              <thead>
+                <tr>
+                  <th>Patient</th>
+                  <th>Doctor</th>
+                  <th>Time</th>
+                  <th>Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {appointmentRows.map((row) => (
+                  <tr key={row.id}>
+                    <td className="pv-name">{row.patient}</td>
+                    <td>{row.doctor}</td>
+                    <td>{row.time}</td>
+                    <td>
+                      <span className="pv-badge">{row.status}</span>
+                    </td>
+                  </tr>
+                ))}
+                {appointmentRows.length === 0 && (
+                  <tr>
+                    <td colSpan={4} className="pv-empty">
+                      No appointments found.
                     </td>
                   </tr>
                 )}
@@ -24563,11 +25041,17 @@ export function WorkflowModuleView({
         </>
       )}
 
-      {!disablePatientSearch && (
+      {!isAppointmentModule && !disablePatientSearch && (
         <div className="workflow-top-search">
           <input
             className="pv-search"
-            placeholder="Patient search (Reg No, ID, Phone, Name)"
+            placeholder={
+              isAppointmentModule
+                ? "Search appointments"
+                : isInpatientModule
+                  ? "Search admissions"
+                  : "Patient search (Reg No, ID, Phone, Name)"
+            }
             value={search}
             onChange={(e) => setSearch(e.target.value)}
           />
@@ -24853,7 +25337,7 @@ export function WorkflowModuleView({
         </>
       )}
 
-      {!disablePatientSearch && !!search.trim() && (
+      {!isAppointmentModule && !isInpatientModule && !disablePatientSearch && !!search.trim() && (
         <div className="workflow-search-results">
           {searchResults.map((patient) => {
             const checkedIn = Boolean(patientCheckinMap[patient.id]);
@@ -24896,7 +25380,7 @@ export function WorkflowModuleView({
         </div>
       )}
 
-      {!disablePatientSearch && !!search.trim() && selectedPatient && (
+      {!isAppointmentModule && !isInpatientModule && !disablePatientSearch && !!search.trim() && selectedPatient && (
         <div className="workflow-patient-preview">
           <h3>Patient Details</h3>
           <div className="workflow-queue-badge">Current Queue: {getPatientQueueLabel(selectedPatient)}</div>
@@ -24950,7 +25434,7 @@ export function WorkflowModuleView({
         </div>
       )}
 
-      {!isWardModule && (
+      {!isWardModule && !isInpatientModule && !isAppointmentModule && (
         <div className="workflow-stage-grid">
           {module.stages.map((stage) => {
             const count = stageCounts.find((s) => s.stageId === stage.id)?.count || 0;
@@ -24969,7 +25453,7 @@ export function WorkflowModuleView({
         </div>
       )}
 
-      {formsForDisplay.length > 1 && (
+      {!isInpatientModule && !isAppointmentModule && formsForDisplay.length > 0 && (
         <div className="workflow-form-tabs">
           {formsForDisplay.map((moduleForm) => (
             <button
@@ -24979,6 +25463,9 @@ export function WorkflowModuleView({
                 setActiveFormId(moduleForm.id);
                 setEditingId(null);
                 setForm(emptyForm(moduleForm.fields));
+                setFormError("");
+                setFormNotice(null);
+                setIsFormPopupOpen(true);
               }}
             >
               {moduleForm.title}
@@ -24987,8 +25474,8 @@ export function WorkflowModuleView({
         </div>
       )}
 
-      <div className={`workflow-layout ${disablePatientSearch ? "is-single" : ""}`}>
-        {!disablePatientSearch && (
+      <div className={`workflow-layout ${disablePatientSearch || isInpatientModule || isAppointmentModule ? "is-single" : ""}`}>
+        {!isAppointmentModule && !isInpatientModule && !disablePatientSearch && (
           <div className="workflow-patients">
             <div className="workflow-panel-title">
               {module.id === 1 ? "Recent Registered (Latest 5)" : "Patients"}
@@ -25018,10 +25505,53 @@ export function WorkflowModuleView({
           </div>
         )}
 
-        <div className="workflow-form-wrap">
+        {isFormPopupOpen && (
+          <div className="modal-overlay" onClick={() => setIsFormPopupOpen(false)}>
+            <div
+              className={`modal-box workflow-form-modal ${activeFormPresentationClass}`}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="modal-header">
+                <div className="ipd-form-title-wrap">
+                  {isRegistrationModule && (
+                    <span className="ipd-form-icon">
+                      <WorkflowActionIcon type="form" />
+                    </span>
+                  )}
+                  {isInpatientModule && (
+                    <span className="ipd-form-icon">
+                      <WorkflowActionIcon type={getWorkflowFormIconType(activeForm?.title || "")} />
+                    </span>
+                  )}
+                  {isAppointmentModule && (
+                    <span className="ipd-form-icon">
+                      <WorkflowActionIcon type={getAppointmentFormIconType(activeForm?.title || "")} />
+                    </span>
+                  )}
+                  <div>
+                    {isRegistrationModule && <span className="ipd-form-kicker">Patient Registry</span>}
+                    {isInpatientModule && <span className="ipd-form-kicker">Inpatient Management</span>}
+                    {isAppointmentModule && <span className="ipd-form-kicker">Appointments & Schedules</span>}
+                    <h3>{cleanWorkflowFormTitle(activeForm?.title || "Module Form")}</h3>
+                  </div>
+                </div>
+                {(isRegistrationModule || isInpatientModule || isAppointmentModule) && (
+                  <div className="ipd-form-meta">
+                    <span>{activeForm?.fields.length || 0} fields</span>
+                    <span>{activeFormRequiredCount} required</span>
+                  </div>
+                )}
+                <button
+                  type="button"
+                  className="modal-close"
+                  onClick={() => setIsFormPopupOpen(false)}
+                >
+                  x
+                </button>
+              </div>
           <form className="workflow-form" onSubmit={saveRecord}>
             <div className="workflow-form-header">
-              <h3>{activeForm?.title || "Module Form"}</h3>
+              <h3>{cleanWorkflowFormTitle(activeForm?.title || "Module Form")}</h3>
               <p>
                 {selectedPatient
                   ? `Patient: ${selectedPatient.name}`
@@ -25029,6 +25559,10 @@ export function WorkflowModuleView({
                     ? "Operational module form"
                   : allowTeleSessionOnlyEdit
                     ? "Session-based telemedicine workflow"
+                  : isAppointmentModule
+                    ? "Capture appointment scheduling details"
+                  : isInpatientModule
+                    ? "Capture inpatient workflow details"
                   : isRegistrationModule
                     ? "New patient registration (search optional)"
                     : "Select a patient first"}
@@ -25348,10 +25882,10 @@ export function WorkflowModuleView({
               </button>
               <button
                 type="submit"
-                className="btn-primary"
-                disabled={isRegistrationModule ? false : !selectedPatientId || !isCheckedIn}
+                className="btn-primary workflow-submit-button"
+                disabled={!canEdit}
               >
-                {editingId ? "Update Data" : "Save Stage Data"}
+                {getWorkflowSubmitLabel(activeForm?.title || "", Boolean(editingId))}
               </button>
             </div>
           </form>
@@ -25396,7 +25930,9 @@ export function WorkflowModuleView({
               </tbody>
             </table>
           </div>
-        </div>
+            </div>
+          </div>
+        )}
       </div>
 
       {labQueueOrderModalOpen && (

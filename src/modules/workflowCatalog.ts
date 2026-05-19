@@ -1,3 +1,8 @@
+import {
+  GENERATED_WORKFLOW_FORMS_BY_ID,
+  GENERATED_WORKFLOW_MODULES,
+} from "./workflowFormsDirectory";
+
 export type FieldType =
   | "text"
   | "number"
@@ -5394,7 +5399,17 @@ const withPatternMeta = (module: WorkflowModule): WorkflowModule => {
   };
 };
 
-export const WORKFLOW_MODULES: WorkflowModule[] = modules.map(withPatternMeta);
+const withGeneratedForms = (module: WorkflowModule): WorkflowModule => {
+  const generatedForms = GENERATED_WORKFLOW_FORMS_BY_ID[module.id];
+  return generatedForms ? { ...module, forms: generatedForms } : module;
+};
+
+const existingModuleIds = new Set(modules.map((module) => module.id));
+
+export const WORKFLOW_MODULES: WorkflowModule[] = [
+  ...modules.map(withPatternMeta).map(withGeneratedForms),
+  ...GENERATED_WORKFLOW_MODULES.filter((module) => !existingModuleIds.has(module.id)),
+];
 
 export const WORKFLOW_MODULE_BY_ID = WORKFLOW_MODULES.reduce<Record<number, WorkflowModule>>((acc, mod) => {
   acc[mod.id] = mod;

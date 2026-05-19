@@ -8,8 +8,9 @@
     "build": "tsc && vite build",
     "postinstall": "node scripts/patch-esbuild.cjs",
     "preview": "vite preview",
-    "tauri:clean": "cd src-tauri && cargo clean",
-    "tauri": "tauri"
+    "tauri:clean": "cd src-tauri && PATH=\"$HOME/.cargo/bin:$PATH\" cargo clean",
+    "tauri:doctor": "PATH=\"$HOME/.cargo/bin:$PATH\" tauri info",
+    "tauri": "PATH=\"$HOME/.cargo/bin:$PATH\" tauri"
   },
   "dependencies": {
     "@tauri-apps/api": "^2",

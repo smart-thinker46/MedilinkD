@@ -4,8 +4,18 @@
 
 From `hmis-platform/apps/desktop`:
 
+Install Linux/Tauri prerequisites on Kali/Debian/Ubuntu:
+
+```bash
+sudo apt update
+sudo apt install -y libwebkit2gtk-4.1-dev librsvg2-dev libayatana-appindicator3-dev libxdo-dev build-essential curl wget file libssl-dev
+```
+
+Rust/Cargo is also required. This project expects Cargo at `$HOME/.cargo/bin/cargo` when installed through rustup.
+
 ```bash
 npm install
+npm run tauri:doctor
 npm run tauri dev
 ```
 
@@ -68,4 +78,3 @@ GitHub Actions (`.github/workflows/release.yml`) will build for Windows/macOS/Li
 Notes:
 - Desktop apps do not update on "every code change" automatically. Users get updates when you publish a new version/release.
 - The updater endpoint is `releases/latest/download/latest.json`, so each new release becomes the next update.
-

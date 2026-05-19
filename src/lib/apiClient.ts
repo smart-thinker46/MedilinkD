@@ -1,6 +1,27 @@
-export const API_BASE_URL =
-  (import.meta as any).env?.VITE_API_BASE_URL || "http://localhost:3000";
 import { WORKFLOW_MODULES } from "../modules/workflowCatalog";
+
+export function normalizeBaseUrl(value: unknown, fallback = "") {
+  const first =
+    String(value || "")
+      .split(",")
+      .map((part) => part.trim())
+      .filter(Boolean)[0] || "";
+  const trimmed = first || fallback;
+  if (!trimmed) return "";
+  const withProtocol = /^https?:\/\//i.test(trimmed) ? trimmed : `http://${trimmed}`;
+  try {
+    const url = new URL(withProtocol);
+    if (url.username || url.password) return fallback;
+    return url.toString().replace(/\/+$/, "");
+  } catch {
+    return fallback;
+  }
+}
+
+export const API_BASE_URL = normalizeBaseUrl(
+  (import.meta as any).env?.VITE_API_BASE_URL,
+  "http://localhost:3000",
+);
 
 export const ACCESS_TOKEN_STORAGE_KEY = "hmis_access_token";
 export const REFRESH_TOKEN_STORAGE_KEY = "hmis_refresh_token";
@@ -124,7 +145,7 @@ export async function fetchLicenseStatus(facilityCode: string) {
   return body;
 }
 
-export async function activateLicense(payload: { facilityCode: string; licenseKey: string }) {
+export async function activateLicense(payload: { facilityCode?: string; licenseKey: string }) {
   const deviceId = getDeviceId();
   const deviceLabel = getDeviceLabel();
   const response = await fetch(`${API_BASE_URL}/license/activate`, {
@@ -232,6 +253,31 @@ export async function createFacility(payload: {
   const body = await parseJsonSafe(response);
   if (!response.ok) {
     throw new Error(toErrorMessage(body, "Facility creation failed"));
+  }
+  return body;
+}
+
+export async function completeFacilitySetup(formData: FormData) {
+  const response = await fetch(`${API_BASE_URL}/facilities/setup`, {
+    method: "POST",
+    body: formData,
+  });
+  const body = await parseJsonSafe(response);
+  if (!response.ok) {
+    throw new Error(toErrorMessage(body, "Setup could not be saved"));
+  }
+  return body;
+}
+
+export async function fetchFacilityBranding(facilityId: string) {
+  const id = String(facilityId || "").trim();
+  if (!id) {
+    throw new Error("Facility ID is required");
+  }
+  const response = await apiFetch(`/facilities/${encodeURIComponent(id)}/branding`);
+  const body = await parseJsonSafe(response);
+  if (!response.ok) {
+    throw new Error(toErrorMessage(body, "Facility profile could not be loaded"));
   }
   return body;
 }
@@ -5845,6 +5891,26 @@ export async function submitModuleRecord(input: WorkflowSubmitInput) {
       },
     });
 
+  const recordModuleAction = (mode: string, extra: Record<string, unknown> = {}) => {
+    const moduleDef = WORKFLOW_MODULES.find((workflowModule) => workflowModule.id === input.moduleId);
+    const formDef = moduleDef?.forms.find((workflowForm) => workflowForm.id === formId);
+    return post("/module-actions", {
+      module: moduleDef?.name || `Module ${input.moduleId}`,
+      action: formDef?.title || input.formId || "Workflow form submission",
+      data: input.formData,
+      context: {
+        mode,
+        moduleId: input.moduleId,
+        formId: input.formId || null,
+        patientId: input.patientId || null,
+        patientName: input.patientName || "",
+        patientPhone: input.patientPhone || null,
+        submittedAt: nowIso,
+        ...extra,
+      },
+    });
+  };
+
   const RCM_AUTO_CHARGE_MODULES = new Set<number>([2, 8, 9, 10, 11, 12, 21, 25, 36, 37, 38]);
   const RCM_SOURCE_BY_MODULE: Record<number, string> = {
     2: "IPD",
@@ -6213,6 +6279,12 @@ export async function submitModuleRecord(input: WorkflowSubmitInput) {
       return post("/tenant/patients", createPayload);
     },
     2: async () => {
+      if (formId === "admission" || formId === "discharge" || formId === "ward_transfer") {
+        return recordModuleAction("inpatient_workflow_action", {
+          source: "desktop_ipd_web_style_form",
+        });
+      }
+
       if (formId === "daily_care_plan") {
         const inpatientId = await resolveInpatientId();
         if (!inpatientId) {
@@ -6366,11 +6438,8 @@ export async function submitModuleRecord(input: WorkflowSubmitInput) {
       });
     },
     4: () =>
-      post("/appointments", {
-        patientId: input.patientId,
-        dateTime,
-        type: input.formData.type || "FOLLOW_UP",
-        status: "SCHEDULED",
+      recordModuleAction("appointment_workflow_action", {
+        source: "desktop_appointments_web_style_form",
       }),
     5: () =>
       logModuleEvent("module_5_bed_ward_management", {
@@ -9283,10 +9352,8 @@ export async function submitModuleRecord(input: WorkflowSubmitInput) {
       }
     } catch (error: any) {
       try {
-        const fallbackResponse = await logModuleEvent(`module_${input.moduleId}_submit_fallback`, {
+        const fallbackResponse = await recordModuleAction("fallback_after_primary_failure", {
           error: String(error?.message || "Unknown module submit error"),
-          formData: input.formData,
-          mode: "fallback_after_primary_failure",
         });
         const fallbackBody = await parseJsonSafe(fallbackResponse);
         if (!fallbackResponse.ok) {
@@ -9300,10 +9367,7 @@ export async function submitModuleRecord(input: WorkflowSubmitInput) {
       }
     }
   } else {
-    const fallbackResponse = await logModuleEvent(`module_${input.moduleId}_submit`, {
-      mode: "fallback",
-      formData: input.formData,
-    });
+    const fallbackResponse = await recordModuleAction("fallback");
     usedFallbackMode = true;
     body = await parseJsonSafe(fallbackResponse);
     if (!fallbackResponse.ok) {
