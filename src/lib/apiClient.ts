@@ -2968,10 +2968,13 @@ export async function fetchTenantUsers() {
 }
 
 export async function createTenantUser(payload: {
+  name?: string;
   email: string;
   password?: string;
   roleId?: string;
   roleName?: string;
+  moduleIds?: number[];
+  moduleNumericIds?: number[];
 }) {
   const res = await apiFetch('/tenant-users', {
     method: 'POST',
@@ -4084,6 +4087,19 @@ export async function createBed(payload: { wardId: string; bedNumber: string }) 
   const body = await parseJsonSafe(res);
   if (!res.ok) {
     throw new Error(toErrorMessage(body, 'Failed to create bed'));
+  }
+  return (body as any)?.data ?? body;
+}
+
+export async function updateBedStatus(id: string, status: string) {
+  const res = await apiFetch(`/beds/${encodeURIComponent(id)}/status`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ status }),
+  });
+  const body = await parseJsonSafe(res);
+  if (!res.ok) {
+    throw new Error(toErrorMessage(body, 'Failed to update bed status'));
   }
   return (body as any)?.data ?? body;
 }
@@ -6584,18 +6600,28 @@ export async function submitModuleRecord(input: WorkflowSubmitInput) {
         return post("/laboratory/request", {
           patientId: input.patientId,
           visitId: input.formData.visit_id || input.formData.visitId || undefined,
-          doctorId: input.formData.doctor_id || input.formData.doctorId || undefined,
+          doctorId:
+            input.formData.doctor_id ||
+            input.formData.doctorId ||
+            input.formData.ordering_doctor ||
+            undefined,
           testName:
             input.formData.test_name ||
+            input.formData.tests_requested ||
             input.formData.testType ||
             input.formData.test_type ||
             input.formData.test ||
             "General Lab",
           testCode: input.formData.test_code || undefined,
           testCategory: input.formData.test_category || undefined,
-          sampleType: input.formData.sample_type || undefined,
+          sampleType: input.formData.sample_type || input.formData.specimen_type || undefined,
           priority: input.formData.urgency || input.formData.priority || "ROUTINE",
-          clinicalNotes: input.formData.clinical_notes || note || undefined,
+          clinicalNotes:
+            input.formData.clinical_notes ||
+            input.formData.clinical_indication ||
+            input.formData.special_instructions ||
+            note ||
+            undefined,
           turnaroundHours: input.formData.turnaround_hours || undefined,
           testPrice: input.formData.test_price || undefined,
           insuranceType: input.formData.insurance_type || undefined,
@@ -6608,28 +6634,64 @@ export async function submitModuleRecord(input: WorkflowSubmitInput) {
           throw new Error("Lab request ID is required for sample collection.");
         }
         return post(`/laboratory/request/${encodeURIComponent(requestId)}/collect-sample`, {
-          sampleId: input.formData.sample_id || undefined,
-          sampleType: input.formData.sample_type || undefined,
-          sampleCondition: input.formData.sample_condition || undefined,
+          sampleId:
+            input.formData.sample_id ||
+            input.formData.specimen_barcode ||
+            input.formData.print_barcode_label ||
+            undefined,
+          sampleType: input.formData.sample_type || input.formData.specimen_type || undefined,
+          sampleCondition:
+            input.formData.sample_condition || input.formData.specimen_condition || undefined,
           storageLocation: input.formData.storage_location || undefined,
           collectionTime: input.formData.collection_time || undefined,
           collectedBy: input.formData.collected_by || undefined,
-          notes: input.formData.notes || undefined,
+          notes:
+            input.formData.notes ||
+            input.formData.tube_type ||
+            input.formData.volume_collected_ml ||
+            undefined,
         });
       }
 
       if (formId === "lab_result_entry") {
         return post("/laboratory/result", {
           requestId: input.formData.request_id || undefined,
-          measuredValue: input.formData.measured_value || undefined,
-          unit: input.formData.unit || undefined,
+          measuredValue:
+            input.formData.measured_value ||
+            input.formData.result_value ||
+            undefined,
+          unit: input.formData.unit || input.formData.result_unit || undefined,
           referenceRange: input.formData.reference_range || undefined,
-          resultFlag: input.formData.result_flag || undefined,
+          resultFlag:
+            input.formData.result_flag ||
+            input.formData.interpretation ||
+            input.formData.critical_value_alert ||
+            undefined,
           interpretationNotes:
-            input.formData.interpretation_notes || input.formData.technician_notes || undefined,
-          rawResult: input.formData.raw_result || input.formData.test_results || note || undefined,
-          criticalResult: asBool(input.formData.critical_result),
+            input.formData.interpretation_notes ||
+            input.formData.technician_notes ||
+            input.formData.analyser_id ||
+            undefined,
+          rawResult:
+            input.formData.raw_result ||
+            input.formData.test_results ||
+            input.formData.specimen_barcode ||
+            input.formData.analyte_name ||
+            note ||
+            undefined,
+          criticalResult:
+            asBool(input.formData.critical_result) ||
+            /critical|escalate/i.test(String(input.formData.critical_value_alert || "")),
           attachments: input.formData.result_scan ? [input.formData.result_scan] : [],
+        });
+      }
+
+      if (formId === "lab_quality_control") {
+        return recordModuleAction("laboratory_quality_control", {
+          instrument: input.formData.instrument || undefined,
+          testAnalyte: input.formData.test_analyte || undefined,
+          qcLevel: input.formData.qc_level || undefined,
+          qcResult: input.formData.qc_result || undefined,
         });
       }
 

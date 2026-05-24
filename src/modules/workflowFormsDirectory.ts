@@ -1029,7 +1029,7 @@ export const GENERATED_WORKFLOW_FORMS_BY_ID: Record<number, WorkflowForm[]> = {
       "fields": [
         {
           "key": "temperature_c",
-          "label": "Temperature (C)",
+          "label": "Temperature (°C)",
           "type": "number",
           "required": false,
           "note": "Body temperature - normal 36.1-37.2"
@@ -1106,7 +1106,7 @@ export const GENERATED_WORKFLOW_FORMS_BY_ID: Record<number, WorkflowForm[]> = {
         },
         {
           "key": "pain_score_0_10",
-          "label": "Pain score (0-10)",
+          "label": "Pain score (0–10)",
           "type": "text",
           "required": false,
           "note": "Numeric pain rating scale"
@@ -1288,7 +1288,7 @@ export const GENERATED_WORKFLOW_FORMS_BY_ID: Record<number, WorkflowForm[]> = {
         {
           "key": "nutritional_status",
           "label": "Nutritional status",
-          "type": "select",
+          "type": "text",
           "required": true,
           "options": [
             "Adequate",
@@ -2956,7 +2956,7 @@ export const GENERATED_WORKFLOW_FORMS_BY_ID: Record<number, WorkflowForm[]> = {
         },
         {
           "key": "temperature_c",
-          "label": "Temperature (C)",
+          "label": "Temperature (°C)",
           "type": "number",
           "required": true,
           "note": "Must be normal"
@@ -3280,7 +3280,7 @@ export const GENERATED_WORKFLOW_FORMS_BY_ID: Record<number, WorkflowForm[]> = {
         {
           "key": "treatment_given",
           "label": "Treatment given",
-          "type": "textarea",
+          "type": "text",
           "required": true,
           "note": "Emergency management steps"
         },
@@ -5753,7 +5753,7 @@ export const GENERATED_WORKFLOW_FORMS_BY_ID: Record<number, WorkflowForm[]> = {
         },
         {
           "key": "temperature_c",
-          "label": "Temperature (C)",
+          "label": "Temperature (°C)",
           "type": "number",
           "required": true,
           "note": "Body temperature"
@@ -6375,7 +6375,7 @@ export const GENERATED_WORKFLOW_FORMS_BY_ID: Record<number, WorkflowForm[]> = {
         },
         {
           "key": "temperature_c",
-          "label": "Temperature (C)",
+          "label": "Temperature (°C)",
           "type": "number",
           "required": true,
           "note": "Axillary or oral temperature"
@@ -8364,84 +8364,6 @@ export const GENERATED_WORKFLOW_FORMS_BY_ID: Record<number, WorkflowForm[]> = {
       ]
     }
   ],
-  "46": [
-    {
-      "id": "dashboard_widget_configuration",
-      "title": "Dashboard Widget Configuration Form",
-      "purpose": "Capture and save dashboard widget configuration form data.",
-      "fields": [
-        {
-          "key": "widget_type",
-          "label": "Widget type",
-          "type": "select",
-          "required": true,
-          "options": [
-            "KPI card",
-            "Line chart",
-            "Bar chart",
-            "Donut",
-            "Table",
-            "Alert list"
-          ],
-          "note": "KPI card | Line chart | Bar chart | Donut | Table | Alert list"
-        },
-        {
-          "key": "widget_title",
-          "label": "Widget title",
-          "type": "text",
-          "required": true,
-          "note": "Label displayed above the widget"
-        },
-        {
-          "key": "kpi_metrics",
-          "label": "KPI metrics",
-          "type": "select",
-          "required": true,
-          "note": "Select KPIs to display"
-        },
-        {
-          "key": "date_range",
-          "label": "Date range",
-          "type": "select",
-          "required": true,
-          "options": [
-            "Today",
-            "Week",
-            "Month",
-            "Quarter",
-            "Year",
-            "Custom"
-          ],
-          "note": "Today | Week | Month | Quarter | Year | Custom"
-        },
-        {
-          "key": "department_filter",
-          "label": "Department filter",
-          "type": "select",
-          "required": false,
-          "options": [
-            "All",
-            "Specific department"
-          ],
-          "note": "All | Specific department"
-        },
-        {
-          "key": "refresh_interval_sec",
-          "label": "Refresh interval (sec)",
-          "type": "number",
-          "required": true,
-          "note": "Auto-refresh frequency - 0 for no auto-refresh"
-        },
-        {
-          "key": "grid_position",
-          "label": "Grid position",
-          "type": "text",
-          "required": true,
-          "note": "Drag to position on dashboard grid"
-        }
-      ]
-    }
-  ],
   "47": [
     {
       "id": "workflow_definition",
@@ -8953,7 +8875,7 @@ export const GENERATED_WORKFLOW_FORMS_BY_ID: Record<number, WorkflowForm[]> = {
         },
         {
           "key": "temperature_c",
-          "label": "Temperature (C)",
+          "label": "Temperature (°C)",
           "type": "number",
           "required": true,
           "note": "Axillary temperature"
@@ -9016,7 +8938,7 @@ export const GENERATED_WORKFLOW_FORMS_BY_ID: Record<number, WorkflowForm[]> = {
         },
         {
           "key": "bilirubin_mol_l",
-          "label": "Bilirubin (mol/L)",
+          "label": "Bilirubin (µmol/L)",
           "type": "number",
           "required": false,
           "note": "Total serum bilirubin"
@@ -9104,7 +9026,7 @@ export const GENERATED_WORKFLOW_FORMS_BY_ID: Record<number, WorkflowForm[]> = {
         {
           "key": "received_at_time",
           "label": "Received at time",
-          "type": "datetime-local",
+          "type": "datetime",
           "required": true,
           "note": "Time body arrived in mortuary"
         },
@@ -9171,7 +9093,7 @@ export const GENERATED_WORKFLOW_FORMS_BY_ID: Record<number, WorkflowForm[]> = {
         {
           "key": "accompanying_documentation",
           "label": "Accompanying documentation",
-          "type": "checkbox",
+          "type": "text",
           "required": true,
           "note": "Death notification | Medical certificate | Police release"
         }
@@ -9212,28 +9134,28 @@ export const GENERATED_WORKFLOW_FORMS_BY_ID: Record<number, WorkflowForm[]> = {
         },
         {
           "key": "cause_ia_immediate_cause",
-          "label": "Cause Ia - Immediate cause",
+          "label": "Cause Ia — Immediate cause",
           "type": "text",
           "required": true,
           "note": "Disease directly causing death"
         },
         {
           "key": "cause_ib_antecedent_cause",
-          "label": "Cause Ib - Antecedent cause",
+          "label": "Cause Ib — Antecedent cause",
           "type": "text",
           "required": false,
           "note": "Disease leading to immediate cause"
         },
         {
           "key": "cause_ic_underlying_cause",
-          "label": "Cause Ic - Underlying cause",
+          "label": "Cause Ic — Underlying cause",
           "type": "text",
           "required": false,
           "note": "Disease leading to Ib"
         },
         {
           "key": "cause_ii_contributing_conditions",
-          "label": "Cause II - Contributing conditions",
+          "label": "Cause II — Contributing conditions",
           "type": "text",
           "required": false,
           "note": "Other conditions contributing to death"
@@ -9262,7 +9184,7 @@ export const GENERATED_WORKFLOW_FORMS_BY_ID: Record<number, WorkflowForm[]> = {
         {
           "key": "post_mortem_performed",
           "label": "Post-mortem performed",
-          "type": "select",
+          "type": "text",
           "required": true,
           "options": [
             "Yes",
@@ -9473,7 +9395,7 @@ export const GENERATED_WORKFLOW_FORMS_BY_ID: Record<number, WorkflowForm[]> = {
         {
           "key": "risk_type",
           "label": "Risk type",
-          "type": "select",
+          "type": "text",
           "required": true,
           "options": [
             "Readmission",
@@ -9599,7 +9521,7 @@ export const GENERATED_WORKFLOW_FORMS_BY_ID: Record<number, WorkflowForm[]> = {
         {
           "key": "attach_screenshot",
           "label": "Attach screenshot",
-          "type": "file",
+          "type": "text",
           "required": false,
           "note": "Screenshot or photo of the issue"
         }
@@ -9810,7 +9732,7 @@ export const GENERATED_WORKFLOW_FORMS_BY_ID: Record<number, WorkflowForm[]> = {
         {
           "key": "objective_measurements",
           "label": "Objective measurements",
-          "type": "select",
+          "type": "text",
           "required": true,
           "options": [
             "ROM per joint",
@@ -9822,7 +9744,7 @@ export const GENERATED_WORKFLOW_FORMS_BY_ID: Record<number, WorkflowForm[]> = {
         },
         {
           "key": "pain_score_0_10",
-          "label": "Pain score (0-10)",
+          "label": "Pain score (0–10)",
           "type": "text",
           "required": true,
           "note": "Current pain level"
@@ -9900,7 +9822,7 @@ export const GENERATED_WORKFLOW_FORMS_BY_ID: Record<number, WorkflowForm[]> = {
         {
           "key": "treatment_given",
           "label": "Treatment given",
-          "type": "select",
+          "type": "text",
           "required": true,
           "options": [
             "Modalities: TENS",
@@ -10039,7 +9961,7 @@ export const GENERATED_WORKFLOW_FORMS_BY_ID: Record<number, WorkflowForm[]> = {
         {
           "key": "risk_category",
           "label": "Risk category",
-          "type": "select",
+          "type": "text",
           "required": true,
           "options": [
             "Low",
@@ -10098,7 +10020,7 @@ export const GENERATED_WORKFLOW_FORMS_BY_ID: Record<number, WorkflowForm[]> = {
         {
           "key": "clinical_signs_of_malnutrition",
           "label": "Clinical signs of malnutrition",
-          "type": "checkbox",
+          "type": "text",
           "required": false,
           "note": "Oedema | Muscle wasting | Hair loss | Skin changes | Angular stomatitis"
         },
@@ -10506,7 +10428,7 @@ export const GENERATED_WORKFLOW_FORMS_BY_ID: Record<number, WorkflowForm[]> = {
         },
         {
           "key": "temperature_c",
-          "label": "Temperature (C)",
+          "label": "Temperature (°C)",
           "type": "text",
           "required": true,
           "note": "Auto-read from machine - typically 134C"
@@ -10632,7 +10554,7 @@ export const GENERATED_WORKFLOW_FORMS_BY_ID: Record<number, WorkflowForm[]> = {
         {
           "key": "by_cadre",
           "label": "By cadre",
-          "type": "select",
+          "type": "text",
           "required": false,
           "options": [
             "Nurses",
@@ -10833,7 +10755,7 @@ export const GENERATED_WORKFLOW_FORMS_BY_ID: Record<number, WorkflowForm[]> = {
         {
           "key": "services_provided",
           "label": "Services provided",
-          "type": "checkbox",
+          "type": "text",
           "required": true,
           "note": "Health education | Screening | Referral | Immunisation | FP counselling"
         },
@@ -11137,7 +11059,7 @@ export const GENERATED_WORKFLOW_FORMS_BY_ID: Record<number, WorkflowForm[]> = {
         {
           "key": "treatment_given",
           "label": "Treatment given",
-          "type": "textarea",
+          "type": "text",
           "required": true,
           "note": "Interventions performed at receiving facility"
         },
@@ -11964,7 +11886,7 @@ export const GENERATED_WORKFLOW_FORMS_BY_ID: Record<number, WorkflowForm[]> = {
         {
           "key": "rca_team_members",
           "label": "RCA team members",
-          "type": "select",
+          "type": "text",
           "required": true,
           "note": "All members of the investigation team"
         },
@@ -11985,14 +11907,14 @@ export const GENERATED_WORKFLOW_FORMS_BY_ID: Record<number, WorkflowForm[]> = {
         {
           "key": "event_timeline",
           "label": "Event timeline",
-          "type": "time",
+          "type": "text",
           "required": true,
           "note": "Chronological sequence of events - time, event, person"
         },
         {
           "key": "contributing_factors",
           "label": "Contributing factors",
-          "type": "select",
+          "type": "text",
           "required": true,
           "options": [
             "Per category: Patient",
@@ -12062,7 +11984,7 @@ export const GENERATED_WORKFLOW_FORMS_BY_ID: Record<number, WorkflowForm[]> = {
         {
           "key": "audit_period",
           "label": "Audit period",
-          "type": "date",
+          "type": "text",
           "required": true,
           "note": "Data collection period"
         },
@@ -12152,7 +12074,7 @@ export const GENERATED_WORKFLOW_FORMS_BY_ID: Record<number, WorkflowForm[]> = {
         {
           "key": "evidence_documents",
           "label": "Evidence documents",
-          "type": "file",
+          "type": "text",
           "required": false,
           "note": "Upload supporting documents"
         },
@@ -12252,7 +12174,7 @@ export const GENERATED_WORKFLOW_FORMS_BY_ID: Record<number, WorkflowForm[]> = {
         {
           "key": "nutritional_status",
           "label": "Nutritional status",
-          "type": "select",
+          "type": "text",
           "required": true,
           "options": [
             "Normal",
@@ -12386,14 +12308,14 @@ export const GENERATED_WORKFLOW_FORMS_BY_ID: Record<number, WorkflowForm[]> = {
         {
           "key": "danger_signs",
           "label": "Danger signs",
-          "type": "checkbox",
+          "type": "text",
           "required": true,
           "note": "Cannot feed | Vomits everything | Convulsions | Lethargic/unconscious"
         },
         {
           "key": "main_symptoms",
           "label": "Main symptoms",
-          "type": "checkbox",
+          "type": "text",
           "required": true,
           "note": "Cough | Diarrhoea | Fever | Ear problem | Malnutrition/anaemia"
         },
@@ -12484,7 +12406,7 @@ export const GENERATED_WORKFLOW_FORMS_BY_ID: Record<number, WorkflowForm[]> = {
         {
           "key": "services_required",
           "label": "Services required",
-          "type": "checkbox",
+          "type": "text",
           "required": true,
           "note": "Wound care | Medication | Physiotherapy | Palliative | Monitoring | Dialysis"
         },
@@ -12567,7 +12489,7 @@ export const GENERATED_WORKFLOW_FORMS_BY_ID: Record<number, WorkflowForm[]> = {
         {
           "key": "vital_signs",
           "label": "Vital signs",
-          "type": "select",
+          "type": "text",
           "required": true,
           "options": [
             "BP",
@@ -12609,7 +12531,7 @@ export const GENERATED_WORKFLOW_FORMS_BY_ID: Record<number, WorkflowForm[]> = {
         {
           "key": "escalation_required",
           "label": "Escalation required",
-          "type": "select",
+          "type": "text",
           "required": true,
           "options": [
             "Yes - needs hospital",
@@ -12769,7 +12691,7 @@ export const GENERATED_WORKFLOW_FORMS_BY_ID: Record<number, WorkflowForm[]> = {
         {
           "key": "screening_passed",
           "label": "Screening passed",
-          "type": "select",
+          "type": "text",
           "required": true,
           "options": [
             "Yes - enrol",
@@ -12855,7 +12777,7 @@ export const GENERATED_WORKFLOW_FORMS_BY_ID: Record<number, WorkflowForm[]> = {
         {
           "key": "is_serious",
           "label": "Is serious",
-          "type": "select",
+          "type": "text",
           "required": true,
           "options": [
             "Yes (SAE)",
@@ -12866,7 +12788,7 @@ export const GENERATED_WORKFLOW_FORMS_BY_ID: Record<number, WorkflowForm[]> = {
         {
           "key": "sae_criteria_met",
           "label": "SAE criteria met",
-          "type": "checkbox",
+          "type": "text",
           "required": false,
           "note": "Death | Life-threatening | Hospitalisation | Disability | Congenital"
         },
@@ -12914,7 +12836,7 @@ export const GENERATED_WORKFLOW_FORMS_BY_ID: Record<number, WorkflowForm[]> = {
         {
           "key": "reported_to_sponsor",
           "label": "Reported to sponsor",
-          "type": "datetime-local",
+          "type": "datetime",
           "required": false,
           "note": "When SAE was reported to study sponsor - required within 24h for SAEs"
         }
@@ -13418,7 +13340,7 @@ export const GENERATED_WORKFLOW_MODULES: WorkflowModule[] = [
           },
           {
             "key": "temperature_c",
-            "label": "Temperature (C)",
+            "label": "Temperature (°C)",
             "type": "number",
             "required": true,
             "note": "Axillary temperature"
@@ -13481,7 +13403,7 @@ export const GENERATED_WORKFLOW_MODULES: WorkflowModule[] = [
           },
           {
             "key": "bilirubin_mol_l",
-            "label": "Bilirubin (mol/L)",
+            "label": "Bilirubin (µmol/L)",
             "type": "number",
             "required": false,
             "note": "Total serum bilirubin"
@@ -13585,7 +13507,7 @@ export const GENERATED_WORKFLOW_MODULES: WorkflowModule[] = [
           {
             "key": "received_at_time",
             "label": "Received at time",
-            "type": "datetime-local",
+            "type": "datetime",
             "required": true,
             "note": "Time body arrived in mortuary"
           },
@@ -13652,7 +13574,7 @@ export const GENERATED_WORKFLOW_MODULES: WorkflowModule[] = [
           {
             "key": "accompanying_documentation",
             "label": "Accompanying documentation",
-            "type": "checkbox",
+            "type": "text",
             "required": true,
             "note": "Death notification | Medical certificate | Police release"
           }
@@ -13693,28 +13615,28 @@ export const GENERATED_WORKFLOW_MODULES: WorkflowModule[] = [
           },
           {
             "key": "cause_ia_immediate_cause",
-            "label": "Cause Ia - Immediate cause",
+            "label": "Cause Ia — Immediate cause",
             "type": "text",
             "required": true,
             "note": "Disease directly causing death"
           },
           {
             "key": "cause_ib_antecedent_cause",
-            "label": "Cause Ib - Antecedent cause",
+            "label": "Cause Ib — Antecedent cause",
             "type": "text",
             "required": false,
             "note": "Disease leading to immediate cause"
           },
           {
             "key": "cause_ic_underlying_cause",
-            "label": "Cause Ic - Underlying cause",
+            "label": "Cause Ic — Underlying cause",
             "type": "text",
             "required": false,
             "note": "Disease leading to Ib"
           },
           {
             "key": "cause_ii_contributing_conditions",
-            "label": "Cause II - Contributing conditions",
+            "label": "Cause II — Contributing conditions",
             "type": "text",
             "required": false,
             "note": "Other conditions contributing to death"
@@ -13743,7 +13665,7 @@ export const GENERATED_WORKFLOW_MODULES: WorkflowModule[] = [
           {
             "key": "post_mortem_performed",
             "label": "Post-mortem performed",
-            "type": "select",
+            "type": "text",
             "required": true,
             "options": [
               "Yes",
@@ -13986,7 +13908,7 @@ export const GENERATED_WORKFLOW_MODULES: WorkflowModule[] = [
           {
             "key": "risk_type",
             "label": "Risk type",
-            "type": "select",
+            "type": "text",
             "required": true,
             "options": [
               "Readmission",
@@ -14128,7 +14050,7 @@ export const GENERATED_WORKFLOW_MODULES: WorkflowModule[] = [
           {
             "key": "attach_screenshot",
             "label": "Attach screenshot",
-            "type": "file",
+            "type": "text",
             "required": false,
             "note": "Screenshot or photo of the issue"
           }
@@ -14371,7 +14293,7 @@ export const GENERATED_WORKFLOW_MODULES: WorkflowModule[] = [
           {
             "key": "objective_measurements",
             "label": "Objective measurements",
-            "type": "select",
+            "type": "text",
             "required": true,
             "options": [
               "ROM per joint",
@@ -14383,7 +14305,7 @@ export const GENERATED_WORKFLOW_MODULES: WorkflowModule[] = [
           },
           {
             "key": "pain_score_0_10",
-            "label": "Pain score (0-10)",
+            "label": "Pain score (0–10)",
             "type": "text",
             "required": true,
             "note": "Current pain level"
@@ -14461,7 +14383,7 @@ export const GENERATED_WORKFLOW_MODULES: WorkflowModule[] = [
           {
             "key": "treatment_given",
             "label": "Treatment given",
-            "type": "select",
+            "type": "text",
             "required": true,
             "options": [
               "Modalities: TENS",
@@ -14616,7 +14538,7 @@ export const GENERATED_WORKFLOW_MODULES: WorkflowModule[] = [
           {
             "key": "risk_category",
             "label": "Risk category",
-            "type": "select",
+            "type": "text",
             "required": true,
             "options": [
               "Low",
@@ -14675,7 +14597,7 @@ export const GENERATED_WORKFLOW_MODULES: WorkflowModule[] = [
           {
             "key": "clinical_signs_of_malnutrition",
             "label": "Clinical signs of malnutrition",
-            "type": "checkbox",
+            "type": "text",
             "required": false,
             "note": "Oedema | Muscle wasting | Hair loss | Skin changes | Angular stomatitis"
           },
@@ -15115,7 +15037,7 @@ export const GENERATED_WORKFLOW_MODULES: WorkflowModule[] = [
           },
           {
             "key": "temperature_c",
-            "label": "Temperature (C)",
+            "label": "Temperature (°C)",
             "type": "text",
             "required": true,
             "note": "Auto-read from machine - typically 134C"
@@ -15241,7 +15163,7 @@ export const GENERATED_WORKFLOW_MODULES: WorkflowModule[] = [
           {
             "key": "by_cadre",
             "label": "By cadre",
-            "type": "select",
+            "type": "text",
             "required": false,
             "options": [
               "Nurses",
@@ -15458,7 +15380,7 @@ export const GENERATED_WORKFLOW_MODULES: WorkflowModule[] = [
           {
             "key": "services_provided",
             "label": "Services provided",
-            "type": "checkbox",
+            "type": "text",
             "required": true,
             "note": "Health education | Screening | Referral | Immunisation | FP counselling"
           },
@@ -15794,7 +15716,7 @@ export const GENERATED_WORKFLOW_MODULES: WorkflowModule[] = [
           {
             "key": "treatment_given",
             "label": "Treatment given",
-            "type": "textarea",
+            "type": "text",
             "required": true,
             "note": "Interventions performed at receiving facility"
           },
@@ -16701,7 +16623,7 @@ export const GENERATED_WORKFLOW_MODULES: WorkflowModule[] = [
           {
             "key": "rca_team_members",
             "label": "RCA team members",
-            "type": "select",
+            "type": "text",
             "required": true,
             "note": "All members of the investigation team"
           },
@@ -16722,14 +16644,14 @@ export const GENERATED_WORKFLOW_MODULES: WorkflowModule[] = [
           {
             "key": "event_timeline",
             "label": "Event timeline",
-            "type": "time",
+            "type": "text",
             "required": true,
             "note": "Chronological sequence of events - time, event, person"
           },
           {
             "key": "contributing_factors",
             "label": "Contributing factors",
-            "type": "select",
+            "type": "text",
             "required": true,
             "options": [
               "Per category: Patient",
@@ -16799,7 +16721,7 @@ export const GENERATED_WORKFLOW_MODULES: WorkflowModule[] = [
           {
             "key": "audit_period",
             "label": "Audit period",
-            "type": "date",
+            "type": "text",
             "required": true,
             "note": "Data collection period"
           },
@@ -16889,7 +16811,7 @@ export const GENERATED_WORKFLOW_MODULES: WorkflowModule[] = [
           {
             "key": "evidence_documents",
             "label": "Evidence documents",
-            "type": "file",
+            "type": "text",
             "required": false,
             "note": "Upload supporting documents"
           },
@@ -17005,7 +16927,7 @@ export const GENERATED_WORKFLOW_MODULES: WorkflowModule[] = [
           {
             "key": "nutritional_status",
             "label": "Nutritional status",
-            "type": "select",
+            "type": "text",
             "required": true,
             "options": [
               "Normal",
@@ -17139,14 +17061,14 @@ export const GENERATED_WORKFLOW_MODULES: WorkflowModule[] = [
           {
             "key": "danger_signs",
             "label": "Danger signs",
-            "type": "checkbox",
+            "type": "text",
             "required": true,
             "note": "Cannot feed | Vomits everything | Convulsions | Lethargic/unconscious"
           },
           {
             "key": "main_symptoms",
             "label": "Main symptoms",
-            "type": "checkbox",
+            "type": "text",
             "required": true,
             "note": "Cough | Diarrhoea | Fever | Ear problem | Malnutrition/anaemia"
           },
@@ -17253,7 +17175,7 @@ export const GENERATED_WORKFLOW_MODULES: WorkflowModule[] = [
           {
             "key": "services_required",
             "label": "Services required",
-            "type": "checkbox",
+            "type": "text",
             "required": true,
             "note": "Wound care | Medication | Physiotherapy | Palliative | Monitoring | Dialysis"
           },
@@ -17336,7 +17258,7 @@ export const GENERATED_WORKFLOW_MODULES: WorkflowModule[] = [
           {
             "key": "vital_signs",
             "label": "Vital signs",
-            "type": "select",
+            "type": "text",
             "required": true,
             "options": [
               "BP",
@@ -17378,7 +17300,7 @@ export const GENERATED_WORKFLOW_MODULES: WorkflowModule[] = [
           {
             "key": "escalation_required",
             "label": "Escalation required",
-            "type": "select",
+            "type": "text",
             "required": true,
             "options": [
               "Yes - needs hospital",
@@ -17554,7 +17476,7 @@ export const GENERATED_WORKFLOW_MODULES: WorkflowModule[] = [
           {
             "key": "screening_passed",
             "label": "Screening passed",
-            "type": "select",
+            "type": "text",
             "required": true,
             "options": [
               "Yes - enrol",
@@ -17640,7 +17562,7 @@ export const GENERATED_WORKFLOW_MODULES: WorkflowModule[] = [
           {
             "key": "is_serious",
             "label": "Is serious",
-            "type": "select",
+            "type": "text",
             "required": true,
             "options": [
               "Yes (SAE)",
@@ -17651,7 +17573,7 @@ export const GENERATED_WORKFLOW_MODULES: WorkflowModule[] = [
           {
             "key": "sae_criteria_met",
             "label": "SAE criteria met",
-            "type": "checkbox",
+            "type": "text",
             "required": false,
             "note": "Death | Life-threatening | Hospitalisation | Disability | Congenital"
           },
@@ -17699,7 +17621,7 @@ export const GENERATED_WORKFLOW_MODULES: WorkflowModule[] = [
           {
             "key": "reported_to_sponsor",
             "label": "Reported to sponsor",
-            "type": "datetime-local",
+            "type": "datetime",
             "required": false,
             "note": "When SAE was reported to study sponsor - required within 24h for SAEs"
           }

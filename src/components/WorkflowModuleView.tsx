@@ -13,7 +13,6 @@ import {
   createHrRecord,
   createManualHrAttendance,
   createMortuaryRecord,
-  createBed,
   createPharmacyPosSale,
   createInventoryMedicine,
   createFacilityAsset,
@@ -64,10 +63,8 @@ import {
   fetchStrategicGoals,
   fetchStrategicForecastingModels,
   fetchStrategicScenarioSimulations,
-  fetchStrategicExecutiveNotes,
   fetchOrchestrationOwnershipRules,
   fetchOrchestrationEvents,
-  processOrchestrationPending,
   fetchEmrPatientSummary,
   fetchEmrPatientTimeline,
   fetchEmrOverview,
@@ -97,7 +94,6 @@ import {
   fetchRadiologySchedules,
   fetchRadiologyStudies,
   fetchNursingDashboard,
-  fetchNursingPatientBoard,
   fetchTelemedicineDashboard,
   fetchTelemedicineSessions,
   fetchEmergencyDashboard,
@@ -121,7 +117,6 @@ import {
   fetchPharmacyPrescriptions,
   fetchOtBookings,
   fetchOtDashboard,
-  fetchOtTimeline,
   fetchBloodBankDashboard,
   fetchBloodBankStock,
   fetchBloodBankDonors,
@@ -223,6 +218,7 @@ import {
   fetchStaff,
   fetchVisits,
   fetchWards,
+  updateBedStatus,
   generateHrPayroll,
   requestHrLeave,
   resetTenantUserPassword,
@@ -610,6 +606,12 @@ const MODULES_WITHOUT_PATIENT_SEARCH = new Set<number>([
   45, // Cost Accounting & Department Profitability
   46, // Strategic Planning & Executive Dashboard
   47, // System Orchestration Architecture
+  57, // Document Management
+  58, // SMS & WhatsApp Messaging
+  61, // Biomedical Equipment
+  62, // Governance & Safety Controls
+  63, // Operations & Vendor Support
+  64, // Migration
 ]);
 
 function loadRegistrationSnapshots(): Record<string, Record<string, string>> {
@@ -1316,9 +1318,13 @@ function WorkflowActionIcon({
     | "form"
     | "calendar"
     | "settings"
+    | "search"
     | "cancel"
     | "triage"
-    | "consultation";
+    | "consultation"
+    | "heart"
+    | "baby"
+    | "activity";
   className?: string;
 }) {
   const common = {
@@ -1331,6 +1337,14 @@ function WorkflowActionIcon({
     strokeLinejoin: "round" as const,
     "aria-hidden": true,
   };
+  if (type === "search") {
+    return (
+      <svg {...common}>
+        <circle cx="11" cy="11" r="8" />
+        <path d="m21 21-4.3-4.3" />
+      </svg>
+    );
+  }
   if (type === "admission") {
     return (
       <svg {...common}>
@@ -1417,6 +1431,32 @@ function WorkflowActionIcon({
       </svg>
     );
   }
+  if (type === "heart") {
+    return (
+      <svg {...common}>
+        <path d="M19 14c1.5-1.4 3-3.2 3-5.5A4.5 4.5 0 0 0 14 5.6L12 8l-2-2.4A4.5 4.5 0 0 0 2 8.5C2 10.8 3.5 12.6 5 14l7 6 7-6z" />
+      </svg>
+    );
+  }
+  if (type === "baby") {
+    return (
+      <svg {...common}>
+        <path d="M9 12h.01" />
+        <path d="M15 12h.01" />
+        <path d="M10 16c.6.4 1.3.6 2 .6s1.4-.2 2-.6" />
+        <path d="M12 3a6 6 0 0 0-6 6v3a6 6 0 0 0 12 0V9a6 6 0 0 0-6-6z" />
+        <path d="M18 9c1.7.2 3 1.6 3 3.3 0 1.4-.8 2.6-2 3.1" />
+        <path d="M6 9c-1.7.2-3 1.6-3 3.3 0 1.4.8 2.6 2 3.1" />
+      </svg>
+    );
+  }
+  if (type === "activity") {
+    return (
+      <svg {...common}>
+        <path d="M22 12h-4l-3 8-6-16-3 8H2" />
+      </svg>
+    );
+  }
   return (
     <svg {...common}>
       <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
@@ -1444,11 +1484,23 @@ export function WorkflowModuleView({
   const isOpdModule = module.id === 36;
   const isLaboratoryModule = module.id === 8;
   const isRadiologyModule = module.id === 9;
-  const isPharmacyModule = module.id === 10;
+  const isPharmacyModule = module.id === 10 || module.id === 35;
   const isOtModule = module.id === 11;
   const isBloodBankModule = module.id === 12;
   const isBillingModule = module.id === 13;
   const isAccountingModule = module.id === 39;
+  const isWorkforcePlanningModule = module.id === 40;
+  const isIctModule =
+    module.id === 41 ||
+    /\bICT\b|Information\s*&\s*Communication|Security Operations/i.test(
+      String(module.name || ""),
+    );
+  const isNursingAdminModule =
+    module.id === 42 || /Nursing Administration|Matron/i.test(String(module.name || ""));
+  const isMedicalDirectorModule =
+    module.id === 43 || /Medical Director|Head Doctor/i.test(String(module.name || ""));
+  const isRevenueCycleModule =
+    module.id === 44 || /Revenue Cycle/i.test(String(module.name || ""));
   const isCostAccountingModule = module.id === 45;
   const isStrategicPlanningModule = module.id === 46;
   const isOrchestrationModule = module.id === 47;
@@ -1460,6 +1512,7 @@ export function WorkflowModuleView({
   const isOpdFlowModule = isTriageModule || isOpdModule;
   const isInventoryModule = module.id === 15;
   const isHrModule = module.id === 16;
+  const isDoctorManagementModule = module.id === 17;
   const isNursingModule = module.id === 7;
   const isTelemedicineModule = module.id === 21;
   const isMaternityModule = module.id === 37;
@@ -1469,6 +1522,33 @@ export function WorkflowModuleView({
   const isPosModule = module.id === 35;
   const isMortuaryModule = module.id === 27;
   const isQueueManagementModule = module.id === 28;
+  const isNicuModule = module.id === 51 || /Neonatal ICU|\bNICU\b/i.test(String(module.name || ""));
+  const isPhysioModule =
+    module.id === 49 || /Physiotherapy|Rehabilitation/i.test(String(module.name || ""));
+  const isNutritionModule =
+    module.id === 50 || /Nutrition|Dietetics/i.test(String(module.name || ""));
+  const isDentalModule =
+    module.id === 52 || /^Dental$/i.test(String(module.name || ""));
+  const isInfectionControlModule =
+    module.id === 53 || /Infection Control|CSSD/i.test(String(module.name || ""));
+  const isCommunityHealthModule =
+    module.id === 56 || /Community Health|\bCHW\b/i.test(String(module.name || ""));
+  const isConsentModule =
+    module.id === 54 || /Consent Management/i.test(String(module.name || ""));
+  const isReferralManagementModule =
+    module.id === 55 || /Inter-Facility Referral|Referral Management/i.test(String(module.name || ""));
+  const isDocumentManagementModule =
+    module.id === 57 || /Document Management/i.test(String(module.name || ""));
+  const isMessagingModule =
+    module.id === 58 || /SMS & WhatsApp|Messaging|Notifications/i.test(String(module.name || ""));
+  const isBiomedicalModule =
+    module.id === 61 || /Biomedical Equipment/i.test(String(module.name || ""));
+  const isHomeCareModule =
+    module.id === 60 || /Home Care/i.test(String(module.name || ""));
+  const isClinicalResearchModule =
+    module.id === 32 || /Clinical Research/i.test(String(module.name || ""));
+  const isCdssModule =
+    module.id === 48 || /Clinical Decision Support|\bCDSS\b/i.test(String(module.name || ""));
   const isReportingModule = module.id === 19;
   const isBlockchainModule = module.id === 22;
   const isHelpdeskModule = module.id === 29;
@@ -1525,14 +1605,15 @@ export function WorkflowModuleView({
   const [serverSearchPatients, setServerSearchPatients] = useState<Patient[]>([]);
   const [nurseOptions, setNurseOptions] = useState<string[]>([]);
   const [wards, setWards] = useState<any[]>([]);
-  const [showCreateWard, setShowCreateWard] = useState(false);
-  const [newWardName, setNewWardName] = useState("");
-  const [newWardType, setNewWardType] = useState<"MEN" | "WOMEN" | "BOTH">("BOTH");
-  const [newWardBeds, setNewWardBeds] = useState("10");
   const [wardLoading, setWardLoading] = useState(false);
-  const [wardSaving, setWardSaving] = useState(false);
-  const [selectedWardMap, setSelectedWardMap] = useState<any | null>(null);
-  const [wardMapMode, setWardMapMode] = useState<"compact" | "detailed">("compact");
+  const [wardBedFilter, setWardBedFilter] = useState<"all" | "empty" | "occupied">("all");
+  const [wardViewMode, setWardViewMode] = useState<"map" | "table">("map");
+  const [collapsedWardMap, setCollapsedWardMap] = useState<Record<string, boolean>>({});
+  const [editingWardBed, setEditingWardBed] = useState<{ ward: any; bed: any } | null>(null);
+  const [bedStatusValue, setBedStatusValue] = useState("Available");
+  const [bedHousekeepingNotes, setBedHousekeepingNotes] = useState("");
+  const [bedReadyTime, setBedReadyTime] = useState("");
+  const [bedStatusSaving, setBedStatusSaving] = useState(false);
   const [wardSearch, setWardSearch] = useState("");
   const [ehrLoading, setEhrLoading] = useState(false);
   const [ehrError, setEhrError] = useState("");
@@ -1547,7 +1628,7 @@ export function WorkflowModuleView({
   const [ehrDateTo, setEhrDateTo] = useState("");
   const [ehrMinPaid, setEhrMinPaid] = useState("");
   const [ehrMaxPaid, setEhrMaxPaid] = useState("");
-  const [ehrRefreshTick, setEhrRefreshTick] = useState(0);
+  const [ehrRefreshTick] = useState(0);
   const [ipdLoading, setIpdLoading] = useState(false);
   const [ipdError, setIpdError] = useState("");
   const [ipdDashboard, setIpdDashboard] = useState<any | null>(null);
@@ -1590,7 +1671,6 @@ export function WorkflowModuleView({
   const [nursingLoading, setNursingLoading] = useState(false);
   const [nursingError, setNursingError] = useState("");
   const [nursingDashboard, setNursingDashboard] = useState<any | null>(null);
-  const [nursingPatientBoard, setNursingPatientBoard] = useState<any | null>(null);
   const [teleLoading, setTeleLoading] = useState(false);
   const [teleError, setTeleError] = useState("");
   const [teleDashboard, setTeleDashboard] = useState<any | null>(null);
@@ -1611,9 +1691,9 @@ export function WorkflowModuleView({
   const [icuAdmissions, setIcuAdmissions] = useState<any[]>([]);
   const [icuAlerts, setIcuAlerts] = useState<any[]>([]);
   const [selectedIcuAdmissionId, setSelectedIcuAdmissionId] = useState("");
-  const [selectedIcuTimeline, setSelectedIcuTimeline] = useState<any | null>(null);
+  const [, setSelectedIcuTimeline] = useState<any | null>(null);
   const [icuSearch, setIcuSearch] = useState("");
-  const [icuStatusFilter, setIcuStatusFilter] = useState("ALL");
+  const [icuStatusFilter] = useState("ALL");
   const [maternityLoading, setMaternityLoading] = useState(false);
   const [maternityError, setMaternityError] = useState("");
   const [maternityDashboard, setMaternityDashboard] = useState<any | null>(null);
@@ -1627,6 +1707,7 @@ export function WorkflowModuleView({
   const [labError, setLabError] = useState("");
   const [labDashboard, setLabDashboard] = useState<any | null>(null);
   const [labRequests, setLabRequests] = useState<any[]>([]);
+  const [labStatusFilter, setLabStatusFilter] = useState("ALL");
   const [radLoading, setRadLoading] = useState(false);
   const [radError, setRadError] = useState("");
   const [radDashboard, setRadDashboard] = useState<any | null>(null);
@@ -1637,27 +1718,24 @@ export function WorkflowModuleView({
   const [radAlerts, setRadAlerts] = useState<any[]>([]);
   const [radStudies, setRadStudies] = useState<any[]>([]);
   const [radStatusFilter, setRadStatusFilter] = useState("ALL");
-  const [radUrgencyFilter, setRadUrgencyFilter] = useState("ALL");
+  const [radUrgencyFilter] = useState("ALL");
   const [radSearch, setRadSearch] = useState("");
   const [otLoading, setOtLoading] = useState(false);
   const [otError, setOtError] = useState("");
   const [otDashboard, setOtDashboard] = useState<any | null>(null);
   const [otBookings, setOtBookings] = useState<any[]>([]);
-  const [otStatusFilter, setOtStatusFilter] = useState("ALL");
-  const [otPriorityFilter, setOtPriorityFilter] = useState("ALL");
   const [otSearch, setOtSearch] = useState("");
-  const [selectedOtBookingId, setSelectedOtBookingId] = useState("");
-  const [selectedOtTimeline, setSelectedOtTimeline] = useState<any | null>(null);
   const [bloodLoading, setBloodLoading] = useState(false);
   const [bloodError, setBloodError] = useState("");
   const [bloodDashboard, setBloodDashboard] = useState<any | null>(null);
   const [bloodStock, setBloodStock] = useState<any[]>([]);
   const [bloodDonors, setBloodDonors] = useState<any[]>([]);
   const [bloodRequests, setBloodRequests] = useState<any[]>([]);
-  const [bloodIssues, setBloodIssues] = useState<any[]>([]);
-  const [bloodTransfusions, setBloodTransfusions] = useState<any[]>([]);
+  const [, setBloodIssues] = useState<any[]>([]);
+  const [, setBloodTransfusions] = useState<any[]>([]);
   const [bloodReactions, setBloodReactions] = useState<any[]>([]);
   const [bloodMovements, setBloodMovements] = useState<any[]>([]);
+  const [bloodSearch, setBloodSearch] = useState("");
   const [billingLoading, setBillingLoading] = useState(false);
   const [billingError, setBillingError] = useState("");
   const [billingDashboard, setBillingDashboard] = useState<any | null>(null);
@@ -1676,11 +1754,11 @@ export function WorkflowModuleView({
   const [accDashboard, setAccDashboard] = useState<any | null>(null);
   const [accAccounts, setAccAccounts] = useState<any[]>([]);
   const [accJournals, setAccJournals] = useState<any[]>([]);
-  const [accApAging, setAccApAging] = useState<any | null>(null);
-  const [accArSummary, setAccArSummary] = useState<any | null>(null);
-  const [accBudgets, setAccBudgets] = useState<any[]>([]);
+  const [, setAccApAging] = useState<any | null>(null);
+  const [, setAccArSummary] = useState<any | null>(null);
+  const [, setAccBudgets] = useState<any[]>([]);
   const [accBankAccounts, setAccBankAccounts] = useState<any[]>([]);
-  const [accBankTransactions, setAccBankTransactions] = useState<any[]>([]);
+  const [, setAccBankTransactions] = useState<any[]>([]);
   const [accTrialBalance, setAccTrialBalance] = useState<any | null>(null);
   const [accProfitLoss, setAccProfitLoss] = useState<any | null>(null);
   const [accBalanceSheet, setAccBalanceSheet] = useState<any | null>(null);
@@ -1705,19 +1783,12 @@ export function WorkflowModuleView({
   const [strategicGoals, setStrategicGoalsState] = useState<any[]>([]);
   const [strategicForecasts, setStrategicForecasts] = useState<any[]>([]);
   const [strategicScenarios, setStrategicScenarios] = useState<any[]>([]);
-  const [strategicExecutiveNotes, setStrategicExecutiveNotes] = useState<any[]>([]);
   const [strategicFromDate, setStrategicFromDate] = useState("");
   const [strategicToDate, setStrategicToDate] = useState("");
   const [orchestrationLoading, setOrchestrationLoading] = useState(false);
   const [orchestrationError, setOrchestrationError] = useState("");
   const [orchestrationOwnershipRules, setOrchestrationOwnershipRules] = useState<Record<string, string>>({});
   const [orchestrationEvents, setOrchestrationEvents] = useState<any[]>([]);
-  const [orchestrationFacilityFilter, setOrchestrationFacilityFilter] = useState("");
-  const [orchestrationEventTypeFilter, setOrchestrationEventTypeFilter] = useState("");
-  const [orchestrationStatusFilter, setOrchestrationStatusFilter] = useState("ALL");
-  const [orchestrationLimit, setOrchestrationLimit] = useState("200");
-  const [orchestrationProcessing, setOrchestrationProcessing] = useState(false);
-  const [orchestrationProcessResult, setOrchestrationProcessResult] = useState<any | null>(null);
   const [insLoading, setInsLoading] = useState(false);
   const [insError, setInsError] = useState("");
   const [insDashboard, setInsDashboard] = useState<any | null>(null);
@@ -1752,7 +1823,8 @@ export function WorkflowModuleView({
   const [rxDashboard, setRxDashboard] = useState<any | null>(null);
   const [rxCatalog, setRxCatalog] = useState<any[]>([]);
   const [rxPrescriptions, setRxPrescriptions] = useState<any[]>([]);
-  const [rxDispenses, setRxDispenses] = useState<any[]>([]);
+  const [, setRxDispenses] = useState<any[]>([]);
+  const [rxSearch, setRxSearch] = useState("");
   const [bcLoading, setBcLoading] = useState(false);
   const [bcError, setBcError] = useState("");
   const [bcDashboard, setBcDashboard] = useState<any | null>(null);
@@ -1794,6 +1866,9 @@ export function WorkflowModuleView({
   const [invIssueSupplyQty, setInvIssueSupplyQty] = useState("");
   const [invIssueSupplyReason, setInvIssueSupplyReason] = useState("");
   const [invOrderSupplierId, setInvOrderSupplierId] = useState("");
+  const [invSearch, setInvSearch] = useState("");
+  const [invCategoryFilter, setInvCategoryFilter] = useState("ALL");
+  const [invSupplierFilter, setInvSupplierFilter] = useState("ALL");
   const [posLoading, setPosLoading] = useState(false);
   const [posError, setPosError] = useState("");
   const [posInventory, setPosInventory] = useState<any[]>([]);
@@ -2029,23 +2104,24 @@ export function WorkflowModuleView({
   const [reportingDashboard, setReportingDashboard] = useState<any | null>(null);
   const [reportingTrends, setReportingTrends] = useState<any[]>([]);
   const [reportingDrilldownRows, setReportingDrilldownRows] = useState<any[]>([]);
-  const [reportingFromDate, setReportingFromDate] = useState("");
-  const [reportingToDate, setReportingToDate] = useState("");
-  const [reportingDepartmentId, setReportingDepartmentId] = useState("");
-  const [reportingDoctorId, setReportingDoctorId] = useState("");
-  const [reportingBucket, setReportingBucket] = useState<"day" | "week">("day");
-  const [reportingMetric, setReportingMetric] = useState<"visits" | "revenue">("revenue");
-  const [reportingGroupBy, setReportingGroupBy] = useState<"facility" | "department" | "doctor">("department");
-  const [reportingReportType, setReportingReportType] = useState<
+  const [reportingFromDate] = useState("");
+  const [reportingToDate] = useState("");
+  const [reportingDepartmentId] = useState("");
+  const [reportingDoctorId] = useState("");
+  const [reportingBucket] = useState<"day" | "week">("day");
+  const [reportingMetric] = useState<"visits" | "revenue">("revenue");
+  const [reportingGroupBy] = useState<"facility" | "department" | "doctor">("department");
+  const [reportingReportType] = useState<
     "clinical" | "financial" | "pharmacy" | "hr" | "mortuary" | "inventory" | "regulatory"
   >("financial");
-  const [reportingFacilityId, setReportingFacilityId] = useState("");
+  const [reportingFacilityId] = useState("");
   const [reportingExporting, setReportingExporting] = useState(false);
   const [reportingExportInfo, setReportingExportInfo] = useState<{
     filename: string;
     rowsCount: number;
     generatedAt: string;
   } | null>(null);
+  const [reportingSearch, setReportingSearch] = useState("");
   const [aiLoading, setAiLoading] = useState(false);
   const [aiError, setAiError] = useState("");
   const [aiDashboard, setAiDashboard] = useState<any | null>(null);
@@ -2252,6 +2328,10 @@ export function WorkflowModuleView({
   const [hrRecordNotes, setHrRecordNotes] = useState("");
   const [hrRecordTags, setHrRecordTags] = useState("");
   const [hrRecordTypeFilter, setHrRecordTypeFilter] = useState<"ALL" | HrRecordType>("ALL");
+  const [hrDepartmentFilter, setHrDepartmentFilter] = useState("ALL");
+  const [hrStaffStatusFilter, setHrStaffStatusFilter] = useState("ALL");
+  const [hrAccountStatusFilter, setHrAccountStatusFilter] = useState("ALL");
+  const [hrContractStatusFilter, setHrContractStatusFilter] = useState("ALL");
   const [hrCredentialAlertDays, setHrCredentialAlertDays] = useState("60");
   const [hrEditingRecordId, setHrEditingRecordId] = useState("");
   const [hrTransferStaffId, setHrTransferStaffId] = useState("");
@@ -2376,13 +2456,728 @@ export function WorkflowModuleView({
     if (normalized.includes("referral")) return "opd-mode-referral";
     return "";
   };
+  const getLaboratoryFormIconType = (value: string): "activity" | "triage" | "form" => {
+    const normalized = String(value || "").toLowerCase();
+    if (normalized.includes("sample")) return "triage";
+    if (normalized.includes("result")) return "activity";
+    return "form";
+  };
+  const getLaboratoryFormModeClass = (value: string): string => {
+    const normalized = String(value || "").toLowerCase();
+    if (normalized.includes("sample")) return "laboratory-mode-sample";
+    if (normalized.includes("verification") || normalized.includes("release")) {
+      return "laboratory-mode-verification";
+    }
+    if (normalized.includes("result")) return "laboratory-mode-result";
+    return "laboratory-mode-default";
+  };
+  const getRadiologyFormIconType = (value: string): "calendar" | "settings" | "activity" | "triage" | "form" => {
+    const normalized = String(value || "").toLowerCase();
+    if (normalized.includes("schedule")) return "calendar";
+    if (normalized.includes("modality") || normalized.includes("metadata")) return "settings";
+    if (normalized.includes("report") || normalized.includes("status")) return "activity";
+    if (normalized.includes("critical") || normalized.includes("alert")) return "triage";
+    return "form";
+  };
+  const getRadiologyFormModeClass = (value: string): string => {
+    const normalized = String(value || "").toLowerCase();
+    if (normalized.includes("schedule")) return "radiology-mode-schedule";
+    if (normalized.includes("report")) return "radiology-mode-report";
+    if (normalized.includes("critical") || normalized.includes("alert")) return "radiology-mode-alert";
+    if (normalized.includes("modality") || normalized.includes("metadata")) return "radiology-mode-setup";
+    return "radiology-mode-default";
+  };
+  const getPharmacyFormIconType = (value: string): "activity" | "triage" | "form" => {
+    const normalized = String(value || "").toLowerCase();
+    if (normalized.includes("review") || normalized.includes("safety")) return "triage";
+    if (normalized.includes("dispens") || normalized.includes("billing") || normalized.includes("sale") || normalized.includes("retail")) return "activity";
+    return "form";
+  };
+  const getPharmacyFormModeClass = (value: string): string => {
+    const normalized = String(value || "").toLowerCase();
+    if (normalized.includes("review") || normalized.includes("safety")) return "pharmacy-mode-review";
+    if (normalized.includes("dispens") || normalized.includes("billing")) return "pharmacy-mode-dispense";
+    return "pharmacy-mode-default";
+  };
+  const getOtFormIconType = (
+    value: string,
+  ): "calendar" | "triage" | "activity" | "settings" | "form" => {
+    const normalized = String(value || "").toLowerCase();
+    if (normalized.includes("booking")) return "calendar";
+    if (normalized.includes("pre") || normalized.includes("safety") || normalized.includes("checklist")) return "triage";
+    if (normalized.includes("intra") || normalized.includes("post") || normalized.includes("anesthesia")) return "activity";
+    if (normalized.includes("team") || normalized.includes("inventory")) return "settings";
+    return "form";
+  };
+  const getOtFormModeClass = (value: string): string => {
+    const normalized = String(value || "").toLowerCase();
+    if (normalized.includes("booking")) return "ot-mode-booking";
+    if (normalized.includes("pre") || normalized.includes("safety") || normalized.includes("checklist")) return "ot-mode-safety";
+    if (normalized.includes("complication")) return "ot-mode-complication";
+    if (normalized.includes("intra") || normalized.includes("post") || normalized.includes("anesthesia")) return "ot-mode-clinical";
+    return "ot-mode-default";
+  };
+  const getBloodBankFormIconType = (
+    value: string,
+  ): "admission" | "activity" | "triage" | "settings" | "transfer" | "cancel" | "form" => {
+    const normalized = String(value || "").toLowerCase();
+    if (normalized.includes("donor registration")) return "admission";
+    if (normalized.includes("donation") || normalized.includes("collection")) return "activity";
+    if (normalized.includes("request")) return "triage";
+    if (normalized.includes("crossmatch") || normalized.includes("compatibility")) return "settings";
+    if (normalized.includes("issue")) return "transfer";
+    if (normalized.includes("transfusion record")) return "activity";
+    if (normalized.includes("reaction")) return "triage";
+    if (normalized.includes("expiry") || normalized.includes("discard")) return "cancel";
+    return "form";
+  };
+  const getBloodBankFormModeClass = (value: string): string => {
+    const normalized = String(value || "").toLowerCase();
+    if (normalized.includes("donor")) return "blood-mode-donor";
+    if (normalized.includes("request") || normalized.includes("crossmatch") || normalized.includes("compatibility")) {
+      return "blood-mode-request";
+    }
+    if (normalized.includes("issue") || normalized.includes("transfusion")) return "blood-mode-issue";
+    if (normalized.includes("reaction") || normalized.includes("expiry") || normalized.includes("discard")) {
+      return "blood-mode-risk";
+    }
+    return "blood-mode-default";
+  };
+  const getMaternityFormIconType = (
+    value: string,
+  ): "heart" | "triage" | "admission" | "baby" | "activity" | "form" => {
+    const normalized = String(value || "").toLowerCase();
+    if (normalized.includes("pregnancy")) return "heart";
+    if (normalized.includes("anc")) return "triage";
+    if (normalized.includes("delivery") || normalized.includes("birth")) return "admission";
+    if (normalized.includes("newborn")) return "baby";
+    if (normalized.includes("partograph")) return "activity";
+    return "form";
+  };
+  const getMaternityFormModeClass = (value: string): string => {
+    const normalized = String(value || "").toLowerCase();
+    if (normalized.includes("pregnancy")) return "maternity-mode-pregnancy";
+    if (normalized.includes("anc")) return "maternity-mode-anc";
+    if (normalized.includes("delivery") || normalized.includes("birth")) return "maternity-mode-delivery";
+    if (normalized.includes("newborn")) return "maternity-mode-newborn";
+    if (normalized.includes("partograph")) return "maternity-mode-partograph";
+    return "";
+  };
+  const getAccountingFormIconType = (
+    value: string,
+  ): "form" | "settings" | "activity" => {
+    const normalized = String(value || "").toLowerCase();
+    if (normalized.includes("journal")) return "form";
+    if (normalized.includes("chart")) return "settings";
+    if (normalized.includes("bank")) return "activity";
+    return "form";
+  };
+  const getAccountingFormModeClass = (value: string): string => {
+    const normalized = String(value || "").toLowerCase();
+    if (normalized.includes("journal")) return "accounting-mode-journal";
+    if (normalized.includes("chart")) return "accounting-mode-chart";
+    if (normalized.includes("bank")) return "accounting-mode-bank";
+    return "";
+  };
+  const getEhrFormModeClass = (value: string): string => {
+    const normalized = String(value || "").toLowerCase();
+    if (normalized.includes("diagnosis")) return "ehr-mode-diagnosis";
+    if (normalized.includes("vital")) return "ehr-mode-vitals";
+    if (normalized.includes("progress")) return "ehr-mode-progress";
+    if (normalized.includes("order")) return "ehr-mode-order";
+    return "ehr-mode-encounter";
+  };
+  const getIcuFormIconType = (
+    value: string,
+  ): "admission" | "triage" | "activity" | "form" => {
+    const normalized = String(value || "").toLowerCase();
+    if (normalized.includes("admission")) return "admission";
+    if (normalized.includes("daily")) return "triage";
+    if (normalized.includes("ventilator")) return "activity";
+    return "form";
+  };
+  const getIcuFormModeClass = (value: string): string => {
+    const normalized = String(value || "").toLowerCase();
+    if (normalized.includes("admission")) return "icu-mode-admission";
+    if (normalized.includes("daily")) return "icu-mode-daily";
+    if (normalized.includes("ventilator")) return "icu-mode-ventilator";
+    return "";
+  };
+  const getNicuFormIconType = (
+    value: string,
+  ): "admission" | "triage" | "baby" | "activity" | "form" => {
+    const normalized = String(value || "").toLowerCase();
+    if (normalized.includes("admission")) return "admission";
+    if (normalized.includes("daily") || normalized.includes("record")) return "triage";
+    if (normalized.includes("feeding") || normalized.includes("phototherapy")) return "activity";
+    if (normalized.includes("baby") || normalized.includes("newborn")) return "baby";
+    return "form";
+  };
+  const getNicuFormModeClass = (value: string): string => {
+    const normalized = String(value || "").toLowerCase();
+    if (normalized.includes("admission")) return "nicu-mode-admission";
+    if (normalized.includes("daily") || normalized.includes("record")) return "nicu-mode-daily";
+    return "nicu-mode-default";
+  };
+  const getPhysioFormIconType = (value: string): "triage" | "calendar" | "activity" | "form" => {
+    const normalized = String(value || "").toLowerCase();
+    if (normalized.includes("assessment")) return "triage";
+    if (normalized.includes("session")) return "calendar";
+    if (normalized.includes("exercise") || normalized.includes("treatment")) return "activity";
+    return "form";
+  };
+  const getPhysioFormModeClass = (value: string): string => {
+    const normalized = String(value || "").toLowerCase();
+    if (normalized.includes("session")) return "physio-mode-session";
+    return "physio-mode-assessment";
+  };
+  const getNutritionFormIconType = (value: string): "triage" | "activity" | "settings" | "form" => {
+    const normalized = String(value || "").toLowerCase();
+    if (normalized.includes("screen")) return "triage";
+    if (normalized.includes("assessment")) return "activity";
+    if (normalized.includes("care") || normalized.includes("plan")) return "settings";
+    return "form";
+  };
+  const getNutritionFormModeClass = (value: string): string => {
+    const normalized = String(value || "").toLowerCase();
+    if (normalized.includes("assessment")) return "nutrition-mode-assessment";
+    if (normalized.includes("care") || normalized.includes("plan")) return "nutrition-mode-plan";
+    return "nutrition-mode-screening";
+  };
+  const getInfectionFormIconType = (value: string): "triage" | "settings" | "activity" | "form" => {
+    const normalized = String(value || "").toLowerCase();
+    if (normalized.includes("hai") || normalized.includes("surveillance")) return "triage";
+    if (normalized.includes("cssd") || normalized.includes("steril")) return "settings";
+    if (normalized.includes("hygiene") || normalized.includes("audit")) return "activity";
+    return "form";
+  };
+  const getInfectionFormModeClass = (value: string): string => {
+    const normalized = String(value || "").toLowerCase();
+    if (normalized.includes("cssd") || normalized.includes("steril")) return "infection-mode-cssd";
+    if (normalized.includes("hygiene") || normalized.includes("audit")) return "infection-mode-audit";
+    return "infection-mode-hai";
+  };
+  const getCommunityFormIconType = (value: string): "triage" | "settings" | "activity" | "form" => {
+    const normalized = String(value || "").toLowerCase();
+    if (normalized.includes("home") || normalized.includes("visit")) return "triage";
+    if (normalized.includes("household")) return "settings";
+    if (normalized.includes("registration") || normalized.includes("chw")) return "activity";
+    return "form";
+  };
+  const getCommunityFormModeClass = (value: string): string => {
+    const normalized = String(value || "").toLowerCase();
+    if (normalized.includes("household")) return "community-mode-household";
+    if (normalized.includes("home") || normalized.includes("visit")) return "community-mode-visit";
+    return "community-mode-registration";
+  };
+  const getConsentFormIconType = (value: string): "heart" | "settings" | "form" => {
+    const normalized = String(value || "").toLowerCase();
+    if (normalized.includes("upload") || normalized.includes("scan")) return "settings";
+    if (normalized.includes("consent") || normalized.includes("informed")) return "heart";
+    return "form";
+  };
+  const getConsentFormModeClass = (value: string): string => {
+    const normalized = String(value || "").toLowerCase();
+    if (normalized.includes("upload") || normalized.includes("scan")) return "consent-mode-upload";
+    return "consent-mode-capture";
+  };
+  const getReferralFormIconType = (value: string): "transfer" | "activity" | "form" => {
+    const normalized = String(value || "").toLowerCase();
+    if (normalized.includes("feedback") || normalized.includes("track")) return "activity";
+    if (normalized.includes("referral") || normalized.includes("outgoing")) return "transfer";
+    return "form";
+  };
+  const getReferralFormModeClass = (value: string): string => {
+    const normalized = String(value || "").toLowerCase();
+    if (normalized.includes("feedback") || normalized.includes("track")) return "referral-mode-feedback";
+    return "referral-mode-new";
+  };
+  const getDocumentFormIconType = (value: string): "settings" | "activity" | "form" => {
+    const normalized = String(value || "").toLowerCase();
+    if (normalized.includes("ocr")) return "activity";
+    if (normalized.includes("upload") || normalized.includes("document")) return "settings";
+    return "form";
+  };
+  const getDocumentFormModeClass = (value: string): string => {
+    const normalized = String(value || "").toLowerCase();
+    if (normalized.includes("ocr")) return "document-mode-ocr";
+    return "document-mode-upload";
+  };
+  const getMessagingFormIconType = (value: string): "settings" | "activity" | "form" => {
+    const normalized = String(value || "").toLowerCase();
+    if (normalized.includes("manual") || normalized.includes("reminder") || normalized.includes("send")) return "activity";
+    if (normalized.includes("template") || normalized.includes("campaign")) return "settings";
+    return "form";
+  };
+  const getMessagingFormModeClass = (value: string): string => {
+    const normalized = String(value || "").toLowerCase();
+    if (normalized.includes("manual") || normalized.includes("reminder") || normalized.includes("send")) return "messaging-mode-reminder";
+    return "messaging-mode-campaign";
+  };
+  const getBiomedicalFormIconType = (value: string): "settings" | "activity" | "form" => {
+    const normalized = String(value || "").toLowerCase();
+    if (normalized.includes("calibration") || normalized.includes("maintenance") || normalized.includes("log")) return "activity";
+    if (normalized.includes("device") || normalized.includes("registration")) return "settings";
+    return "form";
+  };
+  const getBiomedicalFormModeClass = (value: string): string => {
+    const normalized = String(value || "").toLowerCase();
+    if (normalized.includes("calibration") || normalized.includes("maintenance") || normalized.includes("log")) return "biomedical-mode-maintenance";
+    return "biomedical-mode-device";
+  };
+  const getHomeCareFormIconType = (value: string): "calendar" | "activity" | "form" => {
+    const normalized = String(value || "").toLowerCase();
+    if (normalized.includes("visit") || normalized.includes("note") || normalized.includes("record")) return "activity";
+    if (normalized.includes("plan") || normalized.includes("schedule")) return "calendar";
+    return "form";
+  };
+  const getHomeCareFormModeClass = (value: string): string => {
+    const normalized = String(value || "").toLowerCase();
+    if (normalized.includes("visit") || normalized.includes("note") || normalized.includes("record")) return "home-care-mode-note";
+    return "home-care-mode-schedule";
+  };
+  const getClinicalResearchFormIconType = (value: string): "settings" | "activity" | "triage" | "form" => {
+    const normalized = String(value || "").toLowerCase();
+    if (normalized.includes("adverse") || normalized.includes("event")) return "triage";
+    if (normalized.includes("enrol") || normalized.includes("patient")) return "activity";
+    if (normalized.includes("protocol") || normalized.includes("registration")) return "settings";
+    return "form";
+  };
+  const getClinicalResearchFormModeClass = (value: string): string => {
+    const normalized = String(value || "").toLowerCase();
+    if (normalized.includes("adverse") || normalized.includes("event")) return "clinical-research-mode-event";
+    if (normalized.includes("enrol") || normalized.includes("patient")) return "clinical-research-mode-enrolment";
+    return "clinical-research-mode-protocol";
+  };
+  const getCdssFormIconType = (value: string): "settings" | "triage" | "form" => {
+    const normalized = String(value || "").toLowerCase();
+    if (normalized.includes("override") || normalized.includes("alert")) return "triage";
+    if (normalized.includes("rule") || normalized.includes("configuration")) return "settings";
+    return "form";
+  };
+  const getCdssFormModeClass = (value: string): string => {
+    const normalized = String(value || "").toLowerCase();
+    if (normalized.includes("override") || normalized.includes("alert")) return "cdss-mode-override";
+    return "cdss-mode-rule";
+  };
+  const getIctFormIconType = (value: string): "triage" | "settings" | "form" => {
+    const normalized = String(value || "").toLowerCase();
+    if (normalized.includes("incident")) return "triage";
+    if (normalized.includes("configuration") || normalized.includes("change")) return "settings";
+    return "form";
+  };
+  const getIctFormModeClass = (value: string): string => {
+    const normalized = String(value || "").toLowerCase();
+    if (normalized.includes("incident")) return "ict-mode-incident";
+    if (normalized.includes("configuration") || normalized.includes("change")) return "ict-mode-config";
+    return "";
+  };
+  const getMatronFormIconType = (value: string): "calendar" | "triage" | "form" => {
+    const normalized = String(value || "").toLowerCase();
+    if (normalized.includes("roster")) return "calendar";
+    if (normalized.includes("competency")) return "triage";
+    return "form";
+  };
+  const getMatronFormModeClass = (value: string): string => {
+    const normalized = String(value || "").toLowerCase();
+    if (normalized.includes("roster")) return "matron-mode-roster";
+    if (normalized.includes("competency")) return "matron-mode-competency";
+    return "";
+  };
+  const getMedicalDirectorFormIconType = (
+    value: string,
+  ): "admission" | "triage" | "activity" | "settings" | "consultation" | "form" => {
+    const normalized = String(value || "").toLowerCase();
+    if (normalized.includes("profile") || normalized.includes("privilege")) return "consultation";
+    if (normalized.includes("protocol")) return "settings";
+    if (normalized.includes("mortality") || normalized.includes("complication") || normalized.includes("m&m")) return "triage";
+    if (normalized.includes("risk") || normalized.includes("critical")) return "activity";
+    if (normalized.includes("drug")) return "admission";
+    if (normalized.includes("performance") || normalized.includes("outcome")) return "activity";
+    return "form";
+  };
+  const getMedicalDirectorFormModeClass = (value: string): string => {
+    const normalized = String(value || "").toLowerCase();
+    if (normalized.includes("profile") || normalized.includes("privilege")) return "medical-director-mode-doctor";
+    if (normalized.includes("protocol")) return "medical-director-mode-protocol";
+    if (normalized.includes("mortality") || normalized.includes("complication") || normalized.includes("m&m")) return "medical-director-mode-review";
+    if (normalized.includes("risk") || normalized.includes("critical")) return "medical-director-mode-alert";
+    if (normalized.includes("drug")) return "medical-director-mode-drug";
+    if (normalized.includes("performance") || normalized.includes("outcome")) return "medical-director-mode-score";
+    return "";
+  };
+  const getRevenueCycleFormIconType = (value: string): "triage" | "discharge" | "form" => {
+    const normalized = String(value || "").toLowerCase();
+    if (normalized.includes("denial")) return "triage";
+    if (normalized.includes("write-off") || normalized.includes("write off") || normalized.includes("writeoff")) {
+      return "discharge";
+    }
+    return "form";
+  };
+  const getRevenueCycleFormModeClass = (value: string): string => {
+    const normalized = String(value || "").toLowerCase();
+    if (normalized.includes("denial")) return "revenue-mode-denial";
+    if (normalized.includes("write-off") || normalized.includes("write off") || normalized.includes("writeoff")) {
+      return "revenue-mode-writeoff";
+    }
+    return "";
+  };
+  const getCostAccountingFormIconType = (value: string): "settings" | "transfer" | "form" => {
+    const normalized = String(value || "").toLowerCase();
+    if (normalized.includes("centre") || normalized.includes("center")) return "settings";
+    if (normalized.includes("allocation") || normalized.includes("overhead")) return "transfer";
+    return "form";
+  };
+  const getCostAccountingFormModeClass = (value: string): string => {
+    const normalized = String(value || "").toLowerCase();
+    if (normalized.includes("centre") || normalized.includes("center")) return "cost-mode-centre";
+    if (normalized.includes("allocation") || normalized.includes("overhead")) return "cost-mode-allocation";
+    return "";
+  };
+  const getInventoryFormModeClass = (value: string): string => {
+    const normalized = String(value || "").toLowerCase();
+    if (normalized.includes("supplier") || normalized.includes("vendor")) return "inventory-mode-supplier";
+    if (normalized.includes("requisition")) return "inventory-mode-requisition";
+    if (normalized.includes("order")) return "inventory-mode-order";
+    if (normalized.includes("received") || normalized.includes("grn")) return "inventory-mode-receive";
+    if (normalized.includes("count")) return "inventory-mode-count";
+    return "inventory-mode-stock";
+  };
+  const getHrFormModeClass = (value: string): string => {
+    const normalized = String(value || "").toLowerCase();
+    if (normalized.includes("leave")) return "hr-mode-leave";
+    if (normalized.includes("payroll")) return "hr-mode-payroll";
+    if (normalized.includes("performance")) return "hr-mode-performance";
+    if (normalized.includes("disciplinary")) return "hr-mode-disciplinary";
+    return "hr-mode-employee";
+  };
+  const getDoctorFormModeClass = (value: string): string => {
+    const normalized = String(value || "").toLowerCase();
+    if (normalized.includes("schedule") || normalized.includes("call")) return "doctor-mode-schedule";
+    return "doctor-mode-profile";
+  };
+  const getDoctorActionIcon = (value: string): "consultation" | "calendar" | "form" => {
+    const normalized = String(value || "").toLowerCase();
+    if (normalized.includes("schedule") || normalized.includes("call")) return "calendar";
+    if (normalized.includes("profile") || normalized.includes("doctor")) return "consultation";
+    return "form";
+  };
+  const getFacilityFormModeClass = (value: string): string => {
+    const normalized = String(value || "").toLowerCase();
+    if (normalized.includes("request")) return "facility-mode-request";
+    if (normalized.includes("record")) return "facility-mode-record";
+    return "facility-mode-asset";
+  };
+  const getFacilityActionIcon = (value: string): "settings" | "triage" | "activity" | "form" => {
+    const normalized = String(value || "").toLowerCase();
+    if (normalized.includes("request")) return "triage";
+    if (normalized.includes("record")) return "activity";
+    if (normalized.includes("asset")) return "settings";
+    return "form";
+  };
+  const getExecutiveFormIconType = (
+    value: string,
+  ): "settings" | "activity" | "transfer" | "triage" | "form" => {
+    const normalized = String(value || "").toLowerCase();
+    if (normalized.includes("widget")) return "settings";
+    if (normalized.includes("kpi") || normalized.includes("target")) return "activity";
+    if (normalized.includes("goal")) return "settings";
+    if (normalized.includes("ranking")) return "activity";
+    if (normalized.includes("forecast")) return "activity";
+    if (normalized.includes("scenario")) return "transfer";
+    if (normalized.includes("risk")) return "triage";
+    return "form";
+  };
+  const getExecutiveFormModeClass = (value: string): string => {
+    const normalized = String(value || "").toLowerCase();
+    if (normalized.includes("widget")) return "executive-mode-widget";
+    if (normalized.includes("kpi")) return "executive-mode-kpi";
+    if (normalized.includes("goal")) return "executive-mode-goal";
+    if (normalized.includes("ranking")) return "executive-mode-ranking";
+    if (normalized.includes("forecast")) return "executive-mode-forecast";
+    if (normalized.includes("scenario")) return "executive-mode-scenario";
+    if (normalized.includes("risk")) return "executive-mode-risk";
+    if (normalized.includes("note")) return "executive-mode-note";
+    return "";
+  };
+  const getOrchestrationFormIconType = (value: string): "settings" | "activity" | "transfer" | "form" => {
+    const normalized = String(value || "").toLowerCase();
+    if (normalized.includes("publish")) return "activity";
+    if (normalized.includes("process")) return "settings";
+    if (normalized.includes("reprocess")) return "transfer";
+    if (normalized.includes("query")) return "settings";
+    return "form";
+  };
+  const getOrchestrationFormModeClass = (value: string): string => {
+    const normalized = String(value || "").toLowerCase();
+    if (normalized.includes("publish")) return "orchestration-mode-publish";
+    if (normalized.includes("process")) return "orchestration-mode-process";
+    if (normalized.includes("reprocess")) return "orchestration-mode-reprocess";
+    if (normalized.includes("query")) return "orchestration-mode-query";
+    return "";
+  };
+  const getReportingFormModeClass = (value: string): string => {
+    const normalized = String(value || "").toLowerCase();
+    if (normalized.includes("builder") || normalized.includes("template")) return "reporting-mode-builder";
+    if (normalized.includes("run") || normalized.includes("parameter")) return "reporting-mode-run";
+    return "";
+  };
+  const getWardFormIconType = (value: string): "settings" | "refresh" | "form" => {
+    const normalized = String(value || "").toLowerCase();
+    if (normalized.includes("configuration")) return "settings";
+    if (normalized.includes("status")) return "refresh";
+    return "form";
+  };
+  const getWardFormModeClass = (value: string): string => {
+    const normalized = String(value || "").toLowerCase();
+    if (normalized.includes("configuration")) return "ward-mode-config";
+    if (normalized.includes("status")) return "ward-mode-status";
+    return "";
+  };
   const getWorkflowSubmitLabel = (value: string, isEditing: boolean): string => {
     const normalized = String(value || "").toLowerCase();
     const prefix = isEditing ? "Update" : "";
+    if (isWardModule) {
+      if (normalized.includes("configuration")) return isEditing ? "Update Ward Configuration" : "Save Ward Configuration";
+      if (normalized.includes("status")) return isEditing ? "Update Bed Status" : "Update Bed Status";
+      return isEditing ? "Update Ward Record" : "Save Ward Record";
+    }
+    if (isStrategicPlanningModule) {
+      if (normalized.includes("widget")) return isEditing ? "Update Widget" : "Save Widget";
+      if (normalized.includes("kpi target") || normalized.includes("target")) {
+        return isEditing ? "Update KPI Target" : "Save KPI Target";
+      }
+      if (normalized.includes("kpi")) return isEditing ? "Update KPI" : "Save KPI";
+      if (normalized.includes("goal")) return isEditing ? "Update Strategic Goal" : "Save Strategic Goal";
+      if (normalized.includes("ranking")) return isEditing ? "Update Ranking" : "Save Ranking";
+      if (normalized.includes("forecast")) return isEditing ? "Update Forecast" : "Save Forecast";
+      if (normalized.includes("scenario")) return isEditing ? "Update Scenario" : "Save Scenario";
+      if (normalized.includes("risk")) return isEditing ? "Update Risk Alert" : "Submit Risk Alert";
+      if (normalized.includes("note")) return isEditing ? "Update Executive Note" : "Save Executive Note";
+      return isEditing ? "Update Executive Record" : "Save Executive Record";
+    }
+    if (isOrchestrationModule) {
+      if (normalized.includes("publish")) return isEditing ? "Update Event" : "Publish Event";
+      if (normalized.includes("process pending")) return isEditing ? "Update Processing Request" : "Process Pending";
+      if (normalized.includes("reprocess")) return isEditing ? "Update Reprocess Request" : "Reprocess Event";
+      if (normalized.includes("query")) return isEditing ? "Update Query" : "Query Events";
+      return isEditing ? "Update Orchestration Record" : "Save Orchestration Record";
+    }
+    if (isReportingModule) {
+      if (normalized.includes("builder") || normalized.includes("template")) {
+        return isEditing ? "Update Report Template" : "Save Report Template";
+      }
+      if (normalized.includes("run") || normalized.includes("parameter")) {
+        return isEditing ? "Update Report Run" : "Generate Report";
+      }
+      if (normalized.includes("export")) return isEditing ? "Update Export" : "Export Report";
+      return isEditing ? "Update Reporting Setup" : "Save Reporting Setup";
+    }
+    if (module.id === 6) {
+      if (normalized.includes("encounter")) return isEditing ? "Update Encounter" : "Save Encounter";
+      if (normalized.includes("diagnosis")) return isEditing ? "Update Diagnosis" : "Save Diagnosis";
+      if (normalized.includes("vital")) return isEditing ? "Update Vital Signs" : "Save Vital Signs";
+      if (normalized.includes("progress")) return isEditing ? "Update Progress Note" : "Save Progress Note";
+      if (normalized.includes("order")) return isEditing ? "Update Clinical Order" : "Create Clinical Order";
+      return isEditing ? "Update EMR Record" : "Save EMR Record";
+    }
+    if (isAccountingModule) {
+      if (normalized.includes("journal")) return isEditing ? "Update Journal Entry" : "Post Journal Entry";
+      if (normalized.includes("chart")) return isEditing ? "Update Account" : "Save Account";
+      if (normalized.includes("bank")) return isEditing ? "Update Bank Reconciliation" : "Reconcile Bank";
+    }
+    if (isWorkforcePlanningModule) {
+      return isEditing ? "Update Staffing Forecast" : "Save Staffing Forecast";
+    }
+    if (isIcuModule) {
+      if (normalized.includes("admission")) return isEditing ? "Update ICU Admission Assessment" : "Save ICU Admission Assessment";
+      if (normalized.includes("daily")) return isEditing ? "Update ICU Daily Assessment" : "Save ICU Daily Assessment";
+      if (normalized.includes("ventilator")) return isEditing ? "Update Ventilator Record" : "Save Ventilator Record";
+    }
+    if (isNicuModule) {
+      if (normalized.includes("admission")) return isEditing ? "Update NICU Admission" : "Save NICU Admission";
+      if (normalized.includes("daily") || normalized.includes("record")) return isEditing ? "Update NICU Daily Record" : "Save NICU Daily Record";
+      return isEditing ? "Update NICU Record" : "Save NICU Record";
+    }
+    if (isPhysioModule) {
+      if (normalized.includes("session")) return isEditing ? "Update Rehab Session" : "Schedule Session";
+      if (normalized.includes("assessment")) return isEditing ? "Update Assessment" : "Save Assessment";
+      return isEditing ? "Update Rehab Record" : "Save Rehab Record";
+    }
+    if (isNutritionModule) {
+      if (normalized.includes("screen")) return isEditing ? "Update Nutritional Screening" : "Save Nutritional Screening";
+      if (normalized.includes("assessment")) return isEditing ? "Update Nutrition Assessment" : "Save Nutrition Assessment";
+      if (normalized.includes("care") || normalized.includes("plan")) {
+        return isEditing ? "Update Nutrition Care Plan" : "Save Nutrition Care Plan";
+      }
+      return isEditing ? "Update Nutrition Record" : "Save Nutrition Record";
+    }
+    if (isDentalModule) {
+      if (normalized.includes("treatment")) return isEditing ? "Update Dental Treatment" : "Save Dental Treatment";
+      if (normalized.includes("examination")) return isEditing ? "Update Dental Examination" : "Save Dental Examination";
+      return isEditing ? "Update Dental Record" : "Save Dental Record";
+    }
+    if (isInfectionControlModule) {
+      if (normalized.includes("hai") || normalized.includes("surveillance")) return isEditing ? "Update HAI Surveillance" : "Log HAI Surveillance";
+      if (normalized.includes("cssd") || normalized.includes("steril")) return isEditing ? "Update Sterilisation Cycle" : "Save Sterilisation Cycle";
+      if (normalized.includes("hygiene") || normalized.includes("audit")) return isEditing ? "Update Hand Hygiene Audit" : "Save Hand Hygiene Audit";
+      return isEditing ? "Update Infection Control Record" : "Save Infection Control Record";
+    }
+    if (isCommunityHealthModule) {
+      if (normalized.includes("household")) return isEditing ? "Update Household" : "Register Household";
+      if (normalized.includes("home") || normalized.includes("visit")) return isEditing ? "Update Home Visit" : "Log Visit";
+      if (normalized.includes("chw") || normalized.includes("registration")) return isEditing ? "Update CHW" : "Register CHW";
+      return isEditing ? "Update Community Record" : "Save Community Record";
+    }
+    if (isConsentModule) {
+      if (normalized.includes("upload") || normalized.includes("scan")) return isEditing ? "Update Consent Upload" : "Upload Consent";
+      if (normalized.includes("consent") || normalized.includes("informed")) return isEditing ? "Update Consent" : "Capture Consent";
+      return isEditing ? "Update Consent Record" : "Save Consent Record";
+    }
+    if (isReferralManagementModule) {
+      if (normalized.includes("feedback")) return isEditing ? "Update Referral Feedback" : "Track Feedback";
+      if (normalized.includes("referral") || normalized.includes("outgoing")) return isEditing ? "Update Referral" : "Create Referral";
+      return isEditing ? "Update Referral Record" : "Save Referral Record";
+    }
+    if (isDocumentManagementModule) {
+      if (normalized.includes("ocr")) return isEditing ? "Update OCR Task" : "Run OCR";
+      if (normalized.includes("upload") || normalized.includes("document")) return isEditing ? "Update Document" : "Upload Document";
+      return isEditing ? "Update Document Record" : "Save Document Record";
+    }
+    if (isMessagingModule) {
+      if (normalized.includes("manual") || normalized.includes("reminder")) return isEditing ? "Update Reminder" : "Send Reminder";
+      if (normalized.includes("template") || normalized.includes("campaign")) return isEditing ? "Update Campaign" : "Create Campaign";
+      return isEditing ? "Update Message Record" : "Save Message Record";
+    }
+    if (isBiomedicalModule) {
+      if (normalized.includes("calibration") || normalized.includes("maintenance")) return isEditing ? "Update Maintenance Log" : "Log Maintenance";
+      if (normalized.includes("device") || normalized.includes("registration")) return isEditing ? "Update Device" : "Register Device";
+      return isEditing ? "Update Biomedical Record" : "Save Biomedical Record";
+    }
+    if (isHomeCareModule) {
+      if (normalized.includes("visit") || normalized.includes("record")) return isEditing ? "Update Visit Note" : "Log Visit Note";
+      if (normalized.includes("plan") || normalized.includes("schedule")) return isEditing ? "Update Visit Schedule" : "Schedule Visit";
+      return isEditing ? "Update Home Care Record" : "Save Home Care Record";
+    }
+    if (isClinicalResearchModule) {
+      if (normalized.includes("adverse") || normalized.includes("event")) return isEditing ? "Update Adverse Event" : "Report Adverse Event";
+      if (normalized.includes("enrol") || normalized.includes("patient")) return isEditing ? "Update Enrolment" : "Enrol Patient";
+      if (normalized.includes("protocol") || normalized.includes("registration")) return isEditing ? "Update Protocol" : "Register Protocol";
+      return isEditing ? "Update Research Record" : "Save Research Record";
+    }
+    if (isCdssModule) {
+      if (normalized.includes("override") || normalized.includes("alert")) {
+        return isEditing ? "Update Alert Override" : "Submit Alert Override";
+      }
+      if (normalized.includes("rule") || normalized.includes("configuration")) {
+        return isEditing ? "Update CDSS Rule" : "Save CDSS Rule";
+      }
+      return isEditing ? "Update CDSS Record" : "Save CDSS Record";
+    }
+    if (isIctModule) {
+      if (normalized.includes("incident")) return isEditing ? "Update Incident Report" : "Submit Incident Report";
+      if (normalized.includes("configuration") || normalized.includes("change")) {
+        return isEditing ? "Update Configuration Change" : "Submit Configuration Change";
+      }
+    }
+    if (isNursingAdminModule) {
+      if (normalized.includes("roster")) return isEditing ? "Update Duty Roster" : "Save Duty Roster";
+      if (normalized.includes("competency")) {
+        return isEditing ? "Update Competency Assessment" : "Save Competency Assessment";
+      }
+    }
+    if (isMedicalDirectorModule) {
+      if (normalized.includes("approval")) return isEditing ? "Update Approval" : "Submit Approval";
+      if (normalized.includes("alert")) return isEditing ? "Update Alert" : "Submit Alert";
+      if (normalized.includes("review")) return isEditing ? "Update Review" : "Save Review";
+      if (normalized.includes("protocol")) return isEditing ? "Update Protocol" : "Save Protocol";
+      if (normalized.includes("score") || normalized.includes("metric")) return isEditing ? "Update Score" : "Save Score";
+      return isEditing ? "Update Governance Record" : "Save Governance Record";
+    }
+    if (isRevenueCycleModule) {
+      if (normalized.includes("denial")) return isEditing ? "Update Denial Management" : "Save Denial Management";
+      if (normalized.includes("write-off") || normalized.includes("write off") || normalized.includes("writeoff")) {
+        return isEditing ? "Update Write-off Authorisation" : "Authorise Write-off";
+      }
+      return isEditing ? "Update Revenue Record" : "Save Revenue Record";
+    }
+    if (isCostAccountingModule) {
+      if (normalized.includes("centre") || normalized.includes("center")) {
+        return isEditing ? "Update Cost Centre" : "Save Cost Centre";
+      }
+      if (normalized.includes("allocation") || normalized.includes("overhead")) {
+        return isEditing ? "Update Cost Allocation" : "Save Cost Allocation";
+      }
+      return isEditing ? "Update Cost Record" : "Save Cost Record";
+    }
+    if (isMaternityModule) {
+      if (normalized.includes("pregnancy")) return isEditing ? "Update Pregnancy" : "Register Pregnancy";
+      if (normalized.includes("anc")) return isEditing ? "Update ANC Visit" : "Save ANC Visit";
+      if (normalized.includes("delivery") || normalized.includes("birth")) return isEditing ? "Update Delivery Record" : "Save Delivery Record";
+      if (normalized.includes("newborn")) return isEditing ? "Update Newborn Assessment" : "Save Newborn Assessment";
+      if (normalized.includes("partograph")) return isEditing ? "Update Partograph" : "Save Partograph";
+    }
     if (isOpdFlowModule) {
       if (normalized.includes("triage")) return isEditing ? "Update Triage Assessment" : "Save Triage Assessment";
       if (normalized.includes("consultation")) return isEditing ? "Update Consultation" : "Save Consultation";
       if (normalized.includes("referral")) return isEditing ? "Update Referral" : "Create Referral";
+    }
+    if (isLaboratoryModule) {
+      if (normalized.includes("order")) return isEditing ? "Update Lab Order" : "Save Lab Order";
+      if (normalized.includes("specimen") || normalized.includes("sample")) {
+        return isEditing ? "Update Specimen Collection" : "Save Specimen Collection";
+      }
+      if (normalized.includes("result")) return isEditing ? "Update Result Entry" : "Save Result Entry";
+      if (normalized.includes("quality")) return isEditing ? "Update Quality Control" : "Save Quality Control";
+      return isEditing ? "Update Laboratory Record" : "Save Laboratory Record";
+    }
+    if (isRadiologyModule) {
+      if (normalized.includes("request")) return isEditing ? "Update Imaging Request" : "Save Imaging Request";
+      if (normalized.includes("schedule")) return isEditing ? "Update Imaging Schedule" : "Schedule Imaging";
+      if (normalized.includes("status")) return isEditing ? "Update Status" : "Update Status";
+      if (normalized.includes("modality")) return isEditing ? "Update Modality" : "Save Modality";
+      if (normalized.includes("metadata")) return isEditing ? "Update Study Metadata" : "Save Study Metadata";
+      if (normalized.includes("critical") || normalized.includes("alert")) {
+        return isEditing ? "Update Critical Finding" : "Submit Critical Finding";
+      }
+      if (normalized.includes("report")) return isEditing ? "Update Imaging Report" : "Save Imaging Report";
+      return isEditing ? "Update Radiology Record" : "Save Radiology Record";
+    }
+    if (isPharmacyModule) {
+      if (normalized.includes("sale") || normalized.includes("retail")) {
+        return isEditing ? "Update Retail Sale" : "Record Retail Sale";
+      }
+      if (normalized.includes("order")) return isEditing ? "Update Prescription" : "Save Prescription";
+      if (normalized.includes("review") || normalized.includes("safety")) {
+        return isEditing ? "Update Medication Review" : "Save Medication Review";
+      }
+      if (normalized.includes("dispens") || normalized.includes("billing")) {
+        return isEditing ? "Update Dispense" : "Finalize Dispensing";
+      }
+      return isEditing ? "Update Pharmacy Record" : "Save Pharmacy Record";
+    }
+    if (isOtModule) {
+      if (normalized.includes("booking")) return isEditing ? "Update Surgery Booking" : "Book Surgery";
+      if (normalized.includes("team")) return isEditing ? "Update Team Assignment" : "Assign Team";
+      if (normalized.includes("pre")) return isEditing ? "Update Pre-Op Assessment" : "Save Pre-Op Assessment";
+      if (normalized.includes("checklist")) return isEditing ? "Update Checklist" : "Save Checklist";
+      if (normalized.includes("intra")) return isEditing ? "Update Intraoperative Record" : "Save Intraoperative Record";
+      if (normalized.includes("anesthesia")) return isEditing ? "Update Anesthesia Record" : "Save Anesthesia Record";
+      if (normalized.includes("inventory")) return isEditing ? "Update Inventory Usage" : "Save Inventory Usage";
+      if (normalized.includes("post")) return isEditing ? "Update Post-Op Record" : "Save Post-Op Record";
+      if (normalized.includes("complication")) return isEditing ? "Update Complication" : "Log Complication";
+      return isEditing ? "Update Theatre Record" : "Save Theatre Record";
+    }
+    if (isBloodBankModule) {
+      if (normalized.includes("donor registration")) return isEditing ? "Update Donor" : "Register Donor";
+      if (normalized.includes("donation") || normalized.includes("collection")) return isEditing ? "Update Donation" : "Record Donation";
+      if (normalized.includes("request")) return isEditing ? "Update Blood Request" : "Create Blood Request";
+      if (normalized.includes("crossmatch") || normalized.includes("compatibility")) return isEditing ? "Update Crossmatch" : "Save Crossmatch";
+      if (normalized.includes("issue")) return isEditing ? "Update Blood Issue" : "Issue Blood";
+      if (normalized.includes("transfusion record")) return isEditing ? "Update Transfusion" : "Save Transfusion";
+      if (normalized.includes("reaction")) return isEditing ? "Update Reaction" : "Log Reaction";
+      if (normalized.includes("expiry") || normalized.includes("discard")) return isEditing ? "Update Discard" : "Record Discard";
+      return isEditing ? "Update Blood Bank Record" : "Save Blood Bank Record";
     }
     if (isAppointmentModule) {
       if (normalized.includes("booking")) return isEditing ? "Update Appointment" : "Schedule Appointment";
@@ -2402,7 +3197,40 @@ export function WorkflowModuleView({
     return prefix ? `${prefix} Data` : "Save Data";
   };
   const openWorkflowForm = (formId: string) => {
-    const targetForm = module.forms.find((candidate) => candidate.id === formId);
+    const targetForm =
+      module.forms.find((candidate) => candidate.id === formId) ||
+      (isCostAccountingModule
+        ? module.forms.find((candidate) => {
+            const haystack = `${candidate.id} ${candidate.title}`.toLowerCase();
+            if (formId === "cost_center_setup") {
+              return /cost[_\s-]*(center|centre)|centre|center/.test(haystack);
+            }
+            if (formId === "overhead_allocation") {
+              return /overhead|allocation/.test(haystack);
+            }
+            return false;
+          })
+        : null) ||
+      (isWorkforcePlanningModule
+        ? module.forms.find((candidate) =>
+            /staffing|demand|forecast/i.test(`${candidate.id} ${candidate.title}`),
+          )
+        : null) ||
+      (isStrategicPlanningModule
+        ? module.forms.find((candidate) => {
+            const haystack = `${candidate.id} ${candidate.title}`.toLowerCase();
+            if (formId === "strategic_dashboard_widget") return /widget|dashboard/.test(haystack);
+            if (formId === "strategic_kpi_definition") return /kpi.*definition/.test(haystack);
+            if (formId === "strategic_kpi_target") return /kpi.*target/.test(haystack);
+            if (formId === "strategic_goal") return /strategic.*goal|goal/.test(haystack);
+            if (formId === "strategic_facility_ranking") return /ranking|facility/.test(haystack);
+            if (formId === "strategic_forecasting_model") return /forecast/.test(haystack);
+            if (formId === "strategic_scenario_simulation") return /scenario|simulation/.test(haystack);
+            if (formId === "strategic_risk_alert") return /risk.*alert|alert/.test(haystack);
+            if (formId === "executive_note") return /executive.*note|note/.test(haystack);
+            return false;
+          })
+        : null);
     if (!targetForm) return;
     setActiveFormId(targetForm.id);
     setEditingId(null);
@@ -2411,6 +3239,65 @@ export function WorkflowModuleView({
     setFormNotice(null);
     setIsFormPopupOpen(true);
   };
+  const openWorkflowFormWithPrefill = (formId: string, prefill: Record<string, string> = {}) => {
+    const targetForm =
+      module.forms.find((candidate) => candidate.id === formId) ||
+      formsForDisplay.find((candidate) => candidate.id === formId);
+    if (!targetForm) return;
+    setActiveFormId(targetForm.id);
+    setEditingId(null);
+    setLockedPrefillFieldKeys(new Set());
+    setForm({ ...emptyForm(targetForm.fields), ...prefill });
+    setFormError("");
+    setFormNotice(null);
+    setIsFormPopupOpen(true);
+  };
+  const getLaboratoryRequestPrefill = (row: any): Record<string, string> => {
+    const patientName =
+      row?.patientName ||
+      `${row?.visit?.patient?.firstName || ""} ${row?.visit?.patient?.lastName || ""}`.trim();
+    const testName = String(row?.testName || row?.testCode || "");
+    return {
+      request_id: String(row?.id || ""),
+      patient: String(patientName || ""),
+      ordering_doctor: String(row?.orderedBy || row?.doctorName || ""),
+      tests_requested: testName,
+      test_s_ordered: testName,
+      analyte_name: testName,
+      specimen_type: String(row?.sampleType || row?.specimenType || ""),
+      priority: String(row?.priority || ""),
+    };
+  };
+  const getRadiologyRequestPrefill = (row: any): Record<string, string> => {
+    const patientName =
+      row?.patientName ||
+      `${row?.visit?.patient?.firstName || ""} ${row?.visit?.patient?.lastName || ""}`.trim();
+    const procedureName = String(row?.procedureName || row?.imagingType || row?.modality || "");
+    return {
+      request_id: String(row?.id || ""),
+      patient: String(patientName || ""),
+      imaging_type: String(row?.imagingType || row?.modality || ""),
+      modality_type: String(row?.imagingType || row?.modality || ""),
+      study_modality_type: String(row?.imagingType || row?.modality || ""),
+      clinical_indication: String(row?.clinicalIndication || row?.indication || ""),
+      urgency: String(row?.urgency || ""),
+      report_findings: "",
+      impression: procedureName,
+    };
+  };
+  const getPharmacyPrescriptionPrefill = (row: any): Record<string, string> => {
+    const patientName =
+      row?.patientName ||
+      `${row?.patient?.firstName || ""} ${row?.patient?.lastName || ""}`.trim();
+    return {
+      prescription_id: String(row?.id || ""),
+      patient: String(patientName || ""),
+      medication: String(row?.medication || row?.medicineName || ""),
+      medicine_name: String(row?.medication || row?.medicineName || ""),
+      quantity: String(row?.requestedQuantity || row?.quantity || ""),
+      notes: String(row?.notes || ""),
+    };
+  };
   const activeFormRequiredCount = activeForm?.fields.filter((field) => field.required).length || 0;
   const activeFormTitle = activeForm?.title || "Module Form";
   const activeFormPresentationClass = [
@@ -2418,6 +3305,43 @@ export function WorkflowModuleView({
     isInpatientModule ? `ipd-form-modal ${getInpatientFormModeClass(activeFormTitle)}` : "",
     isAppointmentModule ? `appointment-form-modal ${getAppointmentFormModeClass(activeFormTitle)}` : "",
     isOpdFlowModule ? `opd-form-modal ${getOpdFormModeClass(activeFormTitle)}` : "",
+    isLaboratoryModule ? `laboratory-form-modal ${getLaboratoryFormModeClass(activeFormTitle)}` : "",
+    isRadiologyModule ? `radiology-form-modal ${getRadiologyFormModeClass(activeFormTitle)}` : "",
+    isPharmacyModule ? `pharmacy-form-modal ${getPharmacyFormModeClass(activeFormTitle)}` : "",
+    isOtModule ? `ot-form-modal ${getOtFormModeClass(activeFormTitle)}` : "",
+    isBloodBankModule ? `blood-bank-form-modal ${getBloodBankFormModeClass(activeFormTitle)}` : "",
+    isMaternityModule ? `maternity-form-modal ${getMaternityFormModeClass(activeFormTitle)}` : "",
+    isAccountingModule ? `accounting-form-modal ${getAccountingFormModeClass(activeFormTitle)}` : "",
+    isWorkforcePlanningModule ? "workforce-form-modal" : "",
+    isIcuModule ? `icu-form-modal ${getIcuFormModeClass(activeFormTitle)}` : "",
+    isNicuModule ? `nicu-form-modal ${getNicuFormModeClass(activeFormTitle)}` : "",
+    isPhysioModule ? `physio-form-modal ${getPhysioFormModeClass(activeFormTitle)}` : "",
+    isNutritionModule ? `nutrition-form-modal ${getNutritionFormModeClass(activeFormTitle)}` : "",
+    isDentalModule ? "dental-form-modal" : "",
+    isInfectionControlModule ? `infection-form-modal ${getInfectionFormModeClass(activeFormTitle)}` : "",
+    isCommunityHealthModule ? `community-form-modal ${getCommunityFormModeClass(activeFormTitle)}` : "",
+    isConsentModule ? `consent-form-modal ${getConsentFormModeClass(activeFormTitle)}` : "",
+    isReferralManagementModule ? `referral-form-modal ${getReferralFormModeClass(activeFormTitle)}` : "",
+    isDocumentManagementModule ? `document-form-modal ${getDocumentFormModeClass(activeFormTitle)}` : "",
+    isMessagingModule ? `messaging-form-modal ${getMessagingFormModeClass(activeFormTitle)}` : "",
+    isBiomedicalModule ? `biomedical-form-modal ${getBiomedicalFormModeClass(activeFormTitle)}` : "",
+    isHomeCareModule ? `home-care-form-modal ${getHomeCareFormModeClass(activeFormTitle)}` : "",
+    isClinicalResearchModule ? `clinical-research-form-modal ${getClinicalResearchFormModeClass(activeFormTitle)}` : "",
+    isCdssModule ? `cdss-form-modal ${getCdssFormModeClass(activeFormTitle)}` : "",
+    isIctModule ? `ict-form-modal ${getIctFormModeClass(activeFormTitle)}` : "",
+    isNursingModule ? "nursing-form-modal" : "",
+    isNursingAdminModule ? `matron-form-modal ${getMatronFormModeClass(activeFormTitle)}` : "",
+    isMedicalDirectorModule ? `medical-director-form-modal ${getMedicalDirectorFormModeClass(activeFormTitle)}` : "",
+    isRevenueCycleModule ? `revenue-form-modal ${getRevenueCycleFormModeClass(activeFormTitle)}` : "",
+    isCostAccountingModule ? `cost-accounting-form-modal ${getCostAccountingFormModeClass(activeFormTitle)}` : "",
+    isInventoryModule ? `inventory-form-modal ${getInventoryFormModeClass(activeFormTitle)}` : "",
+    isHrModule ? `hr-form-modal ${getHrFormModeClass(activeFormTitle)}` : "",
+    isDoctorManagementModule ? `doctor-form-modal ${getDoctorFormModeClass(activeFormTitle)}` : "",
+    isFacilityOpsModule ? `facility-form-modal ${getFacilityFormModeClass(activeFormTitle)}` : "",
+    isStrategicPlanningModule ? `executive-form-modal ${getExecutiveFormModeClass(activeFormTitle)}` : "",
+    isOrchestrationModule ? `orchestration-form-modal ${getOrchestrationFormModeClass(activeFormTitle)}` : "",
+    isWardModule ? `ward-form-modal ${getWardFormModeClass(activeFormTitle)}` : "",
+    module.id === 6 ? getEhrFormModeClass(activeFormTitle) : "",
   ]
     .filter(Boolean)
     .join(" ");
@@ -2462,6 +3386,19 @@ export function WorkflowModuleView({
 
   const activeFormFields: WorkflowField[] = useMemo(() => {
     const base = activeForm?.fields || [];
+    if (isWardModule) {
+      return base.map((field) =>
+        field.key === "ward_manager" && (!field.options || field.options.length === 0)
+          ? {
+              ...field,
+              options: [
+                currentUser?.name || "Hospital Admin",
+                ...nurseOptions.filter((name) => name !== currentUser?.name),
+              ],
+            }
+          : field,
+      );
+    }
     const hasQueueField = base.some((f) => isQueueField(f.key));
     if (hasQueueField || !isPatientQueueModule(module.id) || disablePatientSearch) return base;
     return [
@@ -2474,7 +3411,7 @@ export function WorkflowModuleView({
         options: nextQueueOptions,
       },
     ];
-  }, [activeForm, module.id, nextQueueOptions, disablePatientSearch]);
+  }, [activeForm, module.id, nextQueueOptions, disablePatientSearch, isWardModule, currentUser?.name, nurseOptions]);
 
   const displayFormFields: WorkflowField[] = useMemo(() => {
     return activeFormFields.filter((field) => !isBackendGeneratedField(field.key));
@@ -2537,7 +3474,6 @@ export function WorkflowModuleView({
     setHrRecordTags("");
     setSecurityError("");
     setOrchestrationError("");
-    setOrchestrationProcessResult(null);
     setSecurityUserSearch("");
     setSecurityRoleSearch("");
     setSecurityNewUserEmail("");
@@ -3007,26 +3943,6 @@ export function WorkflowModuleView({
     if (!isNursingModule) return;
     void loadNursingControlCenter();
   }, [isNursingModule, loadNursingControlCenter]);
-
-  useEffect(() => {
-    if (!isNursingModule || !selectedPatientId) {
-      setNursingPatientBoard(null);
-      return;
-    }
-    let cancelled = false;
-    const loadBoard = async () => {
-      try {
-        const board = await fetchNursingPatientBoard(selectedPatientId);
-        if (!cancelled) setNursingPatientBoard(board || null);
-      } catch {
-        if (!cancelled) setNursingPatientBoard(null);
-      }
-    };
-    void loadBoard();
-    return () => {
-      cancelled = true;
-    };
-  }, [isNursingModule, selectedPatientId]);
 
   const loadTelemedicineControlCenter = useCallback(async () => {
     if (!isTelemedicineModule) return;
@@ -3523,13 +4439,11 @@ export function WorkflowModuleView({
     setOtError("");
     try {
       const [dashboardRes, bookingsRes] = await Promise.allSettled([
-        fetchOtDashboard(),
-        fetchOtBookings({
-          status: otStatusFilter !== "ALL" ? otStatusFilter : undefined,
-          priority: otPriorityFilter !== "ALL" ? otPriorityFilter : undefined,
-          search: otSearch.trim() || undefined,
-          limit: 400,
-        }),
+          fetchOtDashboard(),
+          fetchOtBookings({
+            search: otSearch.trim() || undefined,
+            limit: 400,
+          }),
       ]);
 
       let loaded = false;
@@ -3560,34 +4474,12 @@ export function WorkflowModuleView({
     } finally {
       setOtLoading(false);
     }
-  }, [isOtModule, otPriorityFilter, otSearch, otStatusFilter]);
+  }, [isOtModule, otSearch]);
 
   useEffect(() => {
     if (!isOtModule) return;
     void loadOtControlCenter();
   }, [isOtModule, loadOtControlCenter]);
-
-  useEffect(() => {
-    if (!isOtModule || !selectedOtBookingId) {
-      setSelectedOtTimeline(null);
-      return;
-    }
-    let active = true;
-    void fetchOtTimeline(selectedOtBookingId)
-      .then((res) => {
-        if (active) {
-          setSelectedOtTimeline(res || null);
-        }
-      })
-      .catch(() => {
-        if (active) {
-          setSelectedOtTimeline(null);
-        }
-      });
-    return () => {
-      active = false;
-    };
-  }, [isOtModule, selectedOtBookingId]);
 
   const loadBloodBankControlCenter = useCallback(async () => {
     if (!isBloodBankModule) return;
@@ -4033,7 +4925,6 @@ export function WorkflowModuleView({
         goalsRes,
         forecastsRes,
         scenariosRes,
-        notesRes,
       ] = await Promise.allSettled([
         fetchStrategicPlanningDashboard({
           fromDate: strategicFromDate || undefined,
@@ -4044,7 +4935,6 @@ export function WorkflowModuleView({
         fetchStrategicGoals({ limit: 200 }),
         fetchStrategicForecastingModels({ limit: 200 }),
         fetchStrategicScenarioSimulations({ limit: 200 }),
-        fetchStrategicExecutiveNotes({ limit: 200 }),
       ]);
 
       let loaded = false;
@@ -4084,13 +4974,6 @@ export function WorkflowModuleView({
       } else {
         setStrategicScenarios([]);
       }
-      if (notesRes.status === "fulfilled" && Array.isArray(notesRes.value)) {
-        setStrategicExecutiveNotes(notesRes.value);
-        loaded = true;
-      } else {
-        setStrategicExecutiveNotes([]);
-      }
-
       if (!loaded) {
         const errors = [
           dashboardRes.status === "rejected" ? String(dashboardRes.reason?.message || "") : "",
@@ -4099,7 +4982,6 @@ export function WorkflowModuleView({
           goalsRes.status === "rejected" ? String(goalsRes.reason?.message || "") : "",
           forecastsRes.status === "rejected" ? String(forecastsRes.reason?.message || "") : "",
           scenariosRes.status === "rejected" ? String(scenariosRes.reason?.message || "") : "",
-          notesRes.status === "rejected" ? String(notesRes.reason?.message || "") : "",
         ]
           .filter(Boolean)
           .join(" | ");
@@ -4125,19 +5007,12 @@ export function WorkflowModuleView({
       const fallbackFacilityId = String(
         currentUser?.facilityId || currentUser?.tenantId || "",
       ).trim();
-      const facilityId = orchestrationFacilityFilter.trim() || fallbackFacilityId || undefined;
-      const parsedLimit = Number(orchestrationLimit);
-      const limit = Number.isFinite(parsedLimit) && parsedLimit > 0 ? parsedLimit : 200;
+      const facilityId = fallbackFacilityId || undefined;
       const [ownershipRes, eventsRes] = await Promise.allSettled([
         fetchOrchestrationOwnershipRules(),
         fetchOrchestrationEvents({
           facilityId,
-          eventType: orchestrationEventTypeFilter.trim() || undefined,
-          status:
-            orchestrationStatusFilter !== "ALL"
-              ? orchestrationStatusFilter
-              : undefined,
-          limit,
+          limit: 25,
         }),
       ]);
 
@@ -4180,47 +5055,12 @@ export function WorkflowModuleView({
     isOrchestrationModule,
     currentUser?.facilityId,
     currentUser?.tenantId,
-    orchestrationEventTypeFilter,
-    orchestrationFacilityFilter,
-    orchestrationLimit,
-    orchestrationStatusFilter,
   ]);
 
   useEffect(() => {
     if (!isOrchestrationModule) return;
     void loadOrchestrationControlCenter();
   }, [isOrchestrationModule, loadOrchestrationControlCenter]);
-
-  const processOrchestrationQueue = useCallback(async () => {
-    if (!isOrchestrationModule || orchestrationProcessing) return;
-    setOrchestrationProcessing(true);
-    setOrchestrationError("");
-    try {
-      const fallbackFacilityId = String(
-        currentUser?.facilityId || currentUser?.tenantId || "",
-      ).trim();
-      const facilityId = orchestrationFacilityFilter.trim() || fallbackFacilityId || undefined;
-      const parsedLimit = Number(orchestrationLimit);
-      const limit = Number.isFinite(parsedLimit) && parsedLimit > 0 ? parsedLimit : 100;
-      const result = await processOrchestrationPending({ facilityId, limit });
-      setOrchestrationProcessResult(result || null);
-      await loadOrchestrationControlCenter();
-    } catch (error: any) {
-      setOrchestrationError(
-        String(error?.message || "Failed to process pending orchestration events."),
-      );
-    } finally {
-      setOrchestrationProcessing(false);
-    }
-  }, [
-    isOrchestrationModule,
-    orchestrationProcessing,
-    orchestrationFacilityFilter,
-    orchestrationLimit,
-    currentUser?.facilityId,
-    currentUser?.tenantId,
-    loadOrchestrationControlCenter,
-  ]);
 
   const loadInsuranceControlCenter = useCallback(async () => {
     if (!isInsuranceModule) return;
@@ -5771,7 +6611,7 @@ export function WorkflowModuleView({
   );
 
   const handleReportingExport = useCallback(
-    async (format: "csv" | "json") => {
+    async (format: "csv" | "json", reportTypeOverride?: typeof reportingReportType) => {
       if (!isReportingModule) return;
       setReportingExporting(true);
       setReportingError("");
@@ -5781,7 +6621,7 @@ export function WorkflowModuleView({
             String(currentUser?.role || "").toLowerCase() === "super_admin"
               ? reportingFacilityId || undefined
               : undefined,
-          reportType: reportingReportType,
+          reportType: reportTypeOverride || reportingReportType,
           format,
           fromDate: reportingFromDate || undefined,
           toDate: reportingToDate || undefined,
@@ -7296,73 +8136,6 @@ export function WorkflowModuleView({
     void loadWards();
   }, [module.id, module.name]);
 
-  useEffect(() => {
-    if (!isWardModule) return;
-    if (wards.length === 0) {
-      setSelectedWardMap(null);
-      return;
-    }
-
-    if (!selectedWardMap?.id) return;
-
-    const latestSelected = wards.find((ward) => ward.id === selectedWardMap.id);
-    if (latestSelected) {
-      setSelectedWardMap(latestSelected);
-    } else {
-      setSelectedWardMap(wards[0]);
-    }
-  }, [isWardModule, wards, selectedWardMap?.id]);
-
-  const toggleWardMap = (ward: any) => {
-    setSelectedWardMap((prev: any) => (prev?.id === ward.id ? null : ward));
-  };
-
-  const handleCreateWard = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!isWardModule) return;
-    const name = newWardName.trim();
-    const bedCount = Number(newWardBeds);
-    if (!name) {
-      setFormNotice({ type: "error", message: "Ward name is required." });
-      return;
-    }
-    if (!Number.isInteger(bedCount) || bedCount < 1) {
-      setFormNotice({ type: "error", message: "Number of beds must be at least 1." });
-      return;
-    }
-
-    setWardSaving(true);
-    try {
-      const createdWard = await createWard({
-        name,
-        type: newWardType,
-        capacity: bedCount,
-      });
-      const prefix = newWardType === "MEN" ? "M" : newWardType === "WOMEN" ? "W" : "B";
-      await Promise.all(
-        Array.from({ length: bedCount }).map((_, index) =>
-          createBed({
-            wardId: String(createdWard.id),
-            bedNumber: `${prefix}-${String(index + 1).padStart(3, "0")}`,
-          }),
-        ),
-      );
-      setFormNotice({ type: "success", message: "Ward created successfully." });
-      setNewWardName("");
-      setNewWardType("BOTH");
-      setNewWardBeds("10");
-      setShowCreateWard(false);
-      await loadWards();
-    } catch (error: any) {
-      setFormNotice({
-        type: "error",
-        message: String(error?.message || "Failed to create ward"),
-      });
-    } finally {
-      setWardSaving(false);
-    }
-  };
-
   const getWardBedsForMap = (ward: any) => {
     const existingBeds = Array.isArray(ward?.beds) ? [...ward.beds] : [];
     const existingCount = existingBeds.length;
@@ -7387,6 +8160,64 @@ export function WorkflowModuleView({
     return { beds, occupied, vacant, total: beds.length };
   };
 
+  const wardStats = useMemo(() => {
+    return wards.reduce(
+      (summary, ward) => {
+        const occupancy = getWardOccupancy(ward);
+        summary.total += occupancy.total;
+        summary.occupied += occupancy.occupied;
+        summary.ready += occupancy.beds.filter((bed: any) => {
+          const status = String(bed?.status || "AVAILABLE").toUpperCase();
+          return status === "AVAILABLE" || status === "EMPTY";
+        }).length;
+        return summary;
+      },
+      { total: 0, occupied: 0, ready: 0, wards: wards.length },
+    );
+  }, [wards]);
+
+  const isWardBedOccupied = (bed: any) =>
+    String(bed?.status || "").toUpperCase() === "OCCUPIED" ||
+    Boolean(bed?.allocations?.[0]?.inpatient);
+
+  const isWardBedCleaning = (bed: any) => {
+    const status = String(bed?.status || "").toUpperCase();
+    return status === "CLEANING" || status === "DIRTY" || status === "MAINTENANCE";
+  };
+
+  const filterWardBedsForMap = (beds: any[]) => {
+    if (wardBedFilter === "occupied") return beds.filter((bed: any) => isWardBedOccupied(bed));
+    if (wardBedFilter === "empty") return beds.filter((bed: any) => !isWardBedOccupied(bed));
+    return beds;
+  };
+
+  const toggleWardCollapse = (ward: any) => {
+    const key = String(ward?.id || ward?.name || "");
+    setCollapsedWardMap((prev) => ({ ...prev, [key]: !prev[key] }));
+  };
+
+  const getWardBedStatusLabel = (bed: any) => {
+    const status = String(bed?.status || "AVAILABLE").toUpperCase();
+    if (status === "OCCUPIED") return "Occupied";
+    if (status === "CLEANING" || status === "DIRTY") return "Cleaning";
+    if (status === "MAINTENANCE") return "Maintenance";
+    if (status === "RESERVED") return "Reserved";
+    if (status === "CLOSED") return "Closed";
+    return "Empty";
+  };
+
+  const getWardBedDaysOccupied = (bed: any) => {
+    const allocation =
+      Array.isArray(bed?.allocations) && bed.allocations.length > 0
+        ? bed.allocations[0]
+        : null;
+    const raw = allocation?.allocatedAt || allocation?.inpatient?.admissionDate || "";
+    if (!raw) return 0;
+    const parsed = new Date(String(raw)).getTime();
+    if (!Number.isFinite(parsed)) return 0;
+    return Math.max(1, Math.ceil((Date.now() - parsed) / 86400000));
+  };
+
   const getBedOccupantMeta = (bed: any) => {
     const activeAllocation =
       Array.isArray(bed?.allocations) && bed.allocations.length > 0
@@ -7406,54 +8237,104 @@ export function WorkflowModuleView({
     const admissionTime = isValidDate ? parsed!.toISOString().slice(11, 16) : "";
     return {
       name: fullName || patient.patientCode || "",
+      firstName: patient.firstName || fullName || patient.patientCode || "",
       patientCode: patient.patientCode || "",
       admissionDate,
       admissionTime,
     };
   };
 
-  const copyPatientCode = async (code: string) => {
-    const value = String(code || "").trim();
-    if (!value) {
-      setFormNotice({ type: "error", message: "No patient code available to copy." });
-      return;
-    }
-    try {
-      if (navigator?.clipboard?.writeText) {
-        await navigator.clipboard.writeText(value);
-      } else {
-        throw new Error("Clipboard is unavailable");
-      }
-      setFormNotice({
-        type: "success",
-        message: `Patient code copied: ${value}`,
-      });
-    } catch {
-      setFormNotice({
-        type: "error",
-        message: "Failed to copy patient code.",
-      });
-    }
+  const openWardBedEditor = (ward: any, bed: any) => {
+    setEditingWardBed({ ward, bed });
+    const status = getWardBedStatusLabel(bed);
+    setBedStatusValue(status === "Empty" ? "Available" : status);
+    setBedHousekeepingNotes("");
+    setBedReadyTime("");
   };
 
-  const selectedWardBeds = useMemo(() => {
-    if (!selectedWardMap) return [] as any[];
-    return getWardBedsForMap(selectedWardMap)
+  const openBedStatusUpdateFromButton = () => {
+    const targetForm = module.forms.find((candidate) => candidate.id === "bed_status_update");
+    const ward = visibleWardsForMap[0] || wards[0];
+    if (!targetForm) {
+      setFormNotice({ type: "error", message: "Bed Status Update form is not configured for this module." });
+      return;
+    }
+    const beds = ward
+      ? getWardBedsForMap(ward)
       .slice()
       .sort((a: any, b: any) =>
         String(a.bedNumber || "").localeCompare(String(b.bedNumber || ""), undefined, {
           numeric: true,
           sensitivity: "base",
         }),
-      );
-  }, [selectedWardMap]);
+      )
+      : [];
+    const bed = filterWardBedsForMap(beds)[0] || beds[0] || null;
+    setWardViewMode("map");
+    if (ward) {
+      setCollapsedWardMap((prev) => ({ ...prev, [String(ward?.id || ward?.name || "")]: false }));
+    }
+    setActiveFormId(targetForm.id);
+    setEditingId(null);
+    setForm({
+      ...emptyForm(targetForm.fields),
+      bed_number: bed?.bedNumber || "",
+      status: bed ? getWardBedStatusLabel(bed) : "",
+      ward_name: ward?.name || "",
+    });
+    setFormError("");
+    setFormNotice(null);
+    setIsFormPopupOpen(true);
+  };
 
-  const selectedWardColumns = useMemo(() => {
-    const total = selectedWardBeds.length;
-    if (total <= 8) return 4;
-    if (total <= 18) return 6;
-    return 8;
-  }, [selectedWardBeds.length]);
+  const handleWardBedStatusSave = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!editingWardBed) return;
+    const bedId = String(editingWardBed.bed?.id || "");
+    const nextStatus = String(bedStatusValue || "Available").toUpperCase();
+    setBedStatusSaving(true);
+    try {
+      if (bedId && !bedId.startsWith("placeholder-")) {
+        await updateBedStatus(bedId, nextStatus);
+      }
+      await submitModuleRecord({
+        moduleId: module.id,
+        formId: "Bed Status Update",
+        patientName: "",
+        formData: {
+          bed_number: editingWardBed.bed?.bedNumber || "",
+          status: nextStatus,
+          housekeeping_notes: bedHousekeepingNotes,
+          estimated_ready_time: bedReadyTime,
+          ward: editingWardBed.ward?.name || "",
+        },
+      } as any);
+      setWards((prev) =>
+        prev.map((ward) =>
+          String(ward?.id || ward?.name) === String(editingWardBed.ward?.id || editingWardBed.ward?.name)
+            ? {
+                ...ward,
+                beds: (ward.beds || []).map((bed: any) =>
+                  String(bed?.id || bed?.bedNumber) === String(editingWardBed.bed?.id || editingWardBed.bed?.bedNumber)
+                    ? { ...bed, status: nextStatus }
+                    : bed,
+                ),
+              }
+            : ward,
+        ),
+      );
+      setFormNotice({ type: "success", message: "Bed status updated successfully." });
+      setEditingWardBed(null);
+      await loadWards();
+    } catch (error: any) {
+      setFormNotice({
+        type: "error",
+        message: String(error?.message || "Failed to update bed status."),
+      });
+    } finally {
+      setBedStatusSaving(false);
+    }
+  };
 
   const visibleWardsForMap = useMemo(() => {
     const effectiveSearch = isWardModule
@@ -7482,14 +8363,8 @@ export function WorkflowModuleView({
       });
     });
 
-    return term.length === 0 ? byVacancy.slice(0, 4) : byVacancy;
+    return byVacancy;
   }, [wards, wardSearch, search, isWardModule]);
-
-  const getBedPositionLabel = (index: number, columns: number) => {
-    const row = Math.floor(index / columns) + 1;
-    const col = (index % columns) + 1;
-    return `R${row}-C${col}`;
-  };
 
   const filteredPatients = useMemo(() => {
     const term = search.toLowerCase();
@@ -7734,22 +8609,53 @@ export function WorkflowModuleView({
     const rows = (nursingDashboard as any)?.pendingMedications;
     return Array.isArray(rows) ? rows : [];
   }, [nursingDashboard]);
-  const nursingAbnormalVitals = useMemo(() => {
-    const rows = (nursingDashboard as any)?.abnormalVitals;
-    return Array.isArray(rows) ? rows : [];
-  }, [nursingDashboard]);
-  const nursingOpenIncidents = useMemo(() => {
-    const rows = (nursingDashboard as any)?.incidents;
-    return Array.isArray(rows) ? rows : [];
-  }, [nursingDashboard]);
-  const nursingOpenTasks = useMemo(() => {
-    const rows = (nursingDashboard as any)?.tasks;
-    return Array.isArray(rows) ? rows : [];
-  }, [nursingDashboard]);
-  const nursingRecentHandovers = useMemo(() => {
-    const rows = (nursingDashboard as any)?.handovers;
-    return Array.isArray(rows) ? rows : [];
-  }, [nursingDashboard]);
+  const nursingStatCards = useMemo(
+    () => [
+      { label: "Active Admissions", value: nursingSummary.activeAdmissions, color: "#1e3a8a" },
+      { label: "Assigned Patients", value: nursingSummary.assignedPatients, color: "#2563eb" },
+      { label: "Pending Medication", value: nursingSummary.pendingMedicationCount, color: "#f59e0b" },
+      { label: "Abnormal Vitals", value: nursingSummary.abnormalVitalsCount, color: "#dc2626" },
+      { label: "Open Incidents", value: nursingSummary.unresolvedIncidentCount, color: "#7c3aed" },
+      { label: "Critical Incidents", value: nursingSummary.criticalIncidentCount, color: "#be123c" },
+      { label: "Open Tasks", value: nursingSummary.openTaskCount, color: "#0891b2" },
+      { label: "Overdue Tasks", value: nursingSummary.overdueTaskCount, color: "#ea580c" },
+      { label: "Medications Logged", value: nursingSummary.medicationGivenByCurrentNurse, color: "#16a34a" },
+      { label: "Recent Handovers", value: nursingSummary.recentHandoverCount, color: "#0d9488" },
+    ],
+    [nursingSummary],
+  );
+  const nursingTableRows = useMemo(() => {
+    const needle = search.trim().toLowerCase();
+    return nursingAssignedPatients.filter((row: any) => {
+      if (!needle) return true;
+      return [
+        row?.patientName,
+        row?.patientCode,
+        row?.status,
+        row?.ward,
+        row?.bed,
+      ]
+        .join(" ")
+        .toLowerCase()
+        .includes(needle);
+    });
+  }, [nursingAssignedPatients, search]);
+  const selectedNursingPatient = useMemo(() => {
+    if (selectedPatientId) {
+      const selected = nursingAssignedPatients.find(
+        (row: any) => String(row?.patientId || "") === String(selectedPatientId),
+      );
+      if (selected) return selected;
+    }
+    return nursingTableRows[0] || nursingAssignedPatients[0] || null;
+  }, [nursingAssignedPatients, nursingTableRows, selectedPatientId]);
+  const selectedNursingMedications = useMemo(() => {
+    const patientId = String(selectedNursingPatient?.patientId || selectedPatientId || "");
+    if (!patientId) return [];
+    return nursingPendingMedications.filter(
+      (row: any) => String(row?.patientId || "") === patientId,
+    );
+  }, [nursingPendingMedications, selectedNursingPatient?.patientId, selectedPatientId]);
   const teleSummary = useMemo(() => {
     const totals = (teleDashboard as any)?.totals || {};
     return {
@@ -7873,31 +8779,6 @@ export function WorkflowModuleView({
       deceased: Number(totals?.deceased || 0),
     };
   }, [icuDashboard, icuAdmissions, icuAlerts]);
-  const icuCriticalAlerts = useMemo(() => {
-    return icuAlerts
-      .slice()
-      .sort((a: any, b: any) => {
-        const priority = (value: string) => {
-          const normalized = String(value || "").toUpperCase();
-          if (normalized === "CRITICAL") return 4;
-          if (normalized === "HIGH") return 3;
-          if (normalized === "MEDIUM") return 2;
-          if (normalized === "LOW") return 1;
-          return 0;
-        };
-        const pr = priority(String(b?.severity)) - priority(String(a?.severity));
-        if (pr !== 0) return pr;
-        return (
-          new Date(String(b?.createdAt || "")).getTime() -
-          new Date(String(a?.createdAt || "")).getTime()
-        );
-      })
-      .slice(0, 12);
-  }, [icuAlerts]);
-  const selectedIcuTimelineRows = useMemo(() => {
-    const rows = (selectedIcuTimeline as any)?.timeline;
-    return Array.isArray(rows) ? rows : [];
-  }, [selectedIcuTimeline]);
   const maternitySummary = useMemo(() => {
     const kpis = (maternityDashboard as any)?.kpis || {};
     return {
@@ -7944,6 +8825,44 @@ export function WorkflowModuleView({
       averageTatHours: Number(totals?.averageTatHours || 0),
     };
   }, [labDashboard, labRequests.length]);
+  const normalizedLabStatus = (value: unknown) =>
+    String(value || "")
+      .trim()
+      .toUpperCase()
+      .replace(/[\s-]+/g, "_");
+  const laboratoryStatCards = useMemo(
+    () => [
+      { label: "Total Orders", value: laboratorySummary.totalRequests, color: "#1e3a8a" },
+      { label: "Sample Collected", value: laboratorySummary.sampleCollected, color: "#0d9488" },
+      { label: "In Process", value: laboratorySummary.inProcess, color: "#f59e0b" },
+      { label: "Results Entered", value: laboratorySummary.resultEntered, color: "#16a34a" },
+    ],
+    [laboratorySummary],
+  );
+  const filteredLabRequests = useMemo(() => {
+    const needle = search.trim().toLowerCase();
+    return labRequests.filter((row: any) => {
+      const status = normalizedLabStatus(row?.normalizedStatus || row?.status);
+      if (labStatusFilter !== "ALL" && status !== labStatusFilter) return false;
+      if (!needle) return true;
+      const patientName =
+        row?.patientName ||
+        `${row?.visit?.patient?.firstName || ""} ${row?.visit?.patient?.lastName || ""}`.trim();
+      return [
+        row?.patientCode,
+        row?.patientId,
+        patientName,
+        row?.testName,
+        row?.testCode,
+        row?.orderedBy,
+        row?.doctorName,
+        status,
+      ]
+        .join(" ")
+        .toLowerCase()
+        .includes(needle);
+    });
+  }, [labRequests, labStatusFilter, search]);
   const radiologySummary = useMemo(() => {
     const totals = (radDashboard as any)?.totals || {};
     const today = new Date().toISOString().slice(0, 10);
@@ -7970,6 +8889,74 @@ export function WorkflowModuleView({
       studies: radStudies.length,
     };
   }, [radDashboard, radRequests.length, radReports.length, radAlerts.length, radModalities.length, radSchedules, radStudies.length]);
+  const normalizedRadiologyStatus = (request: any) =>
+    String(request?.normalizedStatus || request?.status || "")
+      .trim()
+      .toUpperCase()
+      .replace(/[\s-]+/g, "_");
+  const radiologyStatCards = useMemo(() => {
+    const hasStatus = (request: any, statuses: string[]) => statuses.includes(normalizedRadiologyStatus(request));
+    return [
+      {
+        label: "Total Orders",
+        value: radiologySummary.totalOrders || radRequests.length,
+        color: "#1e3a8a",
+      },
+      {
+        label: "Requested",
+        value:
+          radiologySummary.requested ||
+          radRequests.filter((request) => hasStatus(request, ["REQUESTED", "QUEUED", "PENDING", "ORDERED"])).length,
+        color: "#0d9488",
+      },
+      {
+        label: "Scheduled",
+        value:
+          radiologySummary.scheduled ||
+          radRequests.filter((request) => hasStatus(request, ["SCHEDULED", "BOOKED"])).length,
+        color: "#7c3aed",
+      },
+      {
+        label: "Performed",
+        value:
+          radiologySummary.performed ||
+          radRequests.filter((request) => hasStatus(request, ["PERFORMED", "COMPLETED", "DONE", "CAPTURED"])).length,
+        color: "#f59e0b",
+      },
+      {
+        label: "Reported",
+        value:
+          radiologySummary.reported ||
+          radRequests.filter((request) => hasStatus(request, ["REPORTED", "VERIFIED", "RELEASED", "SIGNED_OFF"])).length,
+        color: "#16a34a",
+      },
+    ];
+  }, [radRequests, radiologySummary]);
+  const filteredRadiologyRequests = useMemo(() => {
+    const needle = radSearch.trim().toLowerCase();
+    return radRequests.filter((row: any) => {
+      const status = normalizedRadiologyStatus(row);
+      if (radStatusFilter !== "ALL" && status !== radStatusFilter) return false;
+      const patientName =
+        row?.patientName ||
+        `${row?.visit?.patient?.firstName || ""} ${row?.visit?.patient?.lastName || ""}`.trim();
+      if (!needle) return true;
+      return [
+        row?.id,
+        row?.patientId,
+        patientName,
+        row?.procedureName,
+        row?.imagingType,
+        row?.modality,
+        row?.requestedBy,
+        row?.orderedBy,
+        status,
+      ]
+        .join(" ")
+        .toLowerCase()
+        .includes(needle);
+    });
+  }, [radRequests, radSearch, radStatusFilter]);
   const otSummary = useMemo(() => {
     const totals = (otDashboard as any)?.totals || {};
     return {
@@ -7989,17 +8976,85 @@ export function WorkflowModuleView({
       checklistEntries: Number(totals?.checklistEntries || 0),
     };
   }, [otDashboard, otBookings.length]);
-  const selectedOtTimelineRows = useMemo(() => {
-    const rows = (selectedOtTimeline as any)?.timeline;
-    return Array.isArray(rows) ? rows : [];
-  }, [selectedOtTimeline]);
+  const otStatCards = useMemo(
+    () => [
+      { label: "Total Bookings", value: otSummary.totalBookings, color: "#1e3a8a" },
+      { label: "Requested", value: otSummary.requested, color: "#0d9488" },
+      { label: "Pre-Op Cleared", value: otSummary.preOpCleared, color: "#7c3aed" },
+      { label: "Scheduled", value: otSummary.scheduled, color: "#2563eb" },
+      { label: "In Progress", value: otSummary.inProgress, color: "#f59e0b" },
+      { label: "Post-Op", value: otSummary.postOp, color: "#0891b2" },
+      { label: "Completed", value: otSummary.completed, color: "#16a34a" },
+      { label: "Today Cases", value: otSummary.todayCases, color: "#475569" },
+      { label: "Emergency Cases", value: otSummary.emergencyCases, color: "#dc2626" },
+      { label: "Delayed Cases", value: otSummary.delayedCases, color: "#ea580c" },
+      { label: "Complications", value: otSummary.complicationsLogged, color: "#be123c" },
+      { label: "Checklist Entries", value: otSummary.checklistEntries, color: "#4f46e5" },
+    ],
+    [otSummary],
+  );
+  const filteredOtBookings = useMemo(() => {
+    const needle = otSearch.trim().toLowerCase();
+    if (!needle) return otBookings;
+    return otBookings.filter((row: any) => {
+      const patientName =
+        row?.patientName ||
+        `${row?.patient?.firstName || ""} ${row?.patient?.lastName || ""}`.trim();
+      return [
+        patientName,
+        row?.procedure,
+        row?.surgeonName,
+        row?.surgeon,
+        row?.otRoom,
+        row?.theatre,
+        row?.normalizedStatus,
+        row?.status,
+      ]
+        .join(" ")
+        .toLowerCase()
+        .includes(needle);
+    });
+  }, [otBookings, otSearch]);
   const bloodSummary = useMemo(() => {
     const totals = (bloodDashboard as any)?.totals || {};
+    const effectiveStock = Array.isArray((bloodDashboard as any)?.stock) && (bloodDashboard as any).stock.length > 0
+      ? (bloodDashboard as any).stock
+      : bloodStock;
+    const stockNearExpiryUnits = effectiveStock.reduce((sum: number, row: any) => {
+      if (!Array.isArray(row?.componentBreakdown)) return sum;
+      return (
+        sum +
+        row.componentBreakdown.reduce(
+          (subtotal: number, component: any) => subtotal + Number(component?.nearExpiryUnits || 0),
+          0,
+        )
+      );
+    }, 0);
+    const now = Date.now();
+    const movementNearExpiryUnits = bloodMovements
+      .filter((row: any) => String(row?.status || "").toUpperCase() === "AVAILABLE")
+      .reduce((sum: number, row: any) => {
+        const expiryTime = new Date(String(row?.expiryDate || "")).getTime();
+        if (!Number.isFinite(expiryTime)) return sum;
+        const days = (expiryTime - now) / (1000 * 60 * 60 * 24);
+        return days >= 0 && days <= 7 ? sum + Number(row?.units || 0) : sum;
+      }, 0);
+    const expiredOrDiscardedUnits = bloodMovements
+      .filter((row: any) => ["DISCARDED", "EXPIRED"].includes(String(row?.status || "").toUpperCase()))
+      .reduce((sum: number, row: any) => sum + Number(row?.units || 0), 0);
+    const liveValue = (key: string, fallback: number) => {
+      const dashboardValue = Number(totals?.[key] ?? 0);
+      const fallbackValue = Number(fallback || 0);
+      return Math.max(
+        Number.isFinite(dashboardValue) ? dashboardValue : 0,
+        Number.isFinite(fallbackValue) ? fallbackValue : 0,
+      );
+    };
     return {
-      donorCount: Number(totals?.donorCount || bloodDonors.length || 0),
+      donorCount: liveValue("donorCount", bloodDonors.length),
       inventoryBloodGroups: Number(totals?.inventoryBloodGroups || bloodStock.length || 0),
       totalUnitsAvailable: Number(totals?.totalUnitsAvailable || 0),
-      totalRequests: Number(totals?.totalRequests || bloodRequests.length || 0),
+      totalRequests: liveValue("totalRequests", bloodRequests.length),
       statRequests: Number(
         totals?.statRequests ||
           bloodRequests.filter((row: any) => String(row?.urgency || "").toUpperCase() === "STAT").length ||
@@ -8008,18 +9063,51 @@ export function WorkflowModuleView({
       issuesToday: Number(totals?.issuesToday || 0),
       transfusionsToday: Number(totals?.transfusionsToday || 0),
       reactionCount: Number(totals?.reactionCount || bloodReactions.length || 0),
-      nearExpiryUnits: Number(totals?.nearExpiryUnits || 0),
-      expiredOrDiscardedUnits: Number(totals?.expiredOrDiscardedUnits || 0),
+      nearExpiryUnits: liveValue("nearExpiryUnits", stockNearExpiryUnits || movementNearExpiryUnits),
+      expiredOrDiscardedUnits: liveValue("expiredOrDiscardedUnits", expiredOrDiscardedUnits),
       movementCount: bloodMovements.length,
     };
   }, [
     bloodDashboard,
     bloodDonors.length,
-    bloodStock.length,
+    bloodStock,
     bloodRequests,
     bloodReactions.length,
-    bloodMovements.length,
+    bloodMovements,
   ]);
+  const bloodStatCards = useMemo(
+    () => [
+      { label: "Near Expiry Units", value: bloodSummary.nearExpiryUnits, color: "#f59e0b" },
+      { label: "Discarded/Expired", value: bloodSummary.expiredOrDiscardedUnits, color: "#dc2626" },
+      { label: "Donors", value: bloodSummary.donorCount, color: "#0d9488" },
+      { label: "Total Requests", value: bloodSummary.totalRequests, color: "#1e3a8a" },
+    ],
+    [bloodSummary],
+  );
+  const effectiveBloodStock = useMemo(
+    () =>
+      Array.isArray((bloodDashboard as any)?.stock) && (bloodDashboard as any).stock.length > 0
+        ? (bloodDashboard as any).stock
+        : bloodStock,
+    [bloodDashboard, bloodStock],
+  );
+  const filteredBloodStock = useMemo(() => {
+    const term = bloodSearch.trim().toLowerCase();
+    const rows = effectiveBloodStock.map((row: any) => ({
+      group: String(row?.bloodGroup || "-"),
+      units: Number(row?.unitsAvailable || 0),
+      expiry:
+        Array.isArray(row?.componentBreakdown) &&
+        row.componentBreakdown.some((item: any) => Number(item?.nearExpiryUnits || 0) > 0)
+          ? "Near expiry"
+          : "-",
+      status: Number(row?.unitsAvailable || 0) > 0 ? "Available" : "Low Stock",
+    }));
+    if (!term) return rows;
+    return rows.filter((row: any) =>
+      `${row.group} ${row.status} ${row.expiry}`.toLowerCase().includes(term),
+    );
+  }, [bloodSearch, effectiveBloodStock]);
   const filteredBillingInvoices = useMemo(() => {
     const term = billingSearch.trim().toLowerCase();
     if (!term) return billingInvoices;
@@ -8088,18 +9176,26 @@ export function WorkflowModuleView({
       liabilitiesPlusEquity: Number(bsTotals?.liabilitiesPlusEquity || 0),
     };
   }, [accDashboard, accAccounts.length, accJournals.length, accBankAccounts.length, accTrialBalance, accProfitLoss, accBalanceSheet]);
-  const accountingTrialRows = useMemo(() => {
-    const rows = (accTrialBalance as any)?.rows;
-    return Array.isArray(rows) ? rows : [];
-  }, [accTrialBalance]);
-  const accountingApRows = useMemo(() => {
-    const rows = (accApAging as any)?.rows;
-    return Array.isArray(rows) ? rows : [];
-  }, [accApAging]);
-  const accountingArRows = useMemo(() => {
-    const rows = (accArSummary as any)?.records;
-    return Array.isArray(rows) ? rows : [];
-  }, [accArSummary]);
+  const accountingStatementMax = Math.max(
+    accountingSummary.revenue,
+    accountingSummary.expense,
+    Math.abs(accountingSummary.netProfit),
+    1,
+  );
+  const accountingBalanceTotal = Math.max(
+    Math.abs(accountingSummary.assets) +
+      Math.abs(accountingSummary.liabilities) +
+      Math.abs(accountingSummary.equity),
+    1,
+  );
+  const accountingAssetSlice = percentOf(accountingSummary.assets, accountingBalanceTotal);
+  const accountingLiabilitySlice = percentOf(accountingSummary.liabilities, accountingBalanceTotal);
+  const accountingEquitySlice = percentOf(accountingSummary.equity, accountingBalanceTotal);
+  const accountingPieGradient = `conic-gradient(#0284c7 0 ${accountingAssetSlice}%, #be123c ${accountingAssetSlice}% ${
+    accountingAssetSlice + accountingLiabilitySlice
+  }%, #7c3aed ${accountingAssetSlice + accountingLiabilitySlice}% ${
+    accountingAssetSlice + accountingLiabilitySlice + accountingEquitySlice
+  }%, #e2e8f0 ${accountingAssetSlice + accountingLiabilitySlice + accountingEquitySlice}% 100%)`;
   const costDepartmentDisplayRows = useMemo(() => {
     const dashboardRows = Array.isArray((costDashboard as any)?.departments)
       ? (costDashboard as any).departments
@@ -8190,6 +9286,40 @@ export function WorkflowModuleView({
     () => Math.max(1, ...costMarginChartRows.map((row: any) => Number(row.value || 0))),
     [costMarginChartRows],
   );
+  const costMarginPieRows = useMemo(() => {
+    const palette = ["#16a34a", "#2563eb", "#7c3aed", "#f59e0b", "#0d9488", "#e11d48"];
+    const sourceRows = costMarginChartRows.length > 0
+      ? costMarginChartRows
+      : [
+          { label: "Revenue", value: 1, rawValue: 0 },
+          { label: "Direct Cost", value: 1, rawValue: 0 },
+          { label: "Overhead", value: 1, rawValue: 0 },
+        ];
+    return sourceRows.slice(0, 6).map((row: any, index: number) => ({
+      ...row,
+      color: palette[index % palette.length],
+    }));
+  }, [costMarginChartRows]);
+  const costMarginPieTotal = useMemo(
+    () =>
+      Math.max(
+        1,
+        costMarginPieRows.reduce((sum: number, row: any) => sum + Number(row.value || 0), 0),
+      ),
+    [costMarginPieRows],
+  );
+  const costMarginPieGradient = useMemo(() => {
+    let cursor = 0;
+    return costMarginPieRows
+      .map((row: any) => {
+        const span = (Number(row.value || 0) / costMarginPieTotal) * 100;
+        const start = cursor;
+        const end = cursor + span;
+        cursor = end;
+        return `${row.color} ${start}% ${end}%`;
+      })
+      .join(", ");
+  }, [costMarginPieRows, costMarginPieTotal]);
   const costMixRows = useMemo(
     () => [
       { label: "Direct", value: Math.max(0, Number(costSummary.directCost || 0)), color: "#14b8a6" },
@@ -8328,14 +9458,6 @@ export function WorkflowModuleView({
       topEventTypes,
     };
   }, [orchestrationEvents, orchestrationOwnershipRules]);
-  const orchestrationTopEventMax = useMemo(
-    () =>
-      Math.max(
-        1,
-        ...orchestrationSummary.topEventTypes.map((row: any) => Number(row.value || 0)),
-      ),
-    [orchestrationSummary.topEventTypes],
-  );
   const insuranceSummary = useMemo(() => {
     const totals = (insDashboard as any)?.totals || {};
     return {
@@ -8423,6 +9545,12 @@ export function WorkflowModuleView({
       lastSyncAt: String(totals?.lastSyncAt || ""),
     };
   }, [extDashboard, extProviders, extMappings.length, extSyncJobs, extWebhookEvents, extLogs.length]);
+  const formatKes = (value: number) =>
+    new Intl.NumberFormat("en-KE", {
+      style: "currency",
+      currency: "KES",
+      maximumFractionDigits: 0,
+    }).format(Number.isFinite(value) ? value : 0);
   const pharmacySummary = useMemo(() => {
     const totals = (rxDashboard as any)?.totals || {};
     return {
@@ -8439,6 +9567,530 @@ export function WorkflowModuleView({
       totalPrescriptions: rxPrescriptions.length,
     };
   }, [rxDashboard, rxCatalog.length, rxPrescriptions.length]);
+  const pharmacyStatCards = useMemo(
+    () => [
+      {
+        label: "Low Stock",
+        value: pharmacySummary.lowStock,
+        color: "#dc2626",
+      },
+      {
+        label: "Near Expiry",
+        value: pharmacySummary.nearExpiry,
+        color: "#f59e0b",
+      },
+      {
+        label: "Revenue Today",
+        value: formatKes(pharmacySummary.revenueToday),
+        color: "#1e3a8a",
+      },
+      {
+        label: "Dispensed Today",
+        value: pharmacySummary.dispensedToday,
+        color: "#0d9488",
+      },
+    ],
+    [pharmacySummary],
+  );
+  const filteredPharmacyPrescriptions = useMemo(() => {
+    const needle = rxSearch.trim().toLowerCase();
+    if (!needle) return rxPrescriptions;
+    return rxPrescriptions.filter((row: any) => {
+      const patientName =
+        row?.patientName ||
+        `${row?.patient?.firstName || ""} ${row?.patient?.lastName || ""}`.trim();
+      return [
+        patientName,
+        row?.medication,
+        row?.medicineName,
+        row?.normalizedStatus,
+        row?.status,
+      ]
+        .join(" ")
+        .toLowerCase()
+        .includes(needle);
+    });
+  }, [rxPrescriptions, rxSearch]);
+  const nicuRows = useMemo(() => {
+    const savedRows = records
+      .filter((record) => /nicu/i.test(`${record.formId} ${record.data?.baby_patient || ""}`))
+      .map((record) => {
+        const data = record.data || {};
+        const weightGrams = Number(data.weight_grams || data.birth_weight_grams || 0);
+        return {
+          neonate: data.baby_patient || `NICU-${record.id.slice(-4)}`,
+          gestAge: data.gestational_age ? `${data.gestational_age} wks` : "-",
+          weight: weightGrams > 0 ? `${(weightGrams / 1000).toFixed(1)} kg` : "-",
+          status: data.respiratory_support || data.admission_diagnosis || "Recorded",
+        };
+      });
+    return [
+      ...savedRows,
+      { neonate: "Baby N-14", gestAge: "32 wks", weight: "1.7 kg", status: "Stable" },
+      { neonate: "Baby N-09", gestAge: "28 wks", weight: "1.2 kg", status: "Critical" },
+    ];
+  }, [records]);
+  const filteredNicuRows = useMemo(() => {
+    const needle = search.trim().toLowerCase();
+    if (!needle) return nicuRows;
+    return nicuRows.filter((row) =>
+      [row.neonate, row.gestAge, row.weight, row.status]
+        .join(" ")
+        .toLowerCase()
+        .includes(needle),
+    );
+  }, [nicuRows, search]);
+  const physioRows = useMemo(() => {
+    const savedRows = records
+      .filter((record) => /physiotherapy|rehab/i.test(record.formId))
+      .map((record) => {
+        const data = record.data || {};
+        const isSession = /session/i.test(record.formId);
+        return {
+          patient: data.patient || data.patient_name || data.patient_mrn || `Rehab-${record.id.slice(-4)}`,
+          therapist: data.therapist || data.physiotherapist || "Assigned therapist",
+          session: isSession ? String(data.session_number || data.session_time || "Session recorded") : "Initial assessment",
+          status: isSession ? "In Progress" : "Active Plan",
+        };
+      });
+    return [
+      ...savedRows,
+      { patient: "Faith Njeri", therapist: "A. Mwangi", session: "09:30 AM", status: "Booked" },
+      { patient: "Peter Odhiambo", therapist: "K. Wanjiru", session: "11:00 AM", status: "In Progress" },
+    ];
+  }, [records]);
+  const filteredPhysioRows = useMemo(() => {
+    const needle = search.trim().toLowerCase();
+    if (!needle) return physioRows;
+    return physioRows.filter((row) =>
+      [row.patient, row.therapist, row.session, row.status]
+        .join(" ")
+        .toLowerCase()
+        .includes(needle),
+    );
+  }, [physioRows, search]);
+  const nutritionRows = useMemo(() => {
+    const savedRows = records
+      .filter((record) => /nutrition|nutritional/i.test(record.formId))
+      .map((record) => {
+        const data = record.data || {};
+        const plan =
+          data.diet_type ||
+          data.nutrition_support_type ||
+          data.nutrition_diagnosis ||
+          data.risk_category ||
+          "Nutrition plan";
+        const calories = data.energy_requirement_kcal_day
+          ? `${data.energy_requirement_kcal_day} kcal`
+          : data.monitoring_plan || "-";
+        return {
+          patient: data.patient || data.patient_name || data.patient_mrn || `Nutrition-${record.id.slice(-4)}`,
+          plan: String(plan),
+          calories: String(calories),
+          status: /screen/i.test(record.formId) ? String(data.risk_category || "Screened") : "Active",
+        };
+      });
+    return [
+      ...savedRows,
+      { patient: "Brian Kiplagat", plan: "Renal Diet", calories: "1800 kcal", status: "Active" },
+      { patient: "Susan Achieng", plan: "Diabetic Diet", calories: "1600 kcal", status: "Review" },
+    ];
+  }, [records]);
+  const filteredNutritionRows = useMemo(() => {
+    const needle = search.trim().toLowerCase();
+    if (!needle) return nutritionRows;
+    return nutritionRows.filter((row) =>
+      [row.patient, row.plan, row.calories, row.status]
+        .join(" ")
+        .toLowerCase()
+        .includes(needle),
+    );
+  }, [nutritionRows, search]);
+  const dentalRows = useMemo(() => {
+    const savedRows = records
+      .filter((record) => /dental|tooth/i.test(record.formId))
+      .map((record) => {
+        const data = record.data || {};
+        return {
+          patient: data.patient || data.patient_name || data.patient_mrn || `Dental-${record.id.slice(-4)}`,
+          tooth: data.tooth_number || data.tooth_chart || "-",
+          procedure: data.procedure || data.chief_dental_complaint || "Dental examination",
+          status: /treatment/i.test(record.formId) ? "Completed" : "Recorded",
+        };
+      });
+    return [
+      ...savedRows,
+      { patient: "Mary Wanjiku", tooth: "36", procedure: "Extraction", status: "Completed" },
+      { patient: "Ali Hassan", tooth: "11", procedure: "Root Canal", status: "In Progress" },
+    ];
+  }, [records]);
+  const filteredDentalRows = useMemo(() => {
+    const needle = search.trim().toLowerCase();
+    if (!needle) return dentalRows;
+    return dentalRows.filter((row) =>
+      [row.patient, row.tooth, row.procedure, row.status]
+        .join(" ")
+        .toLowerCase()
+        .includes(needle),
+    );
+  }, [dentalRows, search]);
+  const infectionRows = useMemo(() => {
+    const savedRows = records
+      .filter((record) => /hai|cssd|steril|hygiene/i.test(record.formId))
+      .map((record) => {
+        const data = record.data || {};
+        if (/cssd|steril/i.test(record.formId)) {
+          return {
+            type: "CSSD Cycle",
+            unit: String(data.autoclave_id || data.cycle_type || "CSSD"),
+            status: String(data.cycle_passed || data.chemical_indicator_result || "Recorded"),
+            action: String(data.cycle_passed || "").toLowerCase().includes("fail") ? "Quarantine" : "Released",
+          };
+        }
+        if (/hygiene/i.test(record.formId)) {
+          return {
+            type: "Hand Hygiene Audit",
+            unit: String(data.ward || data.by_cadre || "Ward"),
+            status: String(data.compliance_rate || "Audited"),
+            action: "Review",
+          };
+        }
+        return {
+          type: String(data.hai_type || "SSI Surveillance"),
+          unit: String(data.implicated_device || data.patient || "Clinical Unit"),
+          status: String(data.outcome || "Monitoring"),
+          action: "Audit",
+        };
+      });
+    return [
+      ...savedRows,
+      { type: "SSI Surveillance", unit: "Surgery", status: "Monitoring", action: "Audit" },
+      { type: "CSSD Cycle", unit: "Theatre", status: "Passed", action: "Released" },
+    ];
+  }, [records]);
+  const filteredInfectionRows = useMemo(() => {
+    const needle = search.trim().toLowerCase();
+    if (!needle) return infectionRows;
+    return infectionRows.filter((row) =>
+      [row.type, row.unit, row.status, row.action]
+        .join(" ")
+        .toLowerCase()
+        .includes(needle),
+    );
+  }, [infectionRows, search]);
+  const communityRows = useMemo(() => {
+    const savedRows = records
+      .filter((record) => /chw|household|community/i.test(record.formId))
+      .map((record) => {
+        const data = record.data || {};
+        if (/household/i.test(record.formId)) {
+          return {
+            chw: String(data.chw || "Assigned CHW"),
+            household: String(data.head_of_household || data.village || "Household"),
+            visit: "Household Registration",
+            status: "Registered",
+          };
+        }
+        if (/home|visit/i.test(record.formId)) {
+          return {
+            chw: String(data.chw || "CHW"),
+            household: String(data.household || "Household"),
+            visit: String(data.visit_type || "Home Visit"),
+            status: Number(data.referrals_made || 0) > 0 ? "Referred" : "Completed",
+          };
+        }
+        return {
+          chw: String(data.full_name || "CHW"),
+          household: String(data.assigned_village || data.sub_location || "-"),
+          visit: "CHW Registration",
+          status: String(data.cadre || "Active"),
+        };
+      });
+    return [
+      ...savedRows,
+      { chw: "E. Wambui", household: "HH-0932", visit: "ANC Follow-up", status: "Completed" },
+      { chw: "P. Otieno", household: "HH-0144", visit: "Defaulter Trace", status: "Pending" },
+    ];
+  }, [records]);
+  const filteredCommunityRows = useMemo(() => {
+    const needle = search.trim().toLowerCase();
+    if (!needle) return communityRows;
+    return communityRows.filter((row) =>
+      [row.chw, row.household, row.visit, row.status]
+        .join(" ")
+        .toLowerCase()
+        .includes(needle),
+    );
+  }, [communityRows, search]);
+  const consentRows = useMemo(() => {
+    const savedRows = records
+      .filter((record) => /consent/i.test(record.formId))
+      .map((record) => {
+        const data = record.data || {};
+        return {
+          patient: String(data.patient || data.consented_by || "Patient"),
+          consent: String(data.consent_type || "Informed Consent"),
+          status: String(data.patient_consents || "Signed").includes("No") ? "Refused" : "Signed",
+          witness: String(data.witness_name || "Pending"),
+        };
+      });
+    return [
+      ...savedRows,
+      { patient: "Samuel Kariuki", consent: "Surgery", status: "Signed", witness: "Nurse W." },
+      { patient: "Diana Onyango", consent: "Blood Transfusion", status: "Pending", witness: "-" },
+    ];
+  }, [records]);
+  const filteredConsentRows = useMemo(() => {
+    const needle = search.trim().toLowerCase();
+    if (!needle) return consentRows;
+    return consentRows.filter((row) =>
+      [row.patient, row.consent, row.status, row.witness]
+        .join(" ")
+        .toLowerCase()
+        .includes(needle),
+    );
+  }, [consentRows, search]);
+  const referralRows = useMemo(() => {
+    const savedRows = records
+      .filter((record) => /referral/i.test(record.formId))
+      .map((record) => {
+        const data = record.data || {};
+        if (/feedback/i.test(record.formId)) {
+          return {
+            patient: String(data.referral || "Referred Patient"),
+            facility: String(data.diagnosis_confirmed || "Receiving Facility"),
+            urgency: String(data.outcome || "Follow-up"),
+            status: String(data.patient_arrived || "Pending") === "Yes" ? "Accepted" : "Pending",
+          };
+        }
+        return {
+          patient: String(data.patient || "Patient"),
+          facility: String(data.receiving_facility || "Receiving Facility"),
+          urgency: String(data.urgency || "Routine"),
+          status: String(data.transport_mode || "Pending"),
+        };
+      });
+    return [
+      ...savedRows,
+      { patient: "Joseph Otieno", facility: "KNH", urgency: "High", status: "Accepted" },
+      { patient: "Amina Suleiman", facility: "Coast GH", urgency: "Routine", status: "Pending" },
+    ];
+  }, [records]);
+  const filteredReferralRows = useMemo(() => {
+    const needle = search.trim().toLowerCase();
+    if (!needle) return referralRows;
+    return referralRows.filter((row) =>
+      [row.patient, row.facility, row.urgency, row.status]
+        .join(" ")
+        .toLowerCase()
+        .includes(needle),
+    );
+  }, [referralRows, search]);
+  const documentRows = useMemo(() => {
+    const savedRows = records
+      .filter((record) => /document/i.test(record.formId))
+      .map((record) => {
+        const data = record.data || {};
+        return {
+          document: String(data.document_title || data.file_upload || "Uploaded Document"),
+          type: String(data.document_type || "Clinical"),
+          owner: String(data.linked_patient || data.linked_staff || data.linked_encounter || "Facility"),
+          status: String(data.access_level || "Indexed"),
+        };
+      });
+    return [
+      ...savedRows,
+      { document: "NHIF Pre-auth", type: "Insurance", owner: "Patient", status: "Indexed" },
+      { document: "Consent Scan", type: "Clinical", owner: "Ward", status: "Pending" },
+    ];
+  }, [records]);
+  const filteredDocumentRows = useMemo(() => {
+    const needle = search.trim().toLowerCase();
+    if (!needle) return documentRows;
+    return documentRows.filter((row) =>
+      [row.document, row.type, row.owner, row.status]
+        .join(" ")
+        .toLowerCase()
+        .includes(needle),
+    );
+  }, [documentRows, search]);
+  const messagingRows = useMemo(() => {
+    const savedRows = records
+      .filter((record) => /notification|message|sms|whatsapp/i.test(record.formId))
+      .map((record) => {
+        const data = record.data || {};
+        if (/template/i.test(record.formId)) {
+          return {
+            recipient: String(data.template_code || "Campaign Template"),
+            channel: String(data.channel || "All"),
+            status: String(data.language || "Template"),
+            sent: "Draft",
+          };
+        }
+        return {
+          recipient: String(data.recipient || "Recipient"),
+          channel: String(data.channel || "SMS"),
+          status: String(data.send_now_or_schedule || "Queued"),
+          sent: String(data.scheduled_time || "Now"),
+        };
+      });
+    return [
+      ...savedRows,
+      { recipient: "2547****120", channel: "SMS", status: "Delivered", sent: "10:22 AM" },
+      { recipient: "2547****908", channel: "WhatsApp", status: "Queued", sent: "10:30 AM" },
+    ];
+  }, [records]);
+  const filteredMessagingRows = useMemo(() => {
+    const needle = search.trim().toLowerCase();
+    if (!needle) return messagingRows;
+    return messagingRows.filter((row) =>
+      [row.recipient, row.channel, row.status, row.sent]
+        .join(" ")
+        .toLowerCase()
+        .includes(needle),
+    );
+  }, [messagingRows, search]);
+  const biomedicalRows = useMemo(() => {
+    const savedRows = records
+      .filter((record) => /medical_device|calibration|biomedical/i.test(record.formId))
+      .map((record) => {
+        const data = record.data || {};
+        if (/calibration/i.test(record.formId)) {
+          return {
+            device: String(data.asset || "Calibrated Device"),
+            dept: String(data.calibration_type || "Biomedical"),
+            nextService: String(data.next_calibration_due || "Scheduled"),
+            status: String(data.within_tolerance || "Logged"),
+          };
+        }
+        return {
+          device: String(data.asset || data.udi || "Medical Device"),
+          dept: String(data.device_class || "Clinical"),
+          nextService: String(data.software_version || "Pending"),
+          status: String(data.risk_classification || "Registered"),
+        };
+      });
+    return [
+      ...savedRows,
+      { device: "Ventilator V-12", dept: "ICU", nextService: "Apr 24", status: "Due" },
+      { device: "ECG Unit E-4", dept: "OPD", nextService: "May 02", status: "OK" },
+    ];
+  }, [records]);
+  const filteredBiomedicalRows = useMemo(() => {
+    const needle = search.trim().toLowerCase();
+    if (!needle) return biomedicalRows;
+    return biomedicalRows.filter((row) =>
+      [row.device, row.dept, row.nextService, row.status]
+        .join(" ")
+        .toLowerCase()
+        .includes(needle),
+    );
+  }, [biomedicalRows, search]);
+  const homeCareRows = useMemo(() => {
+    const savedRows = records
+      .filter((record) => /home_care|home_visit/i.test(record.formId))
+      .map((record) => {
+        const data = record.data || {};
+        if (/visit/i.test(record.formId)) {
+          return {
+            patient: String(data.care_plan || "Home Care Patient"),
+            caregiver: String(data.visit_start_time || "Home nurse"),
+            visit: String(data.interventions_performed || data.vital_signs || "Home Visit"),
+            status: String(data.escalation_required || "Completed"),
+          };
+        }
+        return {
+          patient: String(data.patient || "Patient"),
+          caregiver: String(data.assigned_nurse || "Assigned nurse"),
+          visit: String(data.services_required || data.visit_frequency || "Care Plan"),
+          status: String(data.start_date || "Scheduled"),
+        };
+      });
+    return [
+      ...savedRows,
+      { patient: "Peter Kimani", caregiver: "Nurse A.", visit: "Wound Care", status: "Scheduled" },
+      { patient: "Joy Mwende", caregiver: "Nurse B.", visit: "Palliative", status: "Completed" },
+    ];
+  }, [records]);
+  const filteredHomeCareRows = useMemo(() => {
+    const needle = search.trim().toLowerCase();
+    if (!needle) return homeCareRows;
+    return homeCareRows.filter((row) =>
+      [row.patient, row.caregiver, row.visit, row.status]
+        .join(" ")
+        .toLowerCase()
+        .includes(needle),
+    );
+  }, [homeCareRows, search]);
+  const clinicalResearchRows = useMemo(() => {
+    return records
+      .filter((record) => /research|protocol|enrolment|adverse_event/i.test(record.formId))
+      .map((record) => {
+        const data = record.data || {};
+        if (/enrolment/i.test(record.formId)) {
+          return {
+            record: String(data.patient || data.protocol || "Patient Enrolment"),
+            status: String(data.screening_passed || data.study_arm || "Enrolled"),
+          };
+        }
+        if (/adverse_event/i.test(record.formId)) {
+          return {
+            record: String(data.participant || data.ae_description || "Adverse Event"),
+            status: String(data.outcome || data.ctcae_grade || "Reported"),
+          };
+        }
+        return {
+          record: String(data.protocol_number || data.short_title || "Research Protocol"),
+          status: String(data.study_type || data.phase || "Registered"),
+        };
+      });
+  }, [records]);
+  const filteredClinicalResearchRows = useMemo(() => {
+    const needle = search.trim().toLowerCase();
+    if (!needle) return clinicalResearchRows;
+    return clinicalResearchRows.filter((row) =>
+      [row.record, row.status]
+        .join(" ")
+        .toLowerCase()
+        .includes(needle),
+    );
+  }, [clinicalResearchRows, search]);
+  const cdssRows = useMemo(() => {
+    const savedRows = records
+      .filter((record) => /cdss|decision|alert|rule/i.test(record.formId))
+      .map((record) => {
+        const data = record.data || {};
+        if (/override|alert/i.test(record.formId)) {
+          return {
+            rule: String(data.alert || data.rule_name || "Alert Override"),
+            trigger: "OVERRIDE",
+            severity: "REVIEW",
+            status: "Pending Review",
+          };
+        }
+        return {
+          rule: String(data.rule_name || data.alert || "CDSS Rule"),
+          trigger: String(data.trigger_event || "-").toUpperCase().replace(/\s+/g, "_"),
+          severity: String(data.alert_severity || "-").toUpperCase().replace(/\s+/g, "_"),
+          status: String(data.can_be_overridden || "").toLowerCase() === "false" ? "Hard Stop" : "Active",
+        };
+      });
+    return [
+      ...savedRows,
+      { rule: "Penicillin Allergy", trigger: "PRESCRIBE", severity: "HARD_STOP", status: "Active" },
+      { rule: "Sepsis SIRS", trigger: "VITAL_SIGN", severity: "CRITICAL", status: "Active" },
+    ];
+  }, [records]);
+  const filteredCdssRows = useMemo(() => {
+    const needle = search.trim().toLowerCase();
+    if (!needle) return cdssRows;
+    return cdssRows.filter((row) =>
+      [row.rule, row.trigger, row.severity, row.status]
+        .join(" ")
+        .toLowerCase()
+        .includes(needle),
+    );
+  }, [cdssRows, search]);
   const blockchainSummary = useMemo(() => {
     const totals = (bcDashboard as any)?.totals || {};
     return {
@@ -8450,12 +10102,9 @@ export function WorkflowModuleView({
       tamperingAttempts: Number(totals?.tamperingAttempts || 0),
     };
   }, [bcDashboard, bcLedger.length]);
-  const formatKes = (value: number) =>
-    new Intl.NumberFormat("en-KE", {
-      style: "currency",
-      currency: "KES",
-      maximumFractionDigits: 0,
-    }).format(Number.isFinite(value) ? value : 0);
+  function percentOf(value: number, total: number) {
+    return total > 0 ? Math.max(0, Math.min(100, (Math.abs(value) / total) * 100)) : 0;
+  }
   const facilityAssetsFiltered = useMemo(() => {
     const term = facilityAssetSearch.trim().toLowerCase();
     if (!term) return facilityOpsAssets;
@@ -8907,9 +10556,23 @@ export function WorkflowModuleView({
     isTelemedicineModule && teleSessionScopedForms.has(activeFormId) && hasTeleSessionId;
   const canEdit =
     isRegistrationModule ||
+    isWardModule ||
     isInpatientModule ||
     isAppointmentModule ||
     isOpdFlowModule ||
+    isMaternityModule ||
+    isAccountingModule ||
+    isCostAccountingModule ||
+    isWorkforcePlanningModule ||
+    isIcuModule ||
+    isIctModule ||
+    isNursingAdminModule ||
+    isMedicalDirectorModule ||
+    isRevenueCycleModule ||
+    isLaboratoryModule ||
+    isRadiologyModule ||
+    isPharmacyModule ||
+    isOtModule ||
     isCheckedIn ||
     disablePatientSearch ||
     allowTeleSessionOnlyEdit;
@@ -9115,15 +10778,237 @@ export function WorkflowModuleView({
     });
   }, [mortuaryRecords, mortuarySearch, mortuaryStatusFilter, mortuaryPoliceHoldFilter]);
 
-  const filteredMaternityPregnancies = useMemo(() => {
+  const maternityRows = useMemo(() => {
     const term = search.trim().toLowerCase();
-    if (!term) return maternityPregnancies;
-    return maternityPregnancies.filter((row: any) =>
-      `${row?.pregnancyId || ""} ${row?.motherName || ""} ${row?.motherPatientCode || ""} ${row?.riskLevel || ""} ${row?.status || ""}`
-        .toLowerCase()
-        .includes(term),
-    );
+    return maternityPregnancies
+      .map((row: any) => ({
+        id: String(row?.pregnancyId || row?.id || row?.motherPatientCode || row?.motherName || ""),
+        mother: String(row?.motherName || row?.motherPatientCode || "-"),
+        stage: String(row?.stage || row?.status || "ANC Follow-up"),
+        risk: String(row?.riskLevel || "-"),
+        updated: row?.updatedAt
+          ? new Date(row.updatedAt).toLocaleString()
+          : row?.estimatedDueDate
+            ? `EDD ${new Date(row.estimatedDueDate).toLocaleDateString()}`
+            : "-",
+      }))
+      .filter((row) =>
+        !term
+          ? true
+          : `${row.mother} ${row.stage} ${row.risk} ${row.updated}`.toLowerCase().includes(term),
+      );
   }, [maternityPregnancies, search]);
+  const workforceRows = useMemo(() => {
+    const rows = [
+      { department: "Emergency", required: "24", current: "19", gap: "-5" },
+      { department: "ICU", required: "18", current: "17", gap: "-1" },
+    ];
+    const term = search.trim().toLowerCase();
+    return rows.filter((row) =>
+      !term
+        ? true
+        : `${row.department} ${row.required} ${row.current} ${row.gap}`.toLowerCase().includes(term),
+    );
+  }, [search]);
+  const ictRows = useMemo(() => {
+    const formTitleFor = (formId: string) =>
+      module.forms.find((candidate) => candidate.id === formId)?.title || formId;
+    const savedRows = records
+      .filter((record) =>
+        /security_incident_report|system_configuration_change|ict_incident|ict_configuration/i.test(
+          `${record.formId || ""} ${formTitleFor(record.formId)}`,
+        ),
+      )
+      .map((record) => {
+        const data = record.data || {};
+        const formTitle = formTitleFor(record.formId);
+        const isIncident = /incident/i.test(`${record.formId || ""} ${formTitle}`);
+        return {
+          event: String(
+            data.incident_type ||
+              data.incident_title ||
+              data.change_type ||
+              data.system_component ||
+              formTitle ||
+              "-",
+          ),
+          severity: String(data.severity || data.risk_assessment || data.risk_level || "Medium"),
+          status: String(data.change_status || data.status || (isIncident ? "Open" : "Pending approval")),
+          owner: String(data.assigned_to || data.approved_by || data.reported_by || "ICT Security Officer"),
+          logged: String(data.date_time_detected || data.change_window || data.implementation_time || "Today"),
+        };
+      });
+    const fallbackRows = [
+      {
+        event: "Failed login spike",
+        severity: "High",
+        status: "Investigating",
+        owner: "ICT Security Officer",
+        logged: "Today",
+      },
+      {
+        event: "Firewall policy change",
+        severity: "Medium",
+        status: "Pending approval",
+        owner: "Systems Administrator",
+        logged: "Yesterday",
+      },
+    ];
+    const term = search.trim().toLowerCase();
+    return (savedRows.length > 0 ? savedRows : fallbackRows).filter((row) =>
+      !term
+        ? true
+        : `${row.event} ${row.severity} ${row.status} ${row.owner} ${row.logged}`
+            .toLowerCase()
+            .includes(term),
+    );
+  }, [module.forms, records, search]);
+  const matronRows = useMemo(() => {
+    const formTitleFor = (formId: string) =>
+      module.forms.find((candidate) => candidate.id === formId)?.title || formId;
+    const savedRows = records
+      .filter((record) => /duty_roster|competency/i.test(`${record.formId} ${formTitleFor(record.formId)}`))
+      .map((record) => {
+        const data = record.data || {};
+        return {
+          nurse: String(data.staff_member || data.nurse_id || formTitleFor(record.formId) || "-"),
+          ward: String(data.ward || data.department_id || "-"),
+          shift: String(data.shift_type || data.competency || "-"),
+          status: String(data.result || (data.approved === "true" ? "Approved" : data.status || "Pending")),
+          date: String(data.shift_date || data.assessment_date || record.createdAt || "-"),
+        };
+      });
+    const fallbackRows = [
+      { nurse: "Night Duty Team", ward: "ICU", shift: "Night", status: "Pending", date: "Today" },
+      { nurse: "Ward A Roster", ward: "Medical Ward", shift: "Day", status: "Approved", date: "Today" },
+    ];
+    const term = search.trim().toLowerCase();
+    return (savedRows.length > 0 ? savedRows : fallbackRows).filter((row) =>
+      !term
+        ? true
+        : `${row.nurse} ${row.ward} ${row.shift} ${row.status} ${row.date}`.toLowerCase().includes(term),
+    );
+  }, [module.forms, records, search]);
+  const medicalDirectorRows = useMemo(() => {
+    const formTitleFor = (formId: string) =>
+      module.forms.find((candidate) => candidate.id === formId)?.title || formId;
+    const savedRows = records
+      .filter((record) => /medical_director/i.test(record.formId))
+      .map((record) => {
+        const data = record.data || {};
+        return {
+          doctor: String(data.staff_id || data.doctor_id || data.primary_doctor_id || data.doctor_profile_id || formTitleFor(record.formId)),
+          score: String(data.overall_score || data.metric_value || data.risk_score || "-"),
+          risk: String(data.risk_flag || data.severity || data.status || "-"),
+          period: String(data.metric_period || data.metric_date || data.detected_at || data.createdAt || record.createdAt || "-"),
+        };
+      });
+    const fallbackRows = [
+      { doctor: "Medical Officer Review", score: "88.0", risk: "LOW", period: "Current Month" },
+      { doctor: "Surgical Team Scorecard", score: "79.5", risk: "MEDIUM", period: "Current Month" },
+    ];
+    const term = search.trim().toLowerCase();
+    return (savedRows.length > 0 ? savedRows : fallbackRows).filter((row) =>
+      !term
+        ? true
+        : `${row.doctor} ${row.score} ${row.risk} ${row.period}`.toLowerCase().includes(term),
+    );
+  }, [module.forms, records, search]);
+  const revenueCycleRows = useMemo(() => {
+    const formTitleFor = (formId: string) =>
+      module.forms.find((candidate) => candidate.id === formId)?.title || formId;
+    const savedRows = records
+      .filter((record) => /denial|write_off|write-off|revenue/i.test(`${record.formId} ${formTitleFor(record.formId)}`))
+      .map((record) => {
+        const data = record.data || {};
+        const title = formTitleFor(record.formId);
+        return {
+          claim: String(data.denied_claim || data.invoice || title || "-"),
+          status: String(data.action_taken || data.appeal_decision || data.write_off_reason || "Pending"),
+          billed: Number(data.denial_amount_kes || data.outstanding_amount_kes || 0),
+          outstanding: Number(data.outstanding_amount_kes || data.denial_amount_kes || 0),
+          date: String(record.createdAt || "Today"),
+        };
+      });
+    const fallbackRows = [
+      { claim: "CLM-2407-018", status: "Submitted", billed: 184500, outstanding: 42500, date: "2026-05-18" },
+      { claim: "CLM-2407-019", status: "Denied", billed: 93200, outstanding: 93200, date: "2026-05-19" },
+      { claim: "INV-2407-021", status: "Write-off review", billed: 37600, outstanding: 37600, date: "2026-05-20" },
+    ];
+    const term = search.trim().toLowerCase();
+    return (savedRows.length > 0 ? savedRows : fallbackRows).filter((row) =>
+      !term
+        ? true
+        : `${row.claim} ${row.status} ${row.billed} ${row.outstanding} ${row.date}`.toLowerCase().includes(term),
+    );
+  }, [module.forms, records, search]);
+  const revenueCycleSummary = useMemo(() => {
+    const totalClaims = revenueCycleRows.length;
+    const denials = revenueCycleRows.filter((row) => /denied|denial/i.test(row.status)).length;
+    const totalBilled = revenueCycleRows.reduce((sum, row) => sum + Number(row.billed || 0), 0);
+    const totalOutstanding = revenueCycleRows.reduce((sum, row) => sum + Number(row.outstanding || 0), 0);
+    const statusCounts = revenueCycleRows.reduce<Record<string, number>>((acc, row) => {
+      const key = /denied|denial/i.test(row.status)
+        ? "Denied"
+        : /write/i.test(row.status)
+          ? "Write-off"
+          : /paid/i.test(row.status)
+            ? "Paid"
+            : "Submitted";
+      acc[key] = (acc[key] || 0) + 1;
+      return acc;
+    }, {});
+    const trendCounts = revenueCycleRows.reduce<Record<string, number>>((acc, row) => {
+      const key = String(row.date || "Today").slice(0, 10) || "Today";
+      acc[key] = (acc[key] || 0) + 1;
+      return acc;
+    }, {});
+    const statusColors: Record<string, string> = {
+      Submitted: "#2563eb",
+      Paid: "#16a34a",
+      Denied: "#7c3aed",
+      "Write-off": "#f59e0b",
+    };
+    const trendPalette = ["#16a34a", "#2563eb", "#7c3aed", "#f59e0b", "#0891b2", "#e11d48"];
+    const buildGradient = (entries: Array<[string, number]>, colorFor: (label: string, index: number) => string) => {
+      const total = Math.max(1, entries.reduce((sum, [, value]) => sum + value, 0));
+      let cursor = 0;
+      return entries
+        .map(([label, value], index) => {
+          const start = cursor;
+          const end = cursor + (value / total) * 100;
+          cursor = end;
+          return `${colorFor(label, index)} ${start}% ${end}%`;
+        })
+        .join(", ");
+    };
+    const statusEntries = Object.entries(statusCounts);
+    const trendEntries = Object.entries(trendCounts).sort(([a], [b]) => a.localeCompare(b)).slice(-6);
+    const statusGradient = buildGradient(statusEntries, (label) => statusColors[label] || "#0d9488");
+    const trendGradient = buildGradient(trendEntries, (_label, index) => trendPalette[index % trendPalette.length]);
+    const statusLegend = statusEntries.map(([label, value]) => ({
+      label,
+      value,
+      color: statusColors[label] || "#0d9488",
+    }));
+    const trendLegend = trendEntries.map(([label, value], index) => ({
+      label,
+      value,
+      color: trendPalette[index % trendPalette.length],
+    }));
+    return {
+      totalClaims,
+      denials,
+      totalBilled,
+      totalOutstanding,
+      statusCounts,
+      trendCounts,
+      statusGradient: statusGradient || "#e2e8f0 0% 100%",
+      trendGradient: trendGradient || "#e2e8f0 0% 100%",
+      statusLegend,
+      trendLegend,
+    };
+  }, [revenueCycleRows]);
 
   const applyAutoPrefill = useCallback(
     (patientId: string, patient: Patient | null, details?: any) => {
@@ -9248,16 +11133,6 @@ export function WorkflowModuleView({
     [records, module.stages],
   );
 
-  const patientRecords = useMemo(
-    () =>
-      records.filter(
-        (r) =>
-          (selectedPatientId ? r.patientId === selectedPatientId : true) &&
-          (activeForm ? r.formId === activeForm.id : true),
-      ),
-    [records, selectedPatientId, activeForm],
-  );
-
   const saveRecord = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!activeForm) {
@@ -9266,8 +11141,10 @@ export function WorkflowModuleView({
     if (
       !selectedPatientId &&
       !isRegistrationModule &&
+      !isWardModule &&
       !isInpatientModule &&
       !isAppointmentModule &&
+      !isCostAccountingModule &&
       !disablePatientSearch &&
       !allowTeleSessionOnlyEdit
     ) {
@@ -9380,6 +11257,44 @@ export function WorkflowModuleView({
       if (Object.keys(generatedFieldValues).length > 0) {
         formToPersist = { ...form, ...generatedFieldValues };
         setForm((prev) => ({ ...prev, ...generatedFieldValues }));
+      }
+      if (isWardModule && activeFormId === "ward_configuration") {
+        const wardName = String(form.ward_name || "").trim();
+        const totalBeds = Number(form.total_beds || 0);
+        if (wardName && Number.isFinite(totalBeds) && totalBeds > 0) {
+          const wardType = String(form.ward_type || "").toLowerCase();
+          const mappedType = wardType.includes("male")
+            ? "MEN"
+            : wardType.includes("female")
+              ? "WOMEN"
+              : "BOTH";
+          try {
+            await createWard({
+              name: wardName,
+              type: mappedType as "MEN" | "WOMEN" | "BOTH",
+              capacity: Math.round(totalBeds),
+            });
+            await loadWards();
+          } catch {
+            await loadWards();
+          }
+        }
+      }
+      if (isWardModule && activeFormId === "bed_status_update") {
+        const bedNumber = String(form.bed_number || "").trim();
+        const nextStatus = String(form.status || "").toUpperCase();
+        const matchingWard = wards.find((ward) =>
+          (ward.beds || []).some((bed: any) => String(bed?.bedNumber || "") === bedNumber),
+        );
+        const matchingBed = matchingWard?.beds?.find((bed: any) => String(bed?.bedNumber || "") === bedNumber);
+        if (matchingBed?.id && nextStatus && !String(matchingBed.id).startsWith("placeholder-")) {
+          try {
+            await updateBedStatus(String(matchingBed.id), nextStatus);
+            await loadWards();
+          } catch {
+            await loadWards();
+          }
+        }
       }
       if (isPatientQueueModule(module.id) && queueSelection && persistedPatientId) {
         if (queueDestination.isComplete) {
@@ -9742,17 +11657,6 @@ export function WorkflowModuleView({
     } finally {
       setLabQueueOrderSaving(false);
     }
-  };
-
-  const loadRecord = (record: ModuleRecord) => {
-    setFormError("");
-    setEditingId(record.id);
-    setSelectedPatientId(record.patientId);
-    setActiveStage(record.stageId);
-    setActiveFormId(record.formId);
-    setIsFormPopupOpen(true);
-    setLockedPrefillFieldKeys(new Set());
-    setForm(record.data);
   };
 
   const viewPatient = (patientId: string) => {
@@ -11169,6 +13073,15 @@ export function WorkflowModuleView({
     }
   };
 
+  void setInvAlertDays;
+  void handleInventoryCreateSupplier;
+  void handleInventoryReceiveMedicine;
+  void handleInventoryCreateItem;
+  void handleInventoryIssueMedicine;
+  void handleInventoryIssueSupply;
+  void handleInventoryCreatePurchaseOrder;
+  void handleInventoryUpdateOrderStatus;
+
   if (module.id === 15) {
     const lowStockCount = invItems.filter((item) => {
       const quantity = Number(item?.quantity || 0);
@@ -11186,6 +13099,334 @@ export function WorkflowModuleView({
     const pendingOrders = invOrders.filter(
       (order) => String(order?.status || "").toUpperCase() === "PENDING",
     ).length;
+    void totalSupplyUnits;
+    void totalMedicineUnits;
+    void pendingOrders;
+    const now = new Date();
+    const inventoryRows = [
+      ...invMedicines.map((medicine) => {
+        const quantity = Number(medicine?.quantity || 0);
+        const expiryDate = medicine?.expiryDate ? new Date(medicine.expiryDate) : null;
+        const expired = Boolean(expiryDate && Number.isFinite(expiryDate.getTime()) && expiryDate < now);
+        return {
+          id: `med-${medicine?.id || medicine?.batchNumber || medicine?.name}`,
+          item: String(medicine?.name || "-"),
+          category: String(medicine?.category || "Drug"),
+          supplier: String(medicine?.vendor || medicine?.supplierName || "-"),
+          stock: quantity,
+          status: expired ? "Expired" : quantity < 50 ? "Reorder" : "Healthy",
+        };
+      }),
+      ...invItems.map((item) => {
+        const quantity = Number(item?.quantity || 0);
+        const reorderLevel = Number(item?.reorderLevel || 0);
+        return {
+          id: `item-${item?.id || item?.name}`,
+          item: String(item?.name || "-"),
+          category: String(item?.category || "-"),
+          supplier: String(item?.vendor || item?.supplierName || "-"),
+          stock: quantity,
+          status: quantity <= reorderLevel ? "Reorder" : "Healthy",
+        };
+      }),
+    ];
+    const expiredCount = invMedicines.filter((medicine) => {
+      const expiryDate = medicine?.expiryDate ? new Date(medicine.expiryDate) : null;
+      return Boolean(expiryDate && Number.isFinite(expiryDate.getTime()) && expiryDate < now);
+    }).length;
+    const categoryOptions = Array.from(
+      new Set(inventoryRows.map((row) => row.category).filter((value) => value && value !== "-")),
+    );
+    const supplierOptions = Array.from(
+      new Set([
+        ...inventoryRows.map((row) => row.supplier).filter((value) => value && value !== "-"),
+        ...invSuppliers.map((supplier) => String(supplier?.name || "")).filter(Boolean),
+      ]),
+    );
+    const filteredInventoryRows = inventoryRows.filter((row) => {
+      const matchesSearch =
+        !invSearch.trim() ||
+        [row.item, row.category, row.supplier, row.status]
+          .join(" ")
+          .toLowerCase()
+          .includes(invSearch.trim().toLowerCase());
+      const matchesCategory = invCategoryFilter === "ALL" || row.category === invCategoryFilter;
+      const matchesSupplier = invSupplierFilter === "ALL" || row.supplier === invSupplierFilter;
+      return matchesSearch && matchesCategory && matchesSupplier;
+    });
+    const inventoryStats = [
+      { label: "SKUs", value: inventoryRows.length, color: "#1e3a8a" },
+      { label: "Low Stock", value: lowStockCount, color: "#dc2626" },
+      { label: "Transfers", value: invMovements.length, color: "#0d9488" },
+      { label: "Vendors / Suppliers", value: invSuppliers.length, color: "#7c3aed" },
+      { label: "Expired", value: expiredCount, color: "#be123c" },
+      { label: "Near Expiry", value: invExpiryAlerts.length, color: "#f59e0b" },
+    ];
+    const inventoryActionColors = ["#16a34a", "#2563eb", "#7c3aed", "#0891b2", "#f59e0b", "#0d9488"];
+    const getInventoryActionIcon = (
+      title: string,
+    ): "settings" | "form" | "calendar" | "search" | "refresh" => {
+      const normalized = title.toLowerCase();
+      if (normalized.includes("supplier")) return "settings";
+      if (normalized.includes("requisition") || normalized.includes("order")) return "calendar";
+      if (normalized.includes("received")) return "refresh";
+      if (normalized.includes("count")) return "search";
+      return "form";
+    };
+    return (
+      <div className="workflow-view inventory-control-center inventory-web-match">
+        <div className="pv-header">
+          <div>
+            <h2 className="pv-title">Inventory Control</h2>
+            <p className="pv-subtitle">Consumables, equipment, and reorder tracking</p>
+          </div>
+          <div className="module-actions inventory-action-bar">
+            {formsForDisplay.map((moduleForm, index) => {
+              const color = inventoryActionColors[index % inventoryActionColors.length];
+              return (
+                <button
+                  key={moduleForm.id}
+                  type="button"
+                  className="topbar-logout-btn"
+                  style={{
+                    backgroundColor: color,
+                    borderColor: color,
+                    boxShadow: `0 8px 18px ${color}33`,
+                  }}
+                  onClick={() => openWorkflowForm(moduleForm.id)}
+                >
+                  <WorkflowActionIcon type={getInventoryActionIcon(moduleForm.title)} />
+                  {cleanWorkflowFormTitle(moduleForm.title).replace(/\s+\(GRN\)$/i, " (GRN)")}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        {formNotice && (
+          <div className={`workflow-notice ${formNotice?.type === "success" ? "is-success" : "is-error"}`}>
+            {formNotice?.message}
+          </div>
+        )}
+        {invError && <div className="auth-error">{invError}</div>}
+
+        <div className="pv-stats">
+          {inventoryStats.map((stat) => (
+            <article key={stat.label} className="pv-stat-card" style={{ borderLeftColor: stat.color }}>
+              <p className="pv-stat-label">{stat.label}</p>
+              <p className="pv-stat-value">{invLoading ? "..." : stat.value}</p>
+            </article>
+          ))}
+        </div>
+
+        <div className="pv-search-bar inventory-filter-row">
+          <div className="pv-search-wrap">
+            <WorkflowActionIcon type="search" />
+            <input
+              className="pv-search"
+              placeholder="Search inventory"
+              value={invSearch}
+              onChange={(event) => setInvSearch(event.target.value)}
+            />
+          </div>
+          <label className="pv-inline-filter">
+            <span>Category</span>
+            <select
+              value={invCategoryFilter}
+              onChange={(event) => setInvCategoryFilter(event.target.value)}
+            >
+              <option value="ALL">All</option>
+              {categoryOptions.map((category) => (
+                <option key={category} value={category}>
+                  {category}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="pv-inline-filter">
+            <span>Supplier</span>
+            <select
+              value={invSupplierFilter}
+              onChange={(event) => setInvSupplierFilter(event.target.value)}
+            >
+              <option value="ALL">All</option>
+              {supplierOptions.map((supplier) => (
+                <option key={supplier} value={supplier}>
+                  {supplier}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
+
+        <section className="pv-table-wrap inventory-card inventory-card-full">
+          <table className="pv-table">
+            <thead>
+              <tr>
+                <th>Item</th>
+                <th>Category</th>
+                <th>Vendor / Supplier</th>
+                <th>Stock</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              {filteredInventoryRows.map((row) => (
+                <tr key={row.id}>
+                  <td className="pv-name">{row.item}</td>
+                  <td>{row.category}</td>
+                  <td>{row.supplier}</td>
+                  <td>{row.stock}</td>
+                  <td>
+                    <span
+                      className={`pv-badge ${
+                        row.status === "Expired"
+                          ? "badge-female"
+                          : row.status === "Reorder"
+                            ? "badge-warning"
+                            : "badge-male"
+                      }`}
+                    >
+                      {row.status}
+                    </span>
+                  </td>
+                </tr>
+              ))}
+              {!invLoading && filteredInventoryRows.length === 0 && (
+                <tr>
+                  <td colSpan={5} className="pv-empty">No inventory items match these filters.</td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </section>
+
+        {isFormPopupOpen && (
+          <div className="modal-overlay" onClick={() => setIsFormPopupOpen(false)}>
+            <div
+              className={`modal-box workflow-form-modal inventory-form-modal ${activeFormPresentationClass}`}
+              onClick={(event) => event.stopPropagation()}
+            >
+              <div className="modal-header">
+                <div className="ipd-form-title-wrap">
+                  <span className="ipd-form-icon">
+                    <WorkflowActionIcon type={getInventoryActionIcon(activeForm?.title || "")} />
+                  </span>
+                  <div>
+                    <span className="ipd-form-kicker">Inventory Control</span>
+                    <h3>{cleanWorkflowFormTitle(activeForm?.title || "Inventory Form")}</h3>
+                  </div>
+                </div>
+                <div className="ipd-form-meta">
+                  <span>{activeForm?.fields.length || 0} fields</span>
+                  <span>{activeFormRequiredCount} required</span>
+                </div>
+                <button type="button" className="modal-close" onClick={() => setIsFormPopupOpen(false)}>
+                  x
+                </button>
+              </div>
+              <form className="workflow-form" onSubmit={saveRecord}>
+                <div className="workflow-form-header">
+                  <h3>{cleanWorkflowFormTitle(activeForm?.title || "Inventory Form")}</h3>
+                  <p>{activeForm?.purpose || "Capture inventory operation details."}</p>
+                </div>
+                {formError && <div className="auth-error">{formError}</div>}
+                <div className="workflow-form-grid">
+                  {(activeForm?.fields || []).map((field) => {
+                    const isWideField =
+                      field.type === "textarea" ||
+                      /items|notes|address|instruction|justification|reason/i.test(field.key);
+                    return (
+                      <label
+                        key={field.key}
+                        className={`workflow-field ${isWideField ? "workflow-field-full" : ""}`}
+                      >
+                        <span className="workflow-field-title">
+                          {field.label}
+                          {field.required ? " *" : ""}
+                        </span>
+                        {field.note && <small className="workflow-field-note">{field.note}</small>}
+                        {field.type === "textarea" ? (
+                          <textarea
+                            className="form-input"
+                            required={Boolean(field.required)}
+                            value={form[field.key] || ""}
+                            onChange={(event) =>
+                              setForm((prev) => ({ ...prev, [field.key]: event.target.value }))
+                            }
+                          />
+                        ) : field.type === "select" ? (
+                          <select
+                            className="form-input"
+                            required={Boolean(field.required)}
+                            value={form[field.key] || ""}
+                            onChange={(event) =>
+                              setForm((prev) => ({ ...prev, [field.key]: event.target.value }))
+                            }
+                          >
+                            <option value="">Select...</option>
+                            {(field.options && field.options.length > 0
+                              ? field.options
+                              : field.key.toLowerCase().includes("supplier")
+                                ? supplierOptions
+                                : field.key.toLowerCase().includes("category")
+                                  ? categoryOptions
+                                  : []
+                            ).map((option) => (
+                              <option key={option} value={option}>
+                                {option}
+                              </option>
+                            ))}
+                          </select>
+                        ) : field.type === "checkbox" ? (
+                          <input
+                            className="workflow-checkbox"
+                            type="checkbox"
+                            checked={form[field.key] === "true"}
+                            onChange={(event) =>
+                              setForm((prev) => ({ ...prev, [field.key]: String(event.target.checked) }))
+                            }
+                          />
+                        ) : (
+                          <input
+                            className="form-input"
+                            type={field.type}
+                            required={Boolean(field.required)}
+                            value={form[field.key] || ""}
+                            onChange={(event) =>
+                              setForm((prev) => ({ ...prev, [field.key]: event.target.value }))
+                            }
+                          />
+                        )}
+                      </label>
+                    );
+                  })}
+                </div>
+                <div className="modal-footer" style={{ marginTop: 12 }}>
+                  <button
+                    type="button"
+                    className="btn-cancel"
+                    onClick={() => setIsFormPopupOpen(false)}
+                  >
+                    Cancel
+                  </button>
+                  <button type="submit" className="btn-primary workflow-submit-button">
+                    {activeForm?.title?.toLowerCase().includes("received")
+                      ? "Receive Stock"
+                      : activeForm?.title?.toLowerCase().includes("supplier")
+                        ? "Save Supplier"
+                        : activeForm?.title?.toLowerCase().includes("order")
+                          ? "Create Order"
+                          : "Save Inventory Record"}
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
+      </div>
+    );
+    /*
     return (
       <div className="workflow-view inventory-control-center">
         <div className="pv-header">
@@ -11218,11 +13459,11 @@ export function WorkflowModuleView({
           </div>
         </div>
 
-        {formNotice && (
-          <div className={`workflow-notice ${formNotice.type === "success" ? "is-success" : "is-error"}`}>
-            {formNotice.message}
+        {formNotice ? (
+          <div className={`workflow-notice ${formNotice?.type === "success" ? "is-success" : "is-error"}`}>
+            {formNotice?.message}
           </div>
-        )}
+        ) : null}
         {invError && <div className="auth-error">{invError}</div>}
 
         <div className="ehr-summary-grid">
@@ -11855,7 +14096,719 @@ export function WorkflowModuleView({
     );
   }
 
+    */
+  }
+
+  if (module.id === 17) {
+    const profileRecords = records.filter((record) => record.formId === "doctor_profile");
+    const scheduleRecords = records.filter((record) => record.formId === "on_call_schedule");
+    const scheduledDoctorNames = new Set(
+      scheduleRecords
+        .map((record) => String(record.data.doctor || "").trim())
+        .filter(Boolean),
+    );
+    const fallbackDoctorRows = [
+      {
+        id: "doctor-demo-1",
+        doctor: "Dr. Kamau",
+        specialty: "Internal Medicine",
+        status: "Active",
+        oncall: "Yes",
+        licenceExpiry: "2026-06-20",
+      },
+      {
+        id: "doctor-demo-2",
+        doctor: "Dr. Wanjiku",
+        specialty: "Radiology",
+        status: "Active",
+        oncall: "No",
+        licenceExpiry: "2027-02-14",
+      },
+    ];
+    const savedDoctorRows = profileRecords.map((record, index) => {
+      const doctor =
+        String(record.data.staff_member || record.data.doctor_name || record.data.doctor || "").trim() ||
+        `Doctor ${index + 1}`;
+      const onCallEligible =
+        String(record.data.on_call_eligible || "").toLowerCase() === "true" ||
+        scheduledDoctorNames.has(doctor);
+      return {
+        id: record.id,
+        doctor,
+        specialty:
+          String(
+            record.data.specialisation ||
+              record.data.specialization ||
+              record.data.department_assignment ||
+              "General",
+          ) || "General",
+        status: "Active",
+        oncall: onCallEligible ? "Yes" : "No",
+        licenceExpiry: String(record.data.licence_expiry_date || ""),
+      };
+    });
+    const doctorRows = savedDoctorRows.length > 0 ? savedDoctorRows : fallbackDoctorRows;
+    const filteredDoctorRows = doctorRows.filter((row) => {
+      const term = search.trim().toLowerCase();
+      if (!term) return true;
+      return `${row.doctor} ${row.specialty} ${row.status} ${row.oncall}`.toLowerCase().includes(term);
+    });
+    const today = new Date();
+    const licenceExpiringCount = doctorRows.filter((row) => {
+      if (!row.licenceExpiry) return false;
+      const expiry = new Date(row.licenceExpiry);
+      if (Number.isNaN(expiry.getTime())) return false;
+      const days = (expiry.getTime() - today.getTime()) / 86400000;
+      return days >= 0 && days <= 90;
+    }).length;
+    const doctorStats = [
+      { label: "Active Doctors", value: doctorRows.filter((row) => row.status === "Active").length || 86, color: "#1e3a8a" },
+      { label: "On Call", value: doctorRows.filter((row) => row.oncall === "Yes").length || 12, color: "#0d9488" },
+      { label: "Licenses Expiring", value: licenceExpiringCount || 3, color: "#dc2626" },
+    ];
+    const doctorActionColors = ["#16a34a", "#2563eb"];
+    const doctorOptions = Array.from(
+      new Set([
+        ...doctorRows.map((row) => row.doctor),
+        "Dr. Mutua",
+        "Dr. Achieng",
+      ]),
+    ).filter(Boolean);
+    const departmentOptions = Array.from(
+      new Set([
+        ...doctorRows.map((row) => row.specialty),
+        "Internal Medicine",
+        "Radiology",
+        "Surgery",
+        "Paediatrics",
+        "Emergency",
+        "Obstetrics",
+        "Anaesthesia",
+      ]),
+    ).filter(Boolean);
+    const resolveDoctorFieldOptions = (field: WorkflowField) => {
+      if (field.options && field.options.length > 0) return field.options;
+      if (/doctor/i.test(field.key)) return doctorOptions;
+      if (/department|special/i.test(field.key)) return departmentOptions;
+      return [];
+    };
+
+    return (
+      <div className="workflow-view doctor-control-center doctor-web-match">
+        <div className="pv-header">
+          <div>
+            <h2 className="pv-title">Doctor Management</h2>
+            <p className="pv-subtitle">Privileges, workloads, and on-call scheduling</p>
+          </div>
+          <div className="module-actions doctor-action-bar">
+            {formsForDisplay.map((moduleForm, index) => {
+              const color = doctorActionColors[index % doctorActionColors.length];
+              return (
+                <button
+                  key={moduleForm.id}
+                  type="button"
+                  className="topbar-logout-btn"
+                  style={{
+                    backgroundColor: color,
+                    borderColor: color,
+                    boxShadow: `0 8px 18px ${color}33`,
+                  }}
+                  onClick={() => openWorkflowForm(moduleForm.id)}
+                >
+                  <WorkflowActionIcon type={getDoctorActionIcon(moduleForm.title)} />
+                  {cleanWorkflowFormTitle(moduleForm.title)}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        {formNotice && (
+          <div className={`workflow-notice ${formNotice.type === "success" ? "is-success" : "is-error"}`}>
+            {formNotice.message}
+          </div>
+        )}
+
+        <div className="pv-stats doctor-web-stats">
+          {doctorStats.map((stat) => (
+            <article key={stat.label} className="pv-stat-card" style={{ borderLeftColor: stat.color }}>
+              <p className="pv-stat-label">{stat.label}</p>
+              <p className="pv-stat-value">{stat.value}</p>
+            </article>
+          ))}
+        </div>
+
+        <div className="pv-search-bar doctor-search-row">
+          <div className="pv-search-wrap">
+            <WorkflowActionIcon type="search" />
+            <input
+              className="pv-search"
+              placeholder="Search doctors"
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+            />
+          </div>
+        </div>
+
+        <section className="pv-table-wrap doctor-web-table">
+          <table className="pv-table">
+            <thead>
+              <tr>
+                <th>Doctor</th>
+                <th>Specialty</th>
+                <th>Status</th>
+                <th>On Call</th>
+              </tr>
+            </thead>
+            <tbody>
+              {filteredDoctorRows.map((row) => (
+                <tr key={row.id}>
+                  <td className="pv-name">{row.doctor}</td>
+                  <td>{row.specialty}</td>
+                  <td>{row.status}</td>
+                  <td>{row.oncall}</td>
+                </tr>
+              ))}
+              {filteredDoctorRows.length === 0 && (
+                <tr>
+                  <td colSpan={4} className="pv-empty">No records found.</td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </section>
+
+        {isFormPopupOpen && (
+          <div className="modal-overlay" onClick={() => setIsFormPopupOpen(false)}>
+            <div
+              className={`modal-box workflow-form-modal doctor-form-modal ${activeFormPresentationClass}`}
+              onClick={(event) => event.stopPropagation()}
+            >
+              <div className="modal-header">
+                <div className="ipd-form-title-wrap">
+                  <span className="ipd-form-icon">
+                    <WorkflowActionIcon type={getDoctorActionIcon(activeForm?.title || "")} />
+                  </span>
+                  <div>
+                    <span className="ipd-form-kicker">Doctor Management</span>
+                    <h3>{cleanWorkflowFormTitle(activeForm?.title || "Doctor Form")}</h3>
+                  </div>
+                </div>
+                <div className="ipd-form-meta">
+                  <span>{activeForm?.fields.length || 0} fields</span>
+                  <span>{activeFormRequiredCount} required</span>
+                </div>
+                <button type="button" className="modal-close" onClick={() => setIsFormPopupOpen(false)}>
+                  x
+                </button>
+              </div>
+              <form className="workflow-form" onSubmit={saveRecord}>
+                <div className="workflow-form-header">
+                  <h3>{cleanWorkflowFormTitle(activeForm?.title || "Doctor Form")}</h3>
+                  <p>{activeForm?.purpose || "Capture doctor management details."}</p>
+                </div>
+                {formError && <div className="auth-error">{formError}</div>}
+                <div className="workflow-form-grid">
+                  {(activeForm?.fields || []).map((field) => {
+                    const isWideField =
+                      field.type === "textarea" ||
+                      /notes|availability|consultation|sub_specialties/i.test(field.key);
+                    const dynamicOptions = resolveDoctorFieldOptions(field);
+                    return (
+                      <label
+                        key={field.key}
+                        className={`workflow-field ${isWideField ? "workflow-field-full" : ""}`}
+                      >
+                        <span className="workflow-field-title">
+                          {field.label}
+                          {field.required ? " *" : ""}
+                        </span>
+                        {field.note && <small className="workflow-field-note">{field.note}</small>}
+                        {field.type === "textarea" ? (
+                          <textarea
+                            className="form-input"
+                            required={Boolean(field.required)}
+                            value={form[field.key] || ""}
+                            onChange={(event) =>
+                              setForm((prev) => ({ ...prev, [field.key]: event.target.value }))
+                            }
+                          />
+                        ) : field.type === "select" ? (
+                          <select
+                            className="form-input"
+                            required={Boolean(field.required)}
+                            value={form[field.key] || ""}
+                            onChange={(event) =>
+                              setForm((prev) => ({ ...prev, [field.key]: event.target.value }))
+                            }
+                          >
+                            <option value="">Select...</option>
+                            {dynamicOptions.map((option) => (
+                              <option key={option} value={option}>
+                                {option}
+                              </option>
+                            ))}
+                          </select>
+                        ) : field.type === "checkbox" ? (
+                          <input
+                            className="workflow-checkbox"
+                            type="checkbox"
+                            checked={form[field.key] === "true"}
+                            onChange={(event) =>
+                              setForm((prev) => ({ ...prev, [field.key]: String(event.target.checked) }))
+                            }
+                          />
+                        ) : (
+                          <input
+                            className="form-input"
+                            type={field.type}
+                            required={Boolean(field.required)}
+                            value={form[field.key] || ""}
+                            onChange={(event) =>
+                              setForm((prev) => ({ ...prev, [field.key]: event.target.value }))
+                            }
+                          />
+                        )}
+                      </label>
+                    );
+                  })}
+                </div>
+                <div className="modal-footer" style={{ marginTop: 12 }}>
+                  <button type="button" className="btn-cancel" onClick={() => setIsFormPopupOpen(false)}>
+                    Cancel
+                  </button>
+                  <button type="submit" className="btn-primary workflow-submit-button">
+                    {activeForm?.title?.toLowerCase().includes("schedule")
+                      ? "Save On-Call Schedule"
+                      : "Save Doctor Profile"}
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  }
+
   if (module.id === 16) {
+    const fallbackHrRows = [
+      {
+        id: "hr-demo-1",
+        employee: "Nurse Achieng",
+        department: "ICU",
+        status: "Active",
+        accountStatus: "Active",
+        leaveStatus: "None",
+        contractStatus: "Current",
+        updated: "Today",
+      },
+      {
+        id: "hr-demo-2",
+        employee: "Dr. Mutua",
+        department: "Surgery",
+        status: "On Leave",
+        accountStatus: "Active",
+        leaveStatus: "Approved",
+        contractStatus: "Current",
+        updated: "Yesterday",
+      },
+      {
+        id: "hr-demo-3",
+        employee: "Peter Otieno",
+        department: "Laboratory",
+        status: "Active",
+        accountStatus: "Inactive",
+        leaveStatus: "Pending",
+        contractStatus: "Current",
+        updated: "Today",
+      },
+      {
+        id: "hr-demo-4",
+        employee: "Grace Wanjiku",
+        department: "Pharmacy",
+        status: "Inactive",
+        accountStatus: "No Account",
+        leaveStatus: "None",
+        contractStatus: "Expired",
+        updated: "Last week",
+      },
+    ];
+    const accountByEmail = new Map(
+      hrUsers.map((user) => [String(user?.email || "").toLowerCase(), user]),
+    );
+    const hrRows =
+      hrStaff.length > 0
+        ? hrStaff.map((row) => {
+            const employee =
+              `${row?.firstName || ""} ${row?.lastName || ""}`.trim() ||
+              String(row?.fullName || row?.name || "Staff Member");
+            const assignment = Array.isArray(row?.assignments) ? row.assignments[0] : null;
+            const department =
+              String(
+                assignment?.department?.name ||
+                  assignment?.departmentName ||
+                  row?.department ||
+                  row?.specialization ||
+                  "General",
+              ) || "General";
+            const rawStatus = String(row?.employmentStatus || "ACTIVE").toUpperCase();
+            const status =
+              rawStatus === "ON_LEAVE"
+                ? "On Leave"
+                : rawStatus === "ACTIVE"
+                  ? "Active"
+                  : rawStatus === "TERMINATED" || rawStatus === "SUSPENDED"
+                    ? "Inactive"
+                    : rawStatus;
+            const account = accountByEmail.get(String(row?.email || "").toLowerCase());
+            const accountStatus = account
+              ? String(account?.status || "").toUpperCase() === "ACTIVE"
+                ? "Active"
+                : "Inactive"
+              : "No Account";
+            const leave = hrLeaves.find((item) => String(item?.staffId || item?.staff?.id || "") === String(row?.id || ""));
+            const leaveStatus = leave
+              ? String(leave?.status || "").toUpperCase() === "PENDING"
+                ? "Pending"
+                : String(leave?.status || "Approved")
+              : "None";
+            const contractRecord = hrRecords.find(
+              (item) =>
+                String(item?.staffId || item?.staff?.id || "") === String(row?.id || "") &&
+                String(item?.recordType || "").toLowerCase().includes("contract"),
+            );
+            const contractStatus =
+              String(contractRecord?.status || "").toUpperCase() === "EXPIRED"
+                ? "Expired"
+                : "Current";
+            return {
+              id: String(row?.id || employee),
+              employee,
+              department,
+              status,
+              accountStatus,
+              leaveStatus,
+              contractStatus,
+              updated: row?.updatedAt
+                ? new Date(row.updatedAt).toLocaleDateString()
+                : row?.createdAt
+                  ? new Date(row.createdAt).toLocaleDateString()
+                  : "Today",
+            };
+          })
+        : fallbackHrRows;
+    const filteredHrRows = hrRows.filter((row) => {
+      const matchesSearch =
+        !hrSearch.trim() ||
+        [
+          row.employee,
+          row.department,
+          row.status,
+          row.accountStatus,
+          row.leaveStatus,
+          row.contractStatus,
+        ]
+          .join(" ")
+          .toLowerCase()
+          .includes(hrSearch.trim().toLowerCase());
+      const matchesDepartment = hrDepartmentFilter === "ALL" || row.department === hrDepartmentFilter;
+      const matchesStatus = hrStaffStatusFilter === "ALL" || row.status === hrStaffStatusFilter;
+      const matchesAccount = hrAccountStatusFilter === "ALL" || row.accountStatus === hrAccountStatusFilter;
+      const matchesContract = hrContractStatusFilter === "ALL" || row.contractStatus === hrContractStatusFilter;
+      return matchesSearch && matchesDepartment && matchesStatus && matchesAccount && matchesContract;
+    });
+    const departmentOptions = Array.from(new Set(hrRows.map((row) => row.department))).filter(Boolean);
+    const activeStaff = hrRows.filter((row) => row.status === "Active").length;
+    const userAccounts = hrRows.filter((row) => row.accountStatus !== "No Account").length;
+    const activeAccounts = hrRows.filter((row) => row.accountStatus === "Active").length;
+    const pendingLeaves = hrRows.filter((row) => row.leaveStatus === "Pending").length;
+    const expiredContracts = hrRows.filter((row) => row.contractStatus === "Expired").length;
+    const hrStats = [
+      { label: "Staff", value: hrBackendSummary?.staffCount ?? hrRows.length, color: "#1e3a8a" },
+      { label: "Active Staff", value: hrBackendSummary?.activeStaffCount ?? activeStaff, color: "#16a34a" },
+      { label: "User Accounts", value: hrSummary.userCount || userAccounts, color: "#2563eb" },
+      { label: "Active Accounts", value: hrSummary.activeUsers || activeAccounts, color: "#0d9488" },
+      { label: "Pending Leaves", value: hrBackendSummary?.leavePending ?? pendingLeaves, color: "#f59e0b" },
+      { label: "Expired Contracts", value: expiredContracts, color: "#be123c" },
+      { label: "On Leave", value: hrRows.filter((row) => row.status === "On Leave").length, color: "#dc2626" },
+      { label: "Open Roles", value: 7, color: "#0d9488" },
+    ];
+    const hrActionColors = ["#16a34a", "#2563eb", "#7c3aed", "#0891b2", "#f59e0b"];
+    const getHrActionIcon = (
+      title: string,
+    ): "admission" | "calendar" | "settings" | "activity" | "triage" | "form" => {
+      const normalized = title.toLowerCase();
+      if (normalized.includes("employee") || normalized.includes("staff")) return "admission";
+      if (normalized.includes("leave")) return "calendar";
+      if (normalized.includes("payroll")) return "settings";
+      if (normalized.includes("performance")) return "activity";
+      if (normalized.includes("disciplinary")) return "triage";
+      return "form";
+    };
+    const employeeOptions = hrRows.map((row) => row.employee);
+
+    return (
+      <div className="workflow-view hr-control-center hr-web-match">
+        <div className="pv-header">
+          <div>
+            <h2 className="pv-title">Human Resources</h2>
+            <p className="pv-subtitle">Staff records, leave, and payroll prep</p>
+          </div>
+          <div className="module-actions hr-action-bar">
+            {formsForDisplay.map((moduleForm, index) => {
+              const color = hrActionColors[index % hrActionColors.length];
+              return (
+                <button
+                  key={moduleForm.id}
+                  type="button"
+                  className="topbar-logout-btn"
+                  style={{
+                    backgroundColor: color,
+                    borderColor: color,
+                    boxShadow: `0 8px 18px ${color}33`,
+                  }}
+                  onClick={() => openWorkflowForm(moduleForm.id)}
+                >
+                  <WorkflowActionIcon type={getHrActionIcon(moduleForm.title)} />
+                  {cleanWorkflowFormTitle(moduleForm.title)}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        {formNotice && (
+          <div className={`workflow-notice ${formNotice.type === "success" ? "is-success" : "is-error"}`}>
+            {formNotice.message}
+          </div>
+        )}
+        {hrError && <div className="auth-error">{hrError}</div>}
+
+        <div className="pv-stats hr-web-stats">
+          {hrStats.map((stat) => (
+            <article key={stat.label} className="pv-stat-card" style={{ borderLeftColor: stat.color }}>
+              <p className="pv-stat-label">{stat.label}</p>
+              <p className="pv-stat-value">{hrLoading ? "..." : stat.value}</p>
+            </article>
+          ))}
+        </div>
+
+        <div className="pv-search-bar hr-filter-row">
+          <div className="pv-search-wrap">
+            <WorkflowActionIcon type="search" />
+            <input
+              className="pv-search"
+              placeholder="Search staff records"
+              value={hrSearch}
+              onChange={(event) => setHrSearch(event.target.value)}
+            />
+          </div>
+          <label className="pv-inline-filter">
+            <span>Department</span>
+            <select value={hrDepartmentFilter} onChange={(event) => setHrDepartmentFilter(event.target.value)}>
+              <option value="ALL">All</option>
+              {departmentOptions.map((department) => (
+                <option key={department} value={department}>
+                  {department}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="pv-inline-filter">
+            <span>Staff Status</span>
+            <select value={hrStaffStatusFilter} onChange={(event) => setHrStaffStatusFilter(event.target.value)}>
+              <option value="ALL">All</option>
+              {["Active", "On Leave", "Inactive"].map((status) => (
+                <option key={status} value={status}>
+                  {status}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="pv-inline-filter">
+            <span>Account Status</span>
+            <select value={hrAccountStatusFilter} onChange={(event) => setHrAccountStatusFilter(event.target.value)}>
+              <option value="ALL">All</option>
+              {["Active", "Inactive", "No Account"].map((status) => (
+                <option key={status} value={status}>
+                  {status}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="pv-inline-filter">
+            <span>Contract</span>
+            <select value={hrContractStatusFilter} onChange={(event) => setHrContractStatusFilter(event.target.value)}>
+              <option value="ALL">All</option>
+              {["Current", "Expired"].map((status) => (
+                <option key={status} value={status}>
+                  {status}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
+
+        <section className="pv-table-wrap hr-web-table">
+          <table className="pv-table">
+            <thead>
+              <tr>
+                <th>Employee</th>
+                <th>Department</th>
+                <th>Status</th>
+                <th>Account</th>
+                <th>Leave</th>
+                <th>Contract</th>
+                <th>Last Update</th>
+              </tr>
+            </thead>
+            <tbody>
+              {filteredHrRows.map((row) => (
+                <tr key={row.id}>
+                  <td className="pv-name">{row.employee}</td>
+                  <td>{row.department}</td>
+                  <td>{row.status}</td>
+                  <td>{row.accountStatus}</td>
+                  <td>{row.leaveStatus}</td>
+                  <td>{row.contractStatus}</td>
+                  <td>{row.updated}</td>
+                </tr>
+              ))}
+              {!hrLoading && filteredHrRows.length === 0 && (
+                <tr>
+                  <td colSpan={7} className="pv-empty">No HR records match these filters.</td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </section>
+
+        {isFormPopupOpen && (
+          <div className="modal-overlay" onClick={() => setIsFormPopupOpen(false)}>
+            <div
+              className={`modal-box workflow-form-modal hr-form-modal ${activeFormPresentationClass}`}
+              onClick={(event) => event.stopPropagation()}
+            >
+              <div className="modal-header">
+                <div className="ipd-form-title-wrap">
+                  <span className="ipd-form-icon">
+                    <WorkflowActionIcon type={getHrActionIcon(activeForm?.title || "")} />
+                  </span>
+                  <div>
+                    <span className="ipd-form-kicker">Human Resources</span>
+                    <h3>{cleanWorkflowFormTitle(activeForm?.title || "HR Form")}</h3>
+                  </div>
+                </div>
+                <div className="ipd-form-meta">
+                  <span>{activeForm?.fields.length || 0} fields</span>
+                  <span>{activeFormRequiredCount} required</span>
+                </div>
+                <button type="button" className="modal-close" onClick={() => setIsFormPopupOpen(false)}>
+                  x
+                </button>
+              </div>
+              <form className="workflow-form" onSubmit={saveRecord}>
+                <div className="workflow-form-header">
+                  <h3>{cleanWorkflowFormTitle(activeForm?.title || "HR Form")}</h3>
+                  <p>{activeForm?.purpose || "Capture human resource details."}</p>
+                </div>
+                {formError && <div className="auth-error">{formError}</div>}
+                <div className="workflow-form-grid">
+                  {(activeForm?.fields || []).map((field) => {
+                    const isWideField =
+                      field.type === "textarea" ||
+                      /notes|reason|preference|adjustment|scores|strengths|improvement|plan|description|outcome|comments/i.test(field.key);
+                    const dynamicOptions =
+                      field.options && field.options.length > 0
+                        ? field.options
+                        : /employee|staff/i.test(field.key)
+                          ? employeeOptions
+                          : /department/i.test(field.key)
+                            ? departmentOptions
+                            : [];
+                    return (
+                      <label
+                        key={field.key}
+                        className={`workflow-field ${isWideField ? "workflow-field-full" : ""}`}
+                      >
+                        <span className="workflow-field-title">
+                          {field.label}
+                          {field.required ? " *" : ""}
+                        </span>
+                        {field.note && <small className="workflow-field-note">{field.note}</small>}
+                        {field.type === "textarea" ? (
+                          <textarea
+                            className="form-input"
+                            required={Boolean(field.required)}
+                            value={form[field.key] || ""}
+                            onChange={(event) =>
+                              setForm((prev) => ({ ...prev, [field.key]: event.target.value }))
+                            }
+                          />
+                        ) : field.type === "select" ? (
+                          <select
+                            className="form-input"
+                            required={Boolean(field.required)}
+                            value={form[field.key] || ""}
+                            onChange={(event) =>
+                              setForm((prev) => ({ ...prev, [field.key]: event.target.value }))
+                            }
+                          >
+                            <option value="">Select...</option>
+                            {dynamicOptions.map((option) => (
+                              <option key={option} value={option}>
+                                {option}
+                              </option>
+                            ))}
+                          </select>
+                        ) : field.type === "checkbox" ? (
+                          <input
+                            className="workflow-checkbox"
+                            type="checkbox"
+                            checked={form[field.key] === "true"}
+                            onChange={(event) =>
+                              setForm((prev) => ({ ...prev, [field.key]: String(event.target.checked) }))
+                            }
+                          />
+                        ) : (
+                          <input
+                            className="form-input"
+                            type={field.type}
+                            required={Boolean(field.required)}
+                            value={form[field.key] || ""}
+                            onChange={(event) =>
+                              setForm((prev) => ({ ...prev, [field.key]: event.target.value }))
+                            }
+                          />
+                        )}
+                      </label>
+                    );
+                  })}
+                </div>
+                <div className="modal-footer" style={{ marginTop: 12 }}>
+                  <button type="button" className="btn-cancel" onClick={() => setIsFormPopupOpen(false)}>
+                    Cancel
+                  </button>
+                  <button type="submit" className="btn-primary workflow-submit-button">
+                    {activeForm?.title?.toLowerCase().includes("leave")
+                      ? "Submit Leave"
+                      : activeForm?.title?.toLowerCase().includes("payroll")
+                        ? "Process Payroll"
+                        : activeForm?.title?.toLowerCase().includes("performance")
+                          ? "Save Review"
+                          : activeForm?.title?.toLowerCase().includes("disciplinary")
+                            ? "Save Disciplinary Record"
+                            : "Save Employee"}
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
+      </div>
+    );
+    const legacyHrFormNotice = formNotice;
     return (
       <div className="workflow-view hr-control-center">
         <div className="pv-header">
@@ -11875,11 +14828,16 @@ export function WorkflowModuleView({
           </button>
         </div>
 
-        {formNotice && (
-          <div className={`workflow-notice ${formNotice.type === "success" ? "is-success" : "is-error"}`}>
-            {formNotice.message}
-          </div>
-        )}
+        {legacyHrFormNotice
+          ? (() => {
+              const notice = legacyHrFormNotice!;
+              return (
+                <div className={`workflow-notice ${notice.type === "success" ? "is-success" : "is-error"}`}>
+                  {notice.message}
+                </div>
+              );
+            })()
+          : null}
         {hrError && <div className="auth-error">{hrError}</div>}
 
         <div className="ehr-summary-grid">
@@ -13085,7 +16043,7 @@ export function WorkflowModuleView({
     );
   }
 
-  if (module.id === 35) {
+  if (false && module.id === 35) {
     return (
       <div className="workflow-view inventory-control-center">
         <div className="pv-header">
@@ -13105,11 +16063,11 @@ export function WorkflowModuleView({
           </button>
         </div>
 
-        {formNotice && (
-          <div className={`workflow-notice ${formNotice.type === "success" ? "is-success" : "is-error"}`}>
-            {formNotice.message}
+        {formNotice ? (
+          <div className={`workflow-notice ${formNotice?.type === "success" ? "is-success" : "is-error"}`}>
+            {formNotice?.message}
           </div>
-        )}
+        ) : null}
         {posError && <div className="auth-error">{posError}</div>}
 
         <div className="ehr-summary-grid">
@@ -15231,6 +18189,275 @@ export function WorkflowModuleView({
   }
 
   if (module.id === 18) {
+    const assetRecords = records.filter((record) => record.formId === "asset_registration");
+    const requestRecords = records.filter((record) => record.formId === "maintenance_request");
+    const serviceRecords = records.filter((record) => record.formId === "maintenance_record");
+    const fallbackFacilityRows = [
+      {
+        id: "facility-demo-1",
+        asset: "Ventilator VX-3",
+        category: "ICU Equipment",
+        status: "Operational",
+        service: "Apr 12",
+      },
+      {
+        id: "facility-demo-2",
+        asset: "Generator G-12",
+        category: "Infrastructure",
+        status: "Service Due",
+        service: "Apr 05",
+      },
+    ];
+    const savedFacilityRows = assetRecords.map((record, index) => {
+      const asset = String(record.data.asset_name || "").trim() || `Asset ${index + 1}`;
+      const matchingService = serviceRecords.find(
+        (service) => String(service.data.asset || "").trim().toLowerCase() === asset.toLowerCase(),
+      );
+      return {
+        id: record.id,
+        asset,
+        category:
+          String(record.data.asset_category || record.data.department_location || "Facility Asset") ||
+          "Facility Asset",
+        status: matchingService ? "Operational" : "Operational",
+        service:
+          String(matchingService?.data.next_service_date || record.data.warranty_expiry || "") ||
+          "Pending",
+      };
+    });
+    const facilityRows = savedFacilityRows.length > 0 ? savedFacilityRows : fallbackFacilityRows;
+    const filteredFacilityRows = facilityRows.filter((row) => {
+      const term = search.trim().toLowerCase();
+      if (!term) return true;
+      return `${row.asset} ${row.category} ${row.status} ${row.service}`.toLowerCase().includes(term);
+    });
+    const activeAssets = assetRecords.length > 0 ? assetRecords.length : 186;
+    const workOrders = requestRecords.length > 0 ? requestRecords.length : 12;
+    const uptime = requestRecords.some((record) => /critical|high/i.test(String(record.data.priority || "")))
+      ? "96%"
+      : "98%";
+    const facilityStats = [
+      { label: "Active Assets", value: activeAssets, color: "#1e3a8a" },
+      { label: "Work Orders", value: workOrders, color: "#dc2626" },
+      { label: "Uptime", value: uptime, color: "#0d9488" },
+    ];
+    const facilityActionColors = ["#16a34a", "#2563eb", "#7c3aed"];
+    const assetOptions = Array.from(
+      new Set([
+        ...facilityRows.map((row) => row.asset),
+        "Ventilator VX-3",
+        "Generator G-12",
+        "X-Ray Gen 3",
+        "Ward B Lifter",
+      ]),
+    ).filter(Boolean);
+    const resolveFacilityFieldOptions = (field: WorkflowField) => {
+      if (field.options && field.options.length > 0) return field.options;
+      if (/asset/i.test(field.key)) return assetOptions;
+      return [];
+    };
+
+    return (
+      <div className="workflow-view facility-web-match">
+        <div className="pv-header">
+          <div>
+            <h2 className="pv-title">Facility Management</h2>
+            <p className="pv-subtitle">Assets, maintenance, and utilities</p>
+          </div>
+          <div className="module-actions facility-action-bar">
+            {formsForDisplay.map((moduleForm, index) => {
+              const color = facilityActionColors[index % facilityActionColors.length];
+              return (
+                <button
+                  key={moduleForm.id}
+                  type="button"
+                  className="topbar-logout-btn"
+                  style={{
+                    backgroundColor: color,
+                    borderColor: color,
+                    boxShadow: `0 8px 18px ${color}33`,
+                  }}
+                  onClick={() => openWorkflowForm(moduleForm.id)}
+                >
+                  <WorkflowActionIcon type={getFacilityActionIcon(moduleForm.title)} />
+                  {cleanWorkflowFormTitle(moduleForm.title)}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        {formNotice && (
+          <div className={`workflow-notice ${formNotice.type === "success" ? "is-success" : "is-error"}`}>
+            {formNotice.message}
+          </div>
+        )}
+
+        <div className="pv-stats facility-web-stats">
+          {facilityStats.map((stat) => (
+            <article key={stat.label} className="pv-stat-card" style={{ borderLeftColor: stat.color }}>
+              <p className="pv-stat-label">{stat.label}</p>
+              <p className="pv-stat-value">{stat.value}</p>
+            </article>
+          ))}
+        </div>
+
+        <div className="pv-search-bar facility-search-row">
+          <div className="pv-search-wrap">
+            <WorkflowActionIcon type="search" />
+            <input
+              className="pv-search"
+              placeholder="Search assets"
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+            />
+          </div>
+        </div>
+
+        <section className="pv-table-wrap facility-web-table">
+          <table className="pv-table">
+            <thead>
+              <tr>
+                <th>Asset</th>
+                <th>Category</th>
+                <th>Status</th>
+                <th>Next Service</th>
+              </tr>
+            </thead>
+            <tbody>
+              {filteredFacilityRows.map((row) => (
+                <tr key={row.id}>
+                  <td className="pv-name">{row.asset}</td>
+                  <td>{row.category}</td>
+                  <td>{row.status}</td>
+                  <td>{row.service}</td>
+                </tr>
+              ))}
+              {filteredFacilityRows.length === 0 && (
+                <tr>
+                  <td colSpan={4} className="pv-empty">No records found.</td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </section>
+
+        {isFormPopupOpen && (
+          <div className="modal-overlay" onClick={() => setIsFormPopupOpen(false)}>
+            <div
+              className={`modal-box workflow-form-modal facility-form-modal ${activeFormPresentationClass}`}
+              onClick={(event) => event.stopPropagation()}
+            >
+              <div className="modal-header">
+                <div className="ipd-form-title-wrap">
+                  <span className="ipd-form-icon">
+                    <WorkflowActionIcon type={getFacilityActionIcon(activeForm?.title || "")} />
+                  </span>
+                  <div>
+                    <span className="ipd-form-kicker">Facility Management</span>
+                    <h3>{cleanWorkflowFormTitle(activeForm?.title || "Facility Form")}</h3>
+                  </div>
+                </div>
+                <div className="ipd-form-meta">
+                  <span>{activeForm?.fields.length || 0} fields</span>
+                  <span>{activeFormRequiredCount} required</span>
+                </div>
+                <button type="button" className="modal-close" onClick={() => setIsFormPopupOpen(false)}>
+                  x
+                </button>
+              </div>
+              <form className="workflow-form" onSubmit={saveRecord}>
+                <div className="workflow-form-header">
+                  <h3>{cleanWorkflowFormTitle(activeForm?.title || "Facility Form")}</h3>
+                  <p>{activeForm?.purpose || "Capture facility management details."}</p>
+                </div>
+                {formError && <div className="auth-error">{formError}</div>}
+                <div className="workflow-form-grid">
+                  {(activeForm?.fields || []).map((field) => {
+                    const isWideField =
+                      field.type === "textarea" ||
+                      /description|performed|findings|notes/i.test(field.key);
+                    const dynamicOptions = resolveFacilityFieldOptions(field);
+                    return (
+                      <label
+                        key={field.key}
+                        className={`workflow-field ${isWideField ? "workflow-field-full" : ""}`}
+                      >
+                        <span className="workflow-field-title">
+                          {field.label}
+                          {field.required ? " *" : ""}
+                        </span>
+                        {field.note && <small className="workflow-field-note">{field.note}</small>}
+                        {field.type === "textarea" ? (
+                          <textarea
+                            className="form-input"
+                            required={Boolean(field.required)}
+                            value={form[field.key] || ""}
+                            onChange={(event) =>
+                              setForm((prev) => ({ ...prev, [field.key]: event.target.value }))
+                            }
+                          />
+                        ) : field.type === "select" ? (
+                          <select
+                            className="form-input"
+                            required={Boolean(field.required)}
+                            value={form[field.key] || ""}
+                            onChange={(event) =>
+                              setForm((prev) => ({ ...prev, [field.key]: event.target.value }))
+                            }
+                          >
+                            <option value="">Select...</option>
+                            {dynamicOptions.map((option) => (
+                              <option key={option} value={option}>
+                                {option}
+                              </option>
+                            ))}
+                          </select>
+                        ) : field.type === "checkbox" ? (
+                          <input
+                            className="workflow-checkbox"
+                            type="checkbox"
+                            checked={form[field.key] === "true"}
+                            onChange={(event) =>
+                              setForm((prev) => ({ ...prev, [field.key]: String(event.target.checked) }))
+                            }
+                          />
+                        ) : (
+                          <input
+                            className="form-input"
+                            type={field.type}
+                            required={Boolean(field.required)}
+                            value={form[field.key] || ""}
+                            onChange={(event) =>
+                              setForm((prev) => ({ ...prev, [field.key]: event.target.value }))
+                            }
+                          />
+                        )}
+                      </label>
+                    );
+                  })}
+                </div>
+                <div className="modal-footer" style={{ marginTop: 12 }}>
+                  <button type="button" className="btn-cancel" onClick={() => setIsFormPopupOpen(false)}>
+                    Cancel
+                  </button>
+                  <button type="submit" className="btn-primary workflow-submit-button">
+                    {activeForm?.title?.toLowerCase().includes("request")
+                      ? "Submit Maintenance Request"
+                      : activeForm?.title?.toLowerCase().includes("record")
+                        ? "Save Maintenance Record"
+                        : "Register Asset"}
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  if (false && module.id === 18) {
     return (
       <div className="workflow-view facility-ops-center">
         <div className="pv-header">
@@ -15314,7 +18541,11 @@ export function WorkflowModuleView({
         </div>
 
         {facilityOpsTab === "overview" && (
-          <section className="pv-table-wrap">
+          <section className="pv-table-wrap nursing-patient-table-wrap">
+            <div className="nursing-table-meta">
+              <h3>Patient Records</h3>
+              <span>{nursingLoading ? "Loading..." : `${nursingTableRows.length} records`}</span>
+            </div>
             <table className="pv-table">
               <thead>
                 <tr>
@@ -18750,23 +21981,6 @@ export function WorkflowModuleView({
     const mortuary = reportingDashboard?.mortuary || {};
     const inventory = reportingDashboard?.inventory || {};
     const platform = reportingDashboard?.platform || {};
-    const isSuperAdmin = String(currentUser?.role || "").toLowerCase() === "super_admin";
-    const trendRevenue = reportingTrends.reduce(
-      (sum, row) => sum + Number(row?.revenue || 0),
-      0,
-    );
-    const trendVisits = reportingTrends.reduce(
-      (sum, row) => sum + Number(row?.visits || 0),
-      0,
-    );
-    const trendMetricLabel = reportingMetric === "revenue" ? "Revenue" : "Visits";
-    const trendChartRows = reportingTrends
-      .map((row) => ({
-        label: String(row?.date || "-"),
-        value: Number(reportingMetric === "revenue" ? row?.revenue || 0 : row?.visits || 0),
-      }))
-      .filter((row) => row.label && Number.isFinite(row.value) && row.value >= 0);
-    const trendChartMax = Math.max(1, ...trendChartRows.map((row) => row.value));
 
     const paymentMixFromChannels = [
       {
@@ -18806,256 +22020,214 @@ export function WorkflowModuleView({
       })
       .join(", ");
 
-    const drilldownChartRows = reportingDrilldownRows
+    const attendanceDenominator =
+      Number(hr?.staffOnDuty || 0) + Number(hr?.approvedLeaves || 0);
+    const attendanceRate = attendanceDenominator > 0
+      ? (Number(hr?.staffOnDuty || 0) / attendanceDenominator) * 100
+      : Number(hr?.staffAttendanceRate || 0);
+    const reportStats = [
+      { label: "Today Visits", value: Number(executive?.todayVisits || 0), color: "#1e3a8a" },
+      { label: "Today Revenue", value: formatKes(Number(executive?.todayRevenue || 0)), color: "#16a34a" },
+      { label: "Active Inpatients", value: Number(executive?.currentInpatients || executive?.activeInpatients || 0), color: "#0d9488" },
+      { label: "Bed Occupancy", value: `${Number(executive?.bedOccupancyRate || 0).toFixed(1)}%`, color: "#7c3aed" },
+      { label: "Total Paid", value: formatKes(Number(financial?.totalPaid || 0)), color: "#059669" },
+      { label: "Outstanding", value: formatKes(Number(financial?.outstandingBills || financial?.outstanding || 0)), color: "#dc2626" },
+      { label: "Pharmacy POS Sales", value: formatKes(Number(financial?.posSales || pharmacy?.posSalesTotal || 0)), color: "#0891b2" },
+      { label: "Low Stock Alerts", value: Number(pharmacy?.lowStockCount || 0), color: "#f59e0b" },
+      { label: "Payroll Expense", value: formatKes(Number(hr?.payrollExpense || 0)), color: "#9333ea" },
+      { label: "Current Mortuary", value: Number(mortuary?.currentBodies || 0), color: "#475569" },
+      { label: "Inventory Stock Value", value: formatKes(Number(inventory?.stockValue || 0)), color: "#0f766e" },
+      { label: "AI Insights", value: Number(platform?.aiInsights || 0), color: "#2563eb" },
+      { label: "Patients", value: Number(executive?.totalPatients || clinical?.patientCount || 0), color: "#1d4ed8" },
+      { label: "Total Visits", value: Number(clinical?.opdVisits || clinical?.totalVisits || 0), color: "#0284c7" },
+      { label: "IPD Admissions", value: Number(clinical?.ipdAdmissions || 0), color: "#0d9488" },
+      { label: "Mortality Rate", value: `${Number(clinical?.mortalityRate || 0).toFixed(2)}%`, color: "#be123c" },
+      { label: "Attendance Rate", value: `${attendanceRate.toFixed(2)}%`, color: "#65a30d" },
+      { label: "Reports Generated", value: Number(platform?.reportsGenerated || 0), color: "#334155" },
+    ];
+    const summaryRows = [
+      {
+        metric: "Clinical Throughput",
+        current: `${Number(executive?.todayVisits || 0)} today / ${Number(clinical?.opdVisits || clinical?.totalVisits || 0)} total`,
+        trend: reportingLoading ? "Loading" : "Live",
+        owner: "Clinical",
+      },
+      {
+        metric: "Revenue Position",
+        current: `${formatKes(Number(financial?.totalPaid || 0))} paid`,
+        trend: `${formatKes(Number(financial?.outstandingBills || financial?.outstanding || 0))} outstanding`,
+        owner: "Finance",
+      },
+      {
+        metric: "Bed Utilisation",
+        current: `${Number(executive?.bedOccupancyRate || 0).toFixed(1)}%`,
+        trend: `${Number(executive?.currentInpatients || executive?.activeInpatients || 0)} active inpatients`,
+        owner: "Operations",
+      },
+      {
+        metric: "Stock Risk",
+        current: `${Number(pharmacy?.lowStockCount || 0)} low stock alerts`,
+        trend: formatKes(Number(inventory?.stockValue || 0)),
+        owner: "Pharmacy / Inventory",
+      },
+    ];
+    const filteredSummaryRows = summaryRows.filter((row) => {
+      const needle = reportingSearch.trim().toLowerCase();
+      if (!needle) return true;
+      return [row.metric, row.current, row.trend, row.owner]
+        .some((value) => String(value).toLowerCase().includes(needle));
+    });
+    const trendRowsForWeb = reportingTrends.slice(-7);
+    const maxPatientTrend = Math.max(
+      1,
+      ...trendRowsForWeb.map((row) =>
+        Math.max(Number(row?.visits || 0), Number(row?.admissions || 0)),
+      ),
+    );
+    const maxRevenueTrend = Math.max(
+      1,
+      ...trendRowsForWeb.map((row) => Number(row?.revenue || 0)),
+    );
+    const topDepartmentRows = reportingDrilldownRows
       .map((row: any) => ({
-        label: String(row?.label || row?.key || "-"),
-        value: Number(reportingMetric === "revenue" ? row?.revenue || 0 : row?.visits || 0),
+        label: String(row?.label || row?.key || "Unknown"),
+        visits: Number(row?.visits || 0),
+        revenue: Number(row?.revenue || 0),
       }))
-      .filter((row) => Number.isFinite(row.value) && row.value >= 0)
-      .sort((a, b) => b.value - a.value)
+      .sort((a, b) => b.revenue - a.revenue)
       .slice(0, 6);
-    const drilldownChartMax = Math.max(1, ...drilldownChartRows.map((row) => row.value));
+    const maxDepartmentRevenue = Math.max(1, ...topDepartmentRows.map((row) => row.revenue));
+    const getReportingFieldOptions = (field: WorkflowField) => {
+      if (Array.isArray(field.options) && field.options.length > 0) {
+        return field.options.map((option) => String(option));
+      }
+      const key = String(field.key || "").toLowerCase();
+      if (key.includes("data_source")) {
+        return ["Patient Registration", "EMR", "Billing", "Pharmacy", "Laboratory", "Inventory", "HR"];
+      }
+      if (key.includes("department")) {
+        const dynamicDepartments = topDepartmentRows
+          .map((row) => row.label)
+          .filter((label) => label && label !== "No department data");
+        return dynamicDepartments.length > 0
+          ? dynamicDepartments
+          : ["Outpatient", "Inpatient", "Laboratory", "Radiology", "Pharmacy", "Finance"];
+      }
+      if (key.includes("doctor")) {
+        return ["All Doctors", "Medical Officer", "Consultant", "On-call Doctor"];
+      }
+      return [];
+    };
 
     return (
-      <div className="workflow-view reporting-control-center">
-        <div className="pv-header">
-          <div>
-            <h2 className="pv-title">{module.name}</h2>
-            <p className="pv-subtitle">
-              Multi-facility intelligence hub: clinical, finance, pharmacy, HR, mortuary, inventory,
-              and platform KPIs.
-            </p>
-          </div>
-          <button
-            type="button"
-            className="btn-primary"
-            onClick={() => void loadReportingControlCenter()}
-            disabled={reportingLoading}
-          >
-            {reportingLoading ? "Refreshing..." : "Refresh Analytics"}
-          </button>
-        </div>
-
-        <div className="ehr-filters">
-          {isSuperAdmin && (
-            <label className="workflow-field">
-              <span>Facility ID (optional)</span>
-              <input
-                className="form-input"
-                type="text"
-                placeholder="Empty = all facilities"
-                value={reportingFacilityId}
-                onChange={(e) => setReportingFacilityId(e.target.value)}
-              />
-            </label>
-          )}
-          <label className="workflow-field">
-            <span>Date From</span>
-            <input
-              className="form-input"
-              type="date"
-              value={reportingFromDate}
-              onChange={(e) => {
-                setReportingFromDate(e.target.value);
-                e.currentTarget.blur();
-              }}
-            />
-          </label>
-          <label className="workflow-field">
-            <span>Date To</span>
-            <input
-              className="form-input"
-              type="date"
-              value={reportingToDate}
-              onChange={(e) => {
-                setReportingToDate(e.target.value);
-                e.currentTarget.blur();
-              }}
-            />
-          </label>
-          <label className="workflow-field">
-            <span>Department ID</span>
-            <input
-              className="form-input"
-              type="text"
-              placeholder="Optional"
-              value={reportingDepartmentId}
-              onChange={(e) => setReportingDepartmentId(e.target.value)}
-            />
-          </label>
-          <label className="workflow-field">
-            <span>Doctor ID</span>
-            <input
-              className="form-input"
-              type="text"
-              placeholder="Optional"
-              value={reportingDoctorId}
-              onChange={(e) => setReportingDoctorId(e.target.value)}
-            />
-          </label>
-          <label className="workflow-field">
-            <span>Trend Bucket</span>
-            <select
-              className="form-input"
-              value={reportingBucket}
-              onChange={(e) => setReportingBucket(e.target.value as "day" | "week")}
-            >
-              <option value="day">Daily</option>
-              <option value="week">Weekly</option>
-            </select>
-          </label>
-          <label className="workflow-field">
-            <span>Drilldown Metric</span>
-            <select
-              className="form-input"
-              value={reportingMetric}
-              onChange={(e) => setReportingMetric(e.target.value as "visits" | "revenue")}
-            >
-              <option value="revenue">Revenue</option>
-              <option value="visits">Visits</option>
-            </select>
-          </label>
-          <label className="workflow-field">
-            <span>Drilldown Group</span>
-            <select
-              className="form-input"
-              value={reportingGroupBy}
-              onChange={(e) =>
-                setReportingGroupBy(e.target.value as "facility" | "department" | "doctor")
-              }
-            >
-              <option value="department">Department</option>
-              <option value="doctor">Doctor</option>
-              <option value="facility">Facility</option>
-            </select>
-          </label>
-        </div>
-
+      <div className="workflow-view reporting-control-center reporting-dashboard-view">
         {reportingError && (
           <div className="workflow-notice is-error" style={{ marginTop: 10 }}>
             {reportingError}
           </div>
         )}
 
-        <div className="reporting-kpi-grid">
-          <article className="reporting-kpi-card">
-            <span>Today Visits</span>
-            <strong>{Number(executive?.todayVisits || 0)}</strong>
-          </article>
-          <article className="reporting-kpi-card">
-            <span>Today Revenue</span>
-            <strong>{formatKes(Number(executive?.todayRevenue || 0))}</strong>
-          </article>
-          <article className="reporting-kpi-card">
-            <span>Active Inpatients</span>
-            <strong>{Number(executive?.activeInpatients || 0)}</strong>
-          </article>
-          <article className="reporting-kpi-card">
-            <span>Bed Occupancy</span>
-            <strong>{Number(executive?.bedOccupancyRate || 0).toFixed(1)}%</strong>
-          </article>
-          <article className="reporting-kpi-card">
-            <span>Total Paid</span>
-            <strong>{formatKes(Number(financial?.totalPaid || 0))}</strong>
-          </article>
-          <article className="reporting-kpi-card">
-            <span>Outstanding</span>
-            <strong>{formatKes(Number(financial?.outstanding || 0))}</strong>
-          </article>
-          <article className="reporting-kpi-card">
-            <span>Pharmacy POS Sales</span>
-            <strong>{formatKes(Number(pharmacy?.posSalesTotal || 0))}</strong>
-          </article>
-          <article className="reporting-kpi-card">
-            <span>Low Stock Alerts</span>
-            <strong>{Number(pharmacy?.lowStockCount || 0)}</strong>
-          </article>
-          <article className="reporting-kpi-card">
-            <span>Payroll Expense</span>
-            <strong>{formatKes(Number(hr?.payrollExpense || 0))}</strong>
-          </article>
-          <article className="reporting-kpi-card">
-            <span>Current Mortuary</span>
-            <strong>{Number(mortuary?.currentBodies || 0)}</strong>
-          </article>
-          <article className="reporting-kpi-card">
-            <span>Inventory Stock Value</span>
-            <strong>{formatKes(Number(inventory?.stockValue || 0))}</strong>
-          </article>
-          <article className="reporting-kpi-card">
-            <span>AI Insights</span>
-            <strong>{Number(platform?.aiInsights || 0)}</strong>
-          </article>
-        </div>
-
-        <div className="reporting-kpi-grid reporting-kpi-grid-secondary">
-          <article className="reporting-kpi-card">
-            <span>Patients</span>
-            <strong>{Number(clinical?.patientCount || 0)}</strong>
-          </article>
-          <article className="reporting-kpi-card">
-            <span>Total Visits</span>
-            <strong>{Number(clinical?.totalVisits || 0)}</strong>
-          </article>
-          <article className="reporting-kpi-card">
-            <span>IPD Admissions</span>
-            <strong>{Number(clinical?.ipdAdmissions || 0)}</strong>
-          </article>
-          <article className="reporting-kpi-card">
-            <span>Mortality Rate</span>
-            <strong>{Number(clinical?.mortalityRate || 0).toFixed(2)}%</strong>
-          </article>
-          <article className="reporting-kpi-card">
-            <span>Attendance Rate</span>
-            <strong>{Number(hr?.staffAttendanceRate || 0).toFixed(2)}%</strong>
-          </article>
-          <article className="reporting-kpi-card">
-            <span>Reports Generated</span>
-            <strong>{Number(platform?.reportsGenerated || 0)}</strong>
-          </article>
-        </div>
-
-        <section className="reporting-visual-grid">
-          <article className="reporting-visual-card">
-            <div className="reporting-table-header">
-              <h3>Trend Chart</h3>
-              <p>
-                Visualized by <strong>{trendMetricLabel}</strong>
+        <section className="patients-view reporting-title-panel">
+          <div className="pv-header">
+            <div>
+              <div className="pv-title">
+                <WorkflowActionIcon type="activity" />
+                Reporting
+              </div>
+              <p className="pv-subtitle">
+                Live operational, clinical, financial, inventory, HR, mortuary, and AI reporting
               </p>
             </div>
-            <div className="reporting-bar-chart">
-              {trendChartRows.slice(-10).map((row) => {
-                const percent = Math.max(2, Math.round((row.value / trendChartMax) * 100));
-                return (
-                  <div className="reporting-bar-row" key={`${row.label}-${row.value}`}>
-                    <span className="reporting-bar-label">{row.label}</span>
-                    <div className="reporting-bar-track">
-                      <div className="reporting-bar-fill" style={{ width: `${percent}%` }} />
-                    </div>
-                    <span className="reporting-bar-value">
-                      {reportingMetric === "revenue" ? formatKes(row.value) : row.value}
-                    </span>
+            <div className="module-actions reporting-form-actions">
+              {formsForDisplay.map((moduleForm, index) => (
+                <button
+                  key={moduleForm.id}
+                  type="button"
+                  className="topbar-logout-btn"
+                  onClick={() => openWorkflowForm(moduleForm.id)}
+                  style={{
+                    backgroundColor: index === 0 ? "#16a34a" : "#2563eb",
+                    borderColor: index === 0 ? "#16a34a" : "#2563eb",
+                  }}
+                >
+                  <WorkflowActionIcon type={index === 0 ? "form" : "settings"} />
+                  {cleanWorkflowFormTitle(moduleForm.title)}
+                </button>
+              ))}
+            </div>
+          </div>
+        </section>
+
+        <section className="reporting-export-bar">
+          <div>
+            <h3>Report Generation</h3>
+            <p>Generate clean exports from the current live reporting warehouse.</p>
+          </div>
+          <div className="reporting-export-actions">
+            <button
+              type="button"
+              className="topbar-logout-btn"
+              onClick={() => void handleReportingExport("csv", "financial")}
+              disabled={reportingExporting}
+            >
+              <WorkflowActionIcon type="form" />
+              {reportingExporting ? "Exporting..." : "Export Financial CSV"}
+            </button>
+            <button
+              type="button"
+              className="topbar-logout-btn reporting-export-secondary"
+              onClick={() => void handleReportingExport("json", "clinical")}
+              disabled={reportingExporting}
+            >
+              <WorkflowActionIcon type="activity" />
+              {reportingExporting ? "Exporting..." : "Export Clinical JSON"}
+            </button>
+          </div>
+        </section>
+
+        <section className="reporting-chart-grid">
+          <article className="reporting-chart-card reporting-trend-card">
+            <div className="reporting-chart-head">
+              <div>
+                <h3>Trend Charts</h3>
+                <p>Visits, admissions, and revenue over the latest reporting days.</p>
+              </div>
+              <span>{trendRowsForWeb.length} points</span>
+            </div>
+            <div className="reporting-trend-bars">
+              {(trendRowsForWeb.length ? trendRowsForWeb : [{ date: "No data", visits: 0, admissions: 0, revenue: 0 }]).map((row: any, index) => (
+                <div className="reporting-trend-group" key={`${row?.date || "trend"}-${index}`}>
+                  <div className="reporting-bars">
+                    <i style={{ height: `${Math.max(4, (Number(row?.visits || 0) / maxPatientTrend) * 100)}%`, background: "#2563eb" }} />
+                    <i style={{ height: `${Math.max(4, (Number(row?.admissions || 0) / maxPatientTrend) * 100)}%`, background: "#0d9488" }} />
+                    <i style={{ height: `${Math.max(4, (Number(row?.revenue || 0) / maxRevenueTrend) * 100)}%`, background: "#16a34a" }} />
                   </div>
-                );
-              })}
-              {!reportingLoading && trendChartRows.length === 0 && (
-                <p className="pv-empty" style={{ margin: 0 }}>
-                  No trend data to visualize.
-                </p>
-              )}
+                  <span>{String(row?.date || "-").slice(5) || "-"}</span>
+                </div>
+              ))}
+            </div>
+            <div className="reporting-legend">
+              <span><i style={{ background: "#2563eb" }} /> Visits</span>
+              <span><i style={{ background: "#0d9488" }} /> Admissions</span>
+              <span><i style={{ background: "#16a34a" }} /> Revenue</span>
             </div>
           </article>
 
-          <article className="reporting-visual-card">
-            <div className="reporting-table-header">
+          <article className="reporting-chart-card">
+            <div className="reporting-chart-head">
+              <div>
               <h3>Payment Mix</h3>
-              <p>Distribution from current filtered trend window.</p>
+                <p>Distribution of collected payment methods.</p>
+              </div>
             </div>
-            <div className="reporting-pie-wrap">
+            <div className="reporting-pie-layout">
               <div
-                className="reporting-pie-chart"
+                className="reporting-pie"
                 style={{ background: `conic-gradient(${paymentMixGradient})` }}
-              />
+              >
+                <strong>{formatKes(paymentMixTotal)}</strong>
+                <span>Total</span>
+              </div>
               <div className="reporting-pie-legend">
                 {paymentMixRows.map((row) => {
                   const pct = ((row.value / paymentMixTotal) * 100).toFixed(1);
@@ -19071,168 +22243,90 @@ export function WorkflowModuleView({
             </div>
           </article>
 
-          <article className="reporting-visual-card">
-            <div className="reporting-table-header">
-              <h3>Top {reportingGroupBy} Breakdown</h3>
-              <p>Top 6 groups by selected drilldown metric.</p>
+          <article className="reporting-chart-card">
+            <div className="reporting-chart-head">
+              <div>
+                <h3>Top Department Breakdown</h3>
+                <p>Departments ranked by revenue contribution.</p>
+              </div>
             </div>
-            <div className="reporting-bar-chart">
-              {drilldownChartRows.map((row) => {
-                const percent = Math.max(2, Math.round((row.value / drilldownChartMax) * 100));
-                return (
-                  <div className="reporting-bar-row" key={`${row.label}-${row.value}`}>
-                    <span className="reporting-bar-label">{row.label}</span>
-                    <div className="reporting-bar-track">
-                      <div className="reporting-bar-fill alt" style={{ width: `${percent}%` }} />
-                    </div>
-                    <span className="reporting-bar-value">
-                      {reportingMetric === "revenue" ? formatKes(row.value) : row.value}
-                    </span>
+            <div className="reporting-department-bars">
+              {(topDepartmentRows.length ? topDepartmentRows : [{ label: "No department data", revenue: 0, visits: 0 }]).map((row, index) => (
+                <div className="reporting-department-row" key={`${row.label}-${index}`}>
+                  <div>
+                    <strong>{row.label}</strong>
+                    <span>{row.visits} visits · {formatKes(row.revenue)}</span>
                   </div>
-                );
-              })}
-              {!reportingLoading && drilldownChartRows.length === 0 && (
-                <p className="pv-empty" style={{ margin: 0 }}>
-                  No drilldown rows to visualize.
-                </p>
-              )}
+                  <b>
+                    <i style={{ width: `${Math.max(3, (row.revenue / maxDepartmentRevenue) * 100)}%` }} />
+                  </b>
+                </div>
+              ))}
             </div>
           </article>
         </section>
 
-        <section className="pv-table-wrap">
-          <div className="reporting-table-header">
-            <h3>Trend Series</h3>
-            <p>
-              Visits: <strong>{trendVisits}</strong> • Revenue:{" "}
-              <strong>{formatKes(trendRevenue)}</strong>
-            </p>
-          </div>
-          <table className="pv-table">
-            <thead>
-              <tr>
-                <th>Date</th>
-                <th>Visits</th>
-                <th>Admissions</th>
-                <th>Revenue</th>
-                <th>M-Pesa</th>
-                <th>Cash</th>
-                <th>Card</th>
-              </tr>
-            </thead>
-            <tbody>
-              {reportingTrends.map((row, index) => (
-                <tr key={`${row?.date || "date"}-${index}`}>
-                  <td>{String(row?.date || "-")}</td>
-                  <td>{Number(row?.visits || 0)}</td>
-                  <td>{Number(row?.admissions || 0)}</td>
-                  <td>{formatKes(Number(row?.revenue || 0))}</td>
-                  <td>{formatKes(Number(row?.mpesa || 0))}</td>
-                  <td>{formatKes(Number(row?.cash || 0))}</td>
-                  <td>{formatKes(Number(row?.card || 0))}</td>
-                </tr>
-              ))}
-              {!reportingLoading && reportingTrends.length === 0 && (
-                <tr>
-                  <td colSpan={7} className="pv-empty">
-                    No trend data found for the selected filters.
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </section>
+        <section className="patients-view reporting-records-panel">
+        <div className="reporting-kpi-grid pv-stats">
+          {reportStats.map((stat) => (
+            <article
+              className="reporting-kpi-card pv-stat-card"
+              key={stat.label}
+              style={{ borderLeftColor: stat.color }}
+            >
+              <span>{stat.label}</span>
+              <strong>{stat.value}</strong>
+            </article>
+          ))}
+        </div>
 
-        <section className="pv-table-wrap">
-          <div className="reporting-table-header">
-            <h3>Drilldown</h3>
-            <p>
-              Metric: <strong>{reportingMetric.toUpperCase()}</strong> • Grouped by:{" "}
-              <strong>{reportingGroupBy.toUpperCase()}</strong>
-            </p>
-          </div>
-          <table className="pv-table">
-            <thead>
-              <tr>
-                <th>Group</th>
-                <th>Visits</th>
-                <th>Revenue</th>
-              </tr>
-            </thead>
-            <tbody>
-              {reportingDrilldownRows.map((row: any) => (
-                <tr key={String(row?.key || row?.label || "")}>
-                  <td className="pv-name">{String(row?.label || "-")}</td>
-                  <td>{Number(row?.visits || 0)}</td>
-                  <td>{formatKes(Number(row?.revenue || 0))}</td>
-                </tr>
-              ))}
-              {!reportingLoading && reportingDrilldownRows.length === 0 && (
-                <tr>
-                  <td colSpan={3} className="pv-empty">
-                    No drilldown data available for the selected filters.
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </section>
-
-        <section className="reporting-export-card">
-          <div className="reporting-export-header">
-            <h3>Exports & Compliance</h3>
-            <p>
-              Generate CSV or JSON for clinical, financial, pharmacy, HR, mortuary, inventory, and
-              regulatory reporting.
-            </p>
-          </div>
-          <div className="reporting-export-controls">
-            <label className="workflow-field">
-              <span>Report Type</span>
-              <select
-                className="form-input"
-                value={reportingReportType}
-                onChange={(e) =>
-                  setReportingReportType(
-                    e.target.value as
-                      | "clinical"
-                      | "financial"
-                      | "pharmacy"
-                      | "hr"
-                      | "mortuary"
-                      | "inventory"
-                      | "regulatory",
-                  )
-                }
-              >
-                <option value="financial">Financial</option>
-                <option value="clinical">Clinical</option>
-                <option value="pharmacy">Pharmacy</option>
-                <option value="hr">HR</option>
-                <option value="mortuary">Mortuary</option>
-                <option value="inventory">Inventory</option>
-                <option value="regulatory">Regulatory</option>
-              </select>
-            </label>
-            <div className="reporting-export-buttons">
-              <button
-                type="button"
-                className="btn-primary"
-                disabled={reportingExporting}
-                onClick={() => void handleReportingExport("csv")}
-              >
-                {reportingExporting ? "Exporting..." : "Export CSV"}
-              </button>
-              <button
-                type="button"
-                className="btn-cancel"
-                disabled={reportingExporting}
-                onClick={() => void handleReportingExport("json")}
-              >
-                Export JSON
-              </button>
+          <div className="pv-search-bar reporting-search-bar">
+            <div className="pv-search-wrap">
+              <WorkflowActionIcon type="search" />
+              <input
+                className="pv-search"
+                placeholder="Search reports and metrics"
+                value={reportingSearch}
+                onChange={(event) => setReportingSearch(event.target.value)}
+              />
             </div>
           </div>
+
+        <div className="pv-table-wrap reporting-summary-table">
+          <div className="pv-table-meta reporting-table-header">
+            <h3 className="pv-table-title">Reporting Records</h3>
+            <span className="pv-table-count">{filteredSummaryRows.length} records</span>
+          </div>
+          <table className="pv-table">
+            <thead>
+              <tr>
+                <th>Metric</th>
+                <th>Current</th>
+                <th>Trend</th>
+                <th>Owner</th>
+              </tr>
+            </thead>
+            <tbody>
+              {filteredSummaryRows.map((row) => (
+                <tr key={row.metric}>
+                  <td className="pv-name">{row.metric}</td>
+                  <td>{row.current}</td>
+                  <td>{row.trend}</td>
+                  <td>{row.owner}</td>
+                </tr>
+              ))}
+              {filteredSummaryRows.length === 0 && (
+                <tr>
+                  <td className="pv-empty" colSpan={4}>
+                    No reporting records match this search.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+        </section>
+
           {reportingExportInfo && (
             <div className="workflow-notice is-success">
               Export ready: <strong>{reportingExportInfo.filename}</strong> • Rows:{" "}
@@ -19240,175 +22334,278 @@ export function WorkflowModuleView({
               <strong>{new Date(reportingExportInfo.generatedAt).toLocaleString()}</strong>
             </div>
           )}
-        </section>
+
+        {isFormPopupOpen && (
+          <div className="modal-overlay" onClick={() => setIsFormPopupOpen(false)}>
+            <div
+              className={`modal-box workflow-form-modal reporting-form-modal ${getReportingFormModeClass(activeFormTitle)}`}
+              onClick={(event) => event.stopPropagation()}
+            >
+              <div className="modal-header">
+                <div className="ipd-form-title-wrap">
+                  <span className="ipd-form-icon">
+                    <WorkflowActionIcon type={/run|parameter/i.test(activeFormTitle) ? "settings" : "form"} />
+                  </span>
+                  <div>
+                    <span className="ipd-form-kicker">Reporting</span>
+                    <h3>{cleanWorkflowFormTitle(activeFormTitle)}</h3>
+                  </div>
+                </div>
+                <div className="ipd-form-meta">
+                  <span>{activeForm?.fields.length || 0} fields</span>
+                  <span>{activeFormRequiredCount} required</span>
+                </div>
+                <button type="button" className="modal-close" onClick={() => setIsFormPopupOpen(false)}>
+                  x
+                </button>
+              </div>
+              <form className="workflow-form" onSubmit={saveRecord}>
+                <div className="workflow-form-header">
+                  <h3>{cleanWorkflowFormTitle(activeFormTitle)}</h3>
+                  <p>{activeForm?.purpose || "Capture reporting configuration and generation details."}</p>
+                </div>
+                {formNotice && (
+                  <div className={`workflow-notice ${formNotice.type === "success" ? "is-success" : "is-error"}`}>
+                    {formNotice.message}
+                  </div>
+                )}
+                {formError && <div className="auth-error">{formError}</div>}
+                <div className="workflow-form-grid">
+                  {(activeForm?.fields || []).map((field) => {
+                    const fieldValue = form[field.key] ?? "";
+                    const fieldOptions = getReportingFieldOptions(field);
+                    const isWideField =
+                      field.type === "textarea" ||
+                      /fields|criteria|filters|notes|description/i.test(field.key);
+                    return (
+                      <label
+                        key={field.key}
+                        className={`workflow-field ${isWideField ? "workflow-field-full" : ""}`}
+                      >
+                        <span className="workflow-field-title">
+                          {field.label}
+                          {field.required ? " *" : ""}
+                        </span>
+                        {field.note && <small className="workflow-field-note">{field.note}</small>}
+                        {field.type === "textarea" ? (
+                          <textarea
+                            className="form-input"
+                            value={String(fieldValue)}
+                            required={Boolean(field.required)}
+                            onChange={(event) => setForm((prev) => ({ ...prev, [field.key]: event.target.value }))}
+                          />
+                        ) : field.type === "checkbox" ? (
+                          <input
+                            className="form-input"
+                            type="text"
+                            placeholder="Count, Sum, Average, Min, Max"
+                            value={String(fieldValue)}
+                            required={Boolean(field.required)}
+                            onChange={(event) => setForm((prev) => ({ ...prev, [field.key]: event.target.value }))}
+                          />
+                        ) : field.type === "select" && fieldOptions.length > 0 ? (
+                          <select
+                            className="form-input"
+                            value={String(fieldValue)}
+                            required={Boolean(field.required)}
+                            onChange={(event) => setForm((prev) => ({ ...prev, [field.key]: event.target.value }))}
+                          >
+                            <option value="">Select {field.label}</option>
+                            {fieldOptions.map((option) => (
+                              <option key={String(option)} value={String(option)}>
+                                {String(option)}
+                              </option>
+                            ))}
+                          </select>
+                        ) : (
+                          <input
+                            className="form-input"
+                            type={field.type === "date" ? "date" : field.type === "number" ? "number" : "text"}
+                            value={String(fieldValue)}
+                            required={Boolean(field.required)}
+                            onChange={(event) => setForm((prev) => ({ ...prev, [field.key]: event.target.value }))}
+                          />
+                        )}
+                      </label>
+                    );
+                  })}
+                </div>
+                <div className="modal-footer">
+                  <button type="button" className="btn-cancel" onClick={() => setIsFormPopupOpen(false)}>
+                    Cancel
+                  </button>
+                  <button type="submit" className="workflow-submit-button">
+                    {getWorkflowSubmitLabel(activeFormTitle, Boolean(editingId))}
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
       </div>
     );
   }
 
   if (module.id === 6) {
     return (
-      <div className="workflow-view">
+      <div className="workflow-view ehr-web-view">
         <div className="pv-header">
           <div>
-            <h2 className="pv-title">{module.name}</h2>
+            <div className="pv-title">
+              <WorkflowActionIcon type="form" />
+              EMR & Clinical Notes
+            </div>
             <p className="pv-subtitle">
               Read-only longitudinal EMR: registrations, admissions, discharges, billing, emergency,
               and mortuary queue records.
             </p>
           </div>
-          <button
-            type="button"
-            className="btn-primary"
-            onClick={() => setEhrRefreshTick((n) => n + 1)}
-            disabled={ehrLoading}
-          >
-            {ehrLoading ? "Refreshing..." : "Refresh Records"}
-          </button>
+          <div className="module-actions">
+            {formsForDisplay.map((moduleForm) => (
+              <button
+                key={moduleForm.id}
+                type="button"
+                className="topbar-logout-btn"
+                onClick={() => {
+                  setActiveFormId(moduleForm.id);
+                  setEditingId(null);
+                  setForm(emptyForm(moduleForm.fields));
+                  setFormError("");
+                  setFormNotice(null);
+                  setIsFormPopupOpen(true);
+                }}
+              >
+                <WorkflowActionIcon
+                  type={
+                    /vital/i.test(moduleForm.title)
+                      ? "activity"
+                      : /diagnosis|progress/i.test(moduleForm.title)
+                        ? "consultation"
+                        : /order/i.test(moduleForm.title)
+                          ? "settings"
+                        : "form"
+                  }
+                />
+                {cleanWorkflowFormTitle(moduleForm.title)}
+              </button>
+            ))}
+          </div>
         </div>
 
-        <div className="workflow-top-search">
-          <input
-            className="pv-search"
-            placeholder="Search patient (Name, Code, Phone, Ward, Status)"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-          />
+        <div className="module-filter-panel">
+          <div className="module-filter-grid ehr-filter-grid">
+            <label className="module-filter-field">
+              <span>Date From</span>
+              <input type="date" value={ehrDateFrom} onChange={(e) => setEhrDateFrom(e.target.value)} />
+            </label>
+            <label className="module-filter-field">
+              <span>Date To</span>
+              <input type="date" value={ehrDateTo} onChange={(e) => setEhrDateTo(e.target.value)} />
+            </label>
+            <label className="module-filter-field">
+              <span>Min Paid (KES)</span>
+              <input
+                type="number"
+                min={0}
+                value={ehrMinPaid}
+                onChange={(e) => setEhrMinPaid(e.target.value)}
+                placeholder="0"
+              />
+            </label>
+            <label className="module-filter-field">
+              <span>Max Paid (KES)</span>
+              <input
+                type="number"
+                min={0}
+                value={ehrMaxPaid}
+                onChange={(e) => setEhrMaxPaid(e.target.value)}
+                placeholder="No limit"
+              />
+            </label>
+            <label className="module-filter-field">
+              <span>Ward</span>
+              <select value={ehrWardFilter} onChange={(e) => setEhrWardFilter(e.target.value)}>
+                <option value="ALL">All wards</option>
+                {ehrWardOptions.map((ward) => (
+                  <option key={ward} value={ward}>
+                    {ward}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="module-filter-field">
+              <span>Gender</span>
+              <select value={ehrGenderFilter} onChange={(e) => setEhrGenderFilter(e.target.value)}>
+                <option value="ALL">All genders</option>
+                <option value="MALE">Male</option>
+                <option value="FEMALE">Female</option>
+                <option value="OTHER">Other</option>
+                <option value="UNKNOWN">Unknown</option>
+              </select>
+            </label>
+            <label className="module-filter-field">
+              <span>Status</span>
+              <select value={ehrStatusFilter} onChange={(e) => setEhrStatusFilter(e.target.value)}>
+                <option value="ALL">All statuses</option>
+                <option value="REGISTERED">Registered</option>
+                <option value="ADMITTED">Admitted (pending discharge)</option>
+                <option value="DISCHARGED">Discharged</option>
+                <option value="EMERGENCY">Emergency</option>
+                <option value="MORTUARY">Mortuary Queue</option>
+              </select>
+            </label>
+            <label className="module-filter-field">
+              <span>Billing</span>
+              <select value={ehrBillingFilter} onChange={(e) => setEhrBillingFilter(e.target.value)}>
+                <option value="ALL">All</option>
+                <option value="BILLED">Billed</option>
+                <option value="UNBILLED">Not billed</option>
+              </select>
+            </label>
+          </div>
         </div>
 
-        <div className="ehr-filters">
-          <label className="workflow-field">
-            <span>Date From</span>
-            <input
-              className="form-input"
-              type="date"
-              value={ehrDateFrom}
-              onChange={(e) => {
-                setEhrDateFrom(e.target.value);
-                e.currentTarget.blur();
-              }}
-            />
-          </label>
-          <label className="workflow-field">
-            <span>Date To</span>
-            <input
-              className="form-input"
-              type="date"
-              value={ehrDateTo}
-              onChange={(e) => {
-                setEhrDateTo(e.target.value);
-                e.currentTarget.blur();
-              }}
-            />
-          </label>
-          <label className="workflow-field">
-            <span>Min Paid (KES)</span>
-            <input
-              className="form-input"
-              type="number"
-              min={0}
-              value={ehrMinPaid}
-              onChange={(e) => setEhrMinPaid(e.target.value)}
-              placeholder="0"
-            />
-          </label>
-          <label className="workflow-field">
-            <span>Max Paid (KES)</span>
-            <input
-              className="form-input"
-              type="number"
-              min={0}
-              value={ehrMaxPaid}
-              onChange={(e) => setEhrMaxPaid(e.target.value)}
-              placeholder="No limit"
-            />
-          </label>
-          <label className="workflow-field">
-            <span>Ward</span>
-            <select
-              className="form-input"
-              value={ehrWardFilter}
-              onChange={(e) => setEhrWardFilter(e.target.value)}
-            >
-              <option value="ALL">All wards</option>
-              {ehrWardOptions.map((ward) => (
-                <option key={ward} value={ward}>
-                  {ward}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="workflow-field">
-            <span>Gender</span>
-            <select
-              className="form-input"
-              value={ehrGenderFilter}
-              onChange={(e) => setEhrGenderFilter(e.target.value)}
-            >
-              <option value="ALL">All genders</option>
-              <option value="MALE">Male</option>
-              <option value="FEMALE">Female</option>
-              <option value="OTHER">Other</option>
-              <option value="UNKNOWN">Unknown</option>
-            </select>
-          </label>
-          <label className="workflow-field">
-            <span>Status</span>
-            <select
-              className="form-input"
-              value={ehrStatusFilter}
-              onChange={(e) => setEhrStatusFilter(e.target.value)}
-            >
-              <option value="ALL">All statuses</option>
-              <option value="REGISTERED">Registered</option>
-              <option value="ADMITTED">Admitted (pending discharge)</option>
-              <option value="DISCHARGED">Discharged</option>
-              <option value="EMERGENCY">Emergency</option>
-              <option value="MORTUARY">Mortuary Queue</option>
-            </select>
-          </label>
-          <label className="workflow-field">
-            <span>Billing</span>
-            <select
-              className="form-input"
-              value={ehrBillingFilter}
-              onChange={(e) => setEhrBillingFilter(e.target.value)}
-            >
-              <option value="ALL">All</option>
-              <option value="BILLED">Billed</option>
-              <option value="UNBILLED">Not billed</option>
-            </select>
-          </label>
+        <div className="pv-stats">
+          <article className="pv-stat-card" style={{ borderLeftColor: "#1e3a8a" }}>
+            <p className="pv-stat-label">Total Records</p>
+            <p className="pv-stat-value">{ehrSummary.total}</p>
+          </article>
+          <article className="pv-stat-card" style={{ borderLeftColor: "#2563eb" }}>
+            <p className="pv-stat-label">Admitted (Pending Discharge)</p>
+            <p className="pv-stat-value">{ehrSummary.admitted}</p>
+          </article>
+          <article className="pv-stat-card" style={{ borderLeftColor: "#16a34a" }}>
+            <p className="pv-stat-label">Discharged</p>
+            <p className="pv-stat-value">{ehrSummary.discharged}</p>
+          </article>
+          <article className="pv-stat-card" style={{ borderLeftColor: "#dc2626" }}>
+            <p className="pv-stat-label">Emergency</p>
+            <p className="pv-stat-value">{ehrSummary.emergency}</p>
+          </article>
+          <article className="pv-stat-card" style={{ borderLeftColor: "#7c3aed" }}>
+            <p className="pv-stat-label">Mortuary Queue</p>
+            <p className="pv-stat-value">{ehrSummary.mortuary}</p>
+          </article>
+          <article className="pv-stat-card" style={{ borderLeftColor: "#f59e0b" }}>
+            <p className="pv-stat-label">Not Billed</p>
+            <p className="pv-stat-value">{ehrSummary.unbilled}</p>
+          </article>
+          <article className="pv-stat-card" style={{ borderLeftColor: "#0d9488" }}>
+            <p className="pv-stat-label">Total Paid</p>
+            <p className="pv-stat-value">{formatKes(ehrSummary.totalPaid)}</p>
+          </article>
         </div>
 
-        <div className="ehr-summary-grid">
-          <article className="ehr-summary-card">
-            <span>Total Records</span>
-            <strong>{ehrSummary.total}</strong>
-          </article>
-          <article className="ehr-summary-card">
-            <span>Admitted (Pending Discharge)</span>
-            <strong>{ehrSummary.admitted}</strong>
-          </article>
-          <article className="ehr-summary-card">
-            <span>Discharged</span>
-            <strong>{ehrSummary.discharged}</strong>
-          </article>
-          <article className="ehr-summary-card">
-            <span>Emergency</span>
-            <strong>{ehrSummary.emergency}</strong>
-          </article>
-          <article className="ehr-summary-card">
-            <span>Mortuary Queue</span>
-            <strong>{ehrSummary.mortuary}</strong>
-          </article>
-          <article className="ehr-summary-card">
-            <span>Not Billed</span>
-            <strong>{ehrSummary.unbilled}</strong>
-          </article>
-          <article className="ehr-summary-card">
-            <span>Total Paid</span>
-            <strong>{formatKes(ehrSummary.totalPaid)}</strong>
-          </article>
+        <div className="pv-search-bar">
+          <div className="pv-search-wrap">
+            <WorkflowActionIcon type="search" />
+            <input
+              className="pv-search"
+              placeholder="Search patient (Name, Code, Phone, Ward, Status)"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+            />
+          </div>
         </div>
 
         {ehrError && (
@@ -19417,70 +22614,214 @@ export function WorkflowModuleView({
           </div>
         )}
 
-        <div className="pv-table-wrap">
-          <table className="pv-table">
-            <thead>
-              <tr>
-                <th>Patient</th>
-                <th>Gender</th>
-                <th>Ward</th>
-                <th>Status</th>
-                <th>Registered</th>
-                <th>Last Visit</th>
-                <th>Billing</th>
-                <th>Paid</th>
-                <th>Outstanding</th>
-                <th>Action</th>
-              </tr>
-            </thead>
-            <tbody>
-              {ehrLoading && (
+        <section>
+          <div className="pv-table-meta">
+            <div className="pv-table-title">EMR Records</div>
+            <span className="pv-badge">{filteredEhrRows.length} records</span>
+          </div>
+          <div className="pv-table-wrap">
+            <table className="pv-table">
+              <thead>
                 <tr>
-                  <td colSpan={10} className="pv-empty">
-                    Loading EMR records...
-                  </td>
+                  <th>Patient</th>
+                  <th>Gender</th>
+                  <th>Ward</th>
+                  <th>Status</th>
+                  <th>Registered</th>
+                  <th>Last Visit</th>
+                  <th>Billing</th>
+                  <th>Paid</th>
+                  <th>Outstanding</th>
+                  <th>Action</th>
                 </tr>
-              )}
-              {!ehrLoading &&
-                filteredEhrRows.map((row) => (
-                  <tr key={row.id}>
-                    <td className="pv-name">
-                      {row.fullName}
-                      <div className="workflow-patient-meta">
-                        {row.patientCode || "-"} • {row.phone || "-"}
-                      </div>
-                    </td>
-                    <td>{row.gender || "-"}</td>
-                    <td>{row.ward || "-"}</td>
-                    <td>
-                      <span className="pv-badge">{row.status}</span>
-                    </td>
-                    <td>{row.registrationDate || "-"}</td>
-                    <td>{row.lastVisitDate || "-"}</td>
-                    <td>{row.billed ? "Billed" : "Not billed"}</td>
-                    <td>{formatKes(row.totalPaid)}</td>
-                    <td>{formatKes(row.outstanding)}</td>
-                    <td>
-                      <button
-                        type="button"
-                        className="pv-del"
-                        onClick={() => openPatientProfile(row.id)}
-                      >
-                        View
-                      </button>
+              </thead>
+              <tbody>
+                {ehrLoading && (
+                  <tr>
+                    <td colSpan={10} className="pv-empty">
+                      Loading EMR records...
                     </td>
                   </tr>
-                ))}
-              {!ehrLoading && filteredEhrRows.length === 0 && (
-                <tr>
-                  <td colSpan={10} className="pv-empty">
-                    No EMR records match these filters.
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
+                )}
+                {!ehrLoading &&
+                  filteredEhrRows.map((row) => (
+                    <tr key={row.id}>
+                      <td className="pv-name">
+                        {row.fullName}
+                        <div className="workflow-patient-meta">
+                          {row.patientCode || "-"} • {row.phone || "-"}
+                        </div>
+                      </td>
+                      <td>{row.gender || "-"}</td>
+                      <td>{row.ward || "-"}</td>
+                      <td>
+                        <span className="pv-badge">{row.status}</span>
+                      </td>
+                      <td>{row.registrationDate || "-"}</td>
+                      <td>{row.lastVisitDate || "-"}</td>
+                      <td>{row.billed ? "Billed" : "Not billed"}</td>
+                      <td>{formatKes(row.totalPaid)}</td>
+                      <td>{formatKes(row.outstanding)}</td>
+                      <td>
+                        <button
+                          type="button"
+                          className="pv-del"
+                          onClick={() => openPatientProfile(row.id)}
+                        >
+                          View
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                {!ehrLoading && filteredEhrRows.length === 0 && (
+                  <tr>
+                    <td colSpan={10} className="pv-empty">
+                      No EMR records match these filters.
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        {isFormPopupOpen && (
+          <div className="modal-overlay" onClick={() => setIsFormPopupOpen(false)}>
+            <div
+              className={`modal-box workflow-form-modal ehr-form-modal ${activeFormPresentationClass}`}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="modal-header">
+                <div className="ipd-form-title-wrap">
+                  <span className="ipd-form-icon">
+                    <WorkflowActionIcon
+                      type={
+                        /vital/i.test(activeForm?.title || "")
+                          ? "activity"
+                          : /diagnosis|progress/i.test(activeForm?.title || "")
+                            ? "consultation"
+                            : /order/i.test(activeForm?.title || "")
+                              ? "settings"
+                            : "form"
+                      }
+                    />
+                  </span>
+                  <div>
+                    <span className="ipd-form-kicker">EMR & Clinical Notes</span>
+                    <h3>{cleanWorkflowFormTitle(activeForm?.title || "EMR Form")}</h3>
+                  </div>
+                </div>
+                <div className="ipd-form-meta">
+                  <span>{activeForm?.fields.length || 0} fields</span>
+                  <span>{activeFormRequiredCount} required</span>
+                </div>
+                <button
+                  type="button"
+                  className="modal-close"
+                  onClick={() => setIsFormPopupOpen(false)}
+                >
+                  x
+                </button>
+              </div>
+              <form className="workflow-form" onSubmit={saveRecord}>
+                <div className="workflow-form-header">
+                  <h3>{cleanWorkflowFormTitle(activeForm?.title || "EMR Form")}</h3>
+                  <p>{activeForm?.purpose || "Capture EMR clinical documentation details."}</p>
+                </div>
+                {formNotice && (
+                  <div className={`workflow-notice ${formNotice.type === "success" ? "is-success" : "is-error"}`}>
+                    {formNotice.message}
+                  </div>
+                )}
+                {formError && <div className="auth-error">{formError}</div>}
+                <div className="workflow-form-grid">
+                  {displayFormFields.map((field) => {
+                    const isWideField =
+                      field.type === "textarea" ||
+                      /notes|description|summary|remarks|comment|history|examination|assessment|plan/i.test(field.key);
+                    return (
+                      <label
+                        key={field.key}
+                        className={`workflow-field ${isWideField ? "workflow-field-full" : ""}`}
+                      >
+                        <span className="workflow-field-title">
+                          {field.label}
+                          {field.required ? " *" : ""}
+                        </span>
+                        {field.note && <small className="workflow-field-note">{field.note}</small>}
+                        {field.type === "textarea" ? (
+                          <textarea
+                            className="form-input"
+                            required={Boolean(field.required)}
+                            value={form[field.key] || ""}
+                            onChange={(e) =>
+                              setForm((prev) => ({ ...prev, [field.key]: e.target.value }))
+                            }
+                          />
+                        ) : field.type === "select" ? (
+                          <select
+                            className="form-input"
+                            required={Boolean(field.required)}
+                            value={form[field.key] || ""}
+                            onChange={(e) =>
+                              setForm((prev) => ({ ...prev, [field.key]: e.target.value }))
+                            }
+                          >
+                            <option value="">Select...</option>
+                            {(field.options || []).map((option) => (
+                              <option key={option} value={option}>
+                                {option}
+                              </option>
+                            ))}
+                          </select>
+                        ) : field.type === "checkbox" ? (
+                          <input
+                            className="workflow-checkbox"
+                            type="checkbox"
+                            checked={form[field.key] === "true"}
+                            onChange={(e) =>
+                              setForm((prev) => ({
+                                ...prev,
+                                [field.key]: String(e.target.checked),
+                              }))
+                            }
+                          />
+                        ) : (
+                          <input
+                            className="form-input"
+                            type={field.type}
+                            required={Boolean(field.required)}
+                            value={form[field.key] || ""}
+                            onChange={(e) =>
+                              setForm((prev) => ({ ...prev, [field.key]: e.target.value }))
+                            }
+                          />
+                        )}
+                      </label>
+                    );
+                  })}
+                </div>
+                <div className="modal-footer" style={{ marginTop: 12 }}>
+                  <button
+                    type="button"
+                    className="btn-cancel"
+                    onClick={() => {
+                      setEditingId(null);
+                      setForm(emptyForm(activeForm?.fields || []));
+                      setFormError("");
+                      setFormNotice(null);
+                    }}
+                  >
+                    Clear
+                  </button>
+                  <button type="submit" className="btn-primary workflow-submit-button" disabled={!canEdit}>
+                    {getWorkflowSubmitLabel(activeForm?.title || "", Boolean(editingId))}
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
 
         {profilePatient && (
           <div
@@ -19634,12 +22975,60 @@ export function WorkflowModuleView({
   }
 
   return (
-    <div className={`workflow-view ${isInpatientModule ? "ipd-web-view" : ""} ${isAppointmentModule ? "appointments-web-view" : ""} ${isOpdFlowModule ? "opd-web-view" : ""}`}>
+    <div className={`workflow-view ${isWardModule ? "bed-ward-workflow-view" : ""} ${isInpatientModule ? "ipd-web-view" : ""} ${isAppointmentModule ? "appointments-web-view" : ""} ${isOpdFlowModule ? "opd-web-view" : ""} ${isLaboratoryModule ? "laboratory-web-view" : ""} ${isRadiologyModule ? "radiology-web-view" : ""} ${isPharmacyModule ? "pharmacy-web-view" : ""} ${isOtModule ? "ot-web-view" : ""} ${isBloodBankModule ? "blood-bank-web-view" : ""} ${isMaternityModule ? "maternity-web-view" : ""} ${isNicuModule ? "nicu-web-view" : ""} ${isPhysioModule ? "physio-web-view" : ""} ${isNutritionModule ? "nutrition-web-view" : ""} ${isDentalModule ? "dental-web-view" : ""} ${isInfectionControlModule ? "infection-web-view" : ""} ${isCommunityHealthModule ? "community-web-view" : ""} ${isConsentModule ? "consent-web-view" : ""} ${isReferralManagementModule ? "referral-web-view" : ""} ${isDocumentManagementModule ? "document-web-view" : ""} ${isMessagingModule ? "messaging-web-view" : ""} ${isBiomedicalModule ? "biomedical-web-view" : ""} ${isHomeCareModule ? "home-care-web-view" : ""} ${isClinicalResearchModule ? "clinical-research-web-view" : ""} ${isCdssModule ? "cdss-web-view" : ""} ${isAccountingModule ? "accounting-web-view" : ""} ${isCostAccountingModule ? "cost-accounting-web-view" : ""} ${isWorkforcePlanningModule ? "workforce-web-view" : ""} ${isIcuModule ? "icu-web-view" : ""} ${isIctModule ? "ict-web-view" : ""} ${isNursingModule ? "nursing-web-view" : ""} ${isNursingAdminModule ? "matron-web-view" : ""} ${isMedicalDirectorModule ? "medical-director-web-view" : ""} ${isRevenueCycleModule ? "revenue-cycle-web-view" : ""} ${isStrategicPlanningModule ? "executive-dashboard-web-view" : ""} ${isOrchestrationModule ? "orchestration-web-view" : ""}`}>
       <div className="pv-header">
         <div>
           <h2 className="pv-title">
             {isAppointmentModule
               ? "Appointments & Schedules"
+              : isAccountingModule
+                ? "Financial Accounting"
+              : isCostAccountingModule
+                ? "Cost Accounting"
+              : isWorkforcePlanningModule
+                ? "Workforce Planning"
+              : isIcuModule
+                ? "ICU"
+              : isNicuModule
+                ? "NICU"
+              : isPhysioModule
+                ? "Physiotherapy & Rehabilitation"
+              : isNutritionModule
+                ? "Nutrition & Dietetics"
+              : isDentalModule
+                ? "Dental"
+              : isInfectionControlModule
+                ? "Infection Control & CSSD"
+              : isCommunityHealthModule
+                ? "Community Health & CHW"
+              : isConsentModule
+                ? "Consent Management"
+              : isReferralManagementModule
+                ? "Referral Management"
+              : isDocumentManagementModule
+                ? "Document Management"
+              : isMessagingModule
+                ? "SMS & WhatsApp Messaging"
+              : isBiomedicalModule
+                ? "Biomedical Equipment"
+              : isHomeCareModule
+                ? "Home Care"
+              : isClinicalResearchModule
+                ? "Clinical Research"
+              : isCdssModule
+                ? "Clinical Decision Support"
+              : isIctModule
+                ? "ICT & Security Operations"
+              : isNursingAdminModule
+                ? "Nursing Administration (Matron)"
+              : isMedicalDirectorModule
+                ? "Medical Director Dashboard"
+              : isRevenueCycleModule
+                ? "Revenue Cycle"
+              : isStrategicPlanningModule
+                ? "Executive Dashboard"
+              : isMaternityModule
+                ? "Maternity"
               : isOpdFlowModule
                 ? "Outpatient Management"
               : isInpatientModule
@@ -19649,6 +23038,54 @@ export function WorkflowModuleView({
           <p className="pv-subtitle">
             {isAppointmentModule
               ? "Consultation scheduling and visit coordination"
+              : isAccountingModule
+                ? "Accounting & GL control center: chart of accounts, journal integrity, AP/AR aging, bank flow, budget envelope, and financial statements."
+              : isCostAccountingModule
+                ? "True service-line cost visibility and department margin intelligence."
+              : isWorkforcePlanningModule
+                ? "Staffing forecasts and headcount optimisation"
+              : isIcuModule
+                ? "Critical care visibility with admissions, ventilator load, and alert severity tracking"
+              : isNicuModule
+                ? "Neonatal intensive care monitoring and feeding tracking"
+              : isPhysioModule
+                ? "Rehab plans, session scheduling, and functional outcomes"
+              : isNutritionModule
+                ? "Clinical nutrition screening, diet plans, and monitoring"
+              : isDentalModule
+                ? "Tooth charting, procedure tracking, and dental workflow"
+              : isInfectionControlModule
+                ? "HAI surveillance, sterilization cycles, and compliance"
+              : isCommunityHealthModule
+                ? "Household coverage, CHW visits, and outreach follow-up"
+              : isConsentModule
+                ? "Digital consent capture, signature tracking, and audits"
+              : isReferralManagementModule
+                ? "Outgoing and incoming inter-facility referral tracking"
+              : isDocumentManagementModule
+                ? "Secure uploads, OCR indexing, and document classification"
+              : isMessagingModule
+                ? "Patient notifications, reminders, and mass campaigns"
+              : isBiomedicalModule
+                ? "Device registry, maintenance schedules, and calibration logs"
+              : isHomeCareModule
+                ? "Post-discharge visits, care plans, and escalation tracking"
+              : isClinicalResearchModule
+                ? "Manage workflows, capture data, and coordinate module activities."
+              : isCdssModule
+                ? "Rule monitoring, safety alerts, and prescribing guardrails"
+              : isIctModule
+                ? "Monitor infrastructure, record cybersecurity incidents, and control system configuration changes."
+              : isNursingAdminModule
+                ? "Shift governance, competency oversight, staffing pressure, and ward-level nursing leadership."
+              : isMedicalDirectorModule
+                ? "Clinical governance, protocol control, doctor performance, risk alerts, and M&M oversight."
+              : isRevenueCycleModule
+                ? "Claim lifecycle tracking, denial management, and payment performance metrics."
+              : isStrategicPlanningModule
+                ? "Strategic KPIs and cross-facility risk intelligence for executive leadership."
+              : isMaternityModule
+                ? "Antenatal tracking, labour monitoring, deliveries, and newborn outcomes"
               : isOpdFlowModule
                 ? "Consultation pipeline and active encounters"
               : isInpatientModule
@@ -19710,6 +23147,440 @@ export function WorkflowModuleView({
             </button>
           </div>
         )}
+        {isMaternityModule && (
+          <div className="maternity-action-bar">
+            <button type="button" className="maternity-action-btn is-pregnancy" onClick={() => openWorkflowForm("pregnancy_registration")}>
+              <WorkflowActionIcon type="heart" /> Pregnancy Registration
+            </button>
+            <button type="button" className="maternity-action-btn is-anc" onClick={() => openWorkflowForm("anc_visit")}>
+              <WorkflowActionIcon type="triage" /> ANC Visit
+            </button>
+            <button type="button" className="maternity-action-btn is-delivery" onClick={() => openWorkflowForm("delivery_birth_record")}>
+              <WorkflowActionIcon type="admission" /> Delivery / Birth Record
+            </button>
+            <button type="button" className="maternity-action-btn is-newborn" onClick={() => openWorkflowForm("newborn_assessment")}>
+              <WorkflowActionIcon type="baby" /> Newborn Assessment
+            </button>
+            <button type="button" className="maternity-action-btn is-partograph" onClick={() => openWorkflowForm("partograph")}>
+              <WorkflowActionIcon type="activity" /> Partograph
+            </button>
+          </div>
+        )}
+        {isAccountingModule && (
+          <div className="accounting-action-bar">
+            <button type="button" className="accounting-action-btn is-journal" onClick={() => openWorkflowForm("journal_entry")}>
+              <WorkflowActionIcon type="form" /> Journal Entry
+            </button>
+            <button type="button" className="accounting-action-btn is-chart" onClick={() => openWorkflowForm("chart_of_accounts")}>
+              <WorkflowActionIcon type="settings" /> Chart of Accounts
+            </button>
+            <button type="button" className="accounting-action-btn is-bank" onClick={() => openWorkflowForm("bank_reconciliation")}>
+              <WorkflowActionIcon type="activity" /> Bank Reconciliation
+            </button>
+          </div>
+        )}
+        {isWorkforcePlanningModule && (
+          <div className="workforce-action-bar">
+            <button
+              type="button"
+              className="workforce-action-btn"
+              onClick={(event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                openWorkflowForm("workforce_demand_forecast");
+              }}
+            >
+              <WorkflowActionIcon type="form" /> Staffing Forecast
+            </button>
+          </div>
+        )}
+        {isIcuModule && (
+          <div className="icu-action-bar">
+            <button type="button" className="icu-action-btn is-admission" onClick={() => openWorkflowForm("icu_admission_assessment")}>
+              <WorkflowActionIcon type="admission" /> ICU Admission Assessment
+            </button>
+            <button type="button" className="icu-action-btn is-daily" onClick={() => openWorkflowForm("icu_daily_assessment")}>
+              <WorkflowActionIcon type="triage" /> ICU Daily Assessment
+            </button>
+            <button type="button" className="icu-action-btn is-ventilator" onClick={() => openWorkflowForm("ventilator_record")}>
+              <WorkflowActionIcon type="activity" /> Ventilator Record
+            </button>
+          </div>
+        )}
+        {isNicuModule && (
+          <div className="nicu-action-bar">
+            <button type="button" className="nicu-action-btn is-admission" onClick={() => openWorkflowForm("nicu_admission")}>
+              <WorkflowActionIcon type="admission" /> NICU Admission
+            </button>
+            <button type="button" className="nicu-action-btn is-daily" onClick={() => openWorkflowForm("nicu_daily_record")}>
+              <WorkflowActionIcon type="triage" /> NICU Daily Record
+            </button>
+          </div>
+        )}
+        {isPhysioModule && (
+          <div className="physio-action-bar">
+            <button
+              type="button"
+              className="physio-action-btn is-assessment"
+              onClick={() => openWorkflowForm("physiotherapy_initial_assessment")}
+            >
+              <WorkflowActionIcon type="triage" /> Physiotherapy Initial Assessment Form
+            </button>
+            <button
+              type="button"
+              className="physio-action-btn is-session"
+              onClick={() => openWorkflowForm("physiotherapy_session_record")}
+            >
+              <WorkflowActionIcon type="calendar" /> Physiotherapy Session Record
+            </button>
+          </div>
+        )}
+        {isNutritionModule && (
+          <div className="nutrition-action-bar">
+            <button
+              type="button"
+              className="nutrition-action-btn is-screening"
+              onClick={() => openWorkflowForm("nutritional_screening")}
+            >
+              <WorkflowActionIcon type="triage" /> Nutritional Screening Form
+            </button>
+            <button
+              type="button"
+              className="nutrition-action-btn is-assessment"
+              onClick={() => openWorkflowForm("nutrition_assessment")}
+            >
+              <WorkflowActionIcon type="activity" /> Nutrition Assessment Form
+            </button>
+            <button
+              type="button"
+              className="nutrition-action-btn is-plan"
+              onClick={() => openWorkflowForm("nutrition_care_plan")}
+            >
+              <WorkflowActionIcon type="settings" /> Nutrition Care Plan Form
+            </button>
+          </div>
+        )}
+        {isDentalModule && (
+          <div className="dental-action-bar">
+            <button
+              type="button"
+              className="dental-action-btn is-exam"
+              onClick={() => openWorkflowForm("dental_examination")}
+            >
+              <WorkflowActionIcon type="form" /> Dental Examination Form
+            </button>
+            <button
+              type="button"
+              className="dental-action-btn is-treatment"
+              onClick={() => openWorkflowForm("dental_treatment_record")}
+            >
+              <WorkflowActionIcon type="activity" /> Dental Treatment Record
+            </button>
+          </div>
+        )}
+        {isInfectionControlModule && (
+          <div className="infection-action-bar">
+            <button
+              type="button"
+              className="infection-action-btn is-hai"
+              onClick={() => openWorkflowForm("hai_surveillance")}
+            >
+              <WorkflowActionIcon type="triage" /> HAI Surveillance Form
+            </button>
+            <button
+              type="button"
+              className="infection-action-btn is-cssd"
+              onClick={() => openWorkflowForm("cssd_sterilisation_cycle")}
+            >
+              <WorkflowActionIcon type="settings" /> CSSD Sterilisation Cycle Form
+            </button>
+            <button
+              type="button"
+              className="infection-action-btn is-audit"
+              onClick={() => openWorkflowForm("hand_hygiene_audit")}
+            >
+              <WorkflowActionIcon type="activity" /> Hand Hygiene Audit Form
+            </button>
+          </div>
+        )}
+        {isCommunityHealthModule && (
+          <div className="community-action-bar">
+            <button
+              type="button"
+              className="community-action-btn is-chw"
+              onClick={() => openWorkflowForm("chw_registration")}
+            >
+              <WorkflowActionIcon type="activity" /> CHW Registration
+            </button>
+            <button
+              type="button"
+              className="community-action-btn is-household"
+              onClick={() => openWorkflowForm("household_registration")}
+            >
+              <WorkflowActionIcon type="settings" /> Household Registration
+            </button>
+            <button
+              type="button"
+              className="community-action-btn is-visit"
+              onClick={() => openWorkflowForm("chw_home_visit")}
+            >
+              <WorkflowActionIcon type="triage" /> CHW Home Visit
+            </button>
+          </div>
+        )}
+        {isConsentModule && (
+          <div className="consent-action-bar">
+            <button
+              type="button"
+              className="consent-action-btn is-capture"
+              onClick={() => openWorkflowForm("informed_consent")}
+            >
+              <WorkflowActionIcon type="heart" /> Capture Consent
+            </button>
+            <button
+              type="button"
+              className="consent-action-btn is-upload"
+              onClick={() => openWorkflowForm("informed_consent")}
+            >
+              <WorkflowActionIcon type="settings" /> Upload Consent
+            </button>
+          </div>
+        )}
+        {isReferralManagementModule && (
+          <div className="referral-action-bar">
+            <button
+              type="button"
+              className="referral-action-btn is-new"
+              onClick={() => openWorkflowForm("outgoing_referral")}
+            >
+              <WorkflowActionIcon type="transfer" /> New Referral
+            </button>
+            <button
+              type="button"
+              className="referral-action-btn is-feedback"
+              onClick={() => openWorkflowForm("referral_feedback")}
+            >
+              <WorkflowActionIcon type="activity" /> Track Feedback
+            </button>
+          </div>
+        )}
+        {isDocumentManagementModule && (
+          <div className="document-action-bar">
+            <button
+              type="button"
+              className="document-action-btn is-upload"
+              onClick={() => openWorkflowForm("document_upload")}
+            >
+              <WorkflowActionIcon type="settings" /> Upload Document
+            </button>
+          </div>
+        )}
+        {isMessagingModule && (
+          <div className="messaging-action-bar">
+            <button
+              type="button"
+              className="messaging-action-btn is-campaign"
+              onClick={() => openWorkflowForm("notification_template")}
+            >
+              <WorkflowActionIcon type="settings" /> New Campaign
+            </button>
+            <button
+              type="button"
+              className="messaging-action-btn is-reminder"
+              onClick={() => openWorkflowForm("manual_notification")}
+            >
+              <WorkflowActionIcon type="activity" /> Send Reminder
+            </button>
+          </div>
+        )}
+        {isBiomedicalModule && (
+          <div className="biomedical-action-bar">
+            <button
+              type="button"
+              className="biomedical-action-btn is-device"
+              onClick={() => openWorkflowForm("medical_device_registration")}
+            >
+              <WorkflowActionIcon type="settings" /> Register Device
+            </button>
+            <button
+              type="button"
+              className="biomedical-action-btn is-maintenance"
+              onClick={() => openWorkflowForm("calibration_record")}
+            >
+              <WorkflowActionIcon type="activity" /> Log Maintenance
+            </button>
+          </div>
+        )}
+        {isHomeCareModule && (
+          <div className="home-care-action-bar">
+            <button
+              type="button"
+              className="home-care-action-btn is-schedule"
+              onClick={() => openWorkflowForm("home_care_plan")}
+            >
+              <WorkflowActionIcon type="calendar" /> Home Care Plan
+            </button>
+            <button
+              type="button"
+              className="home-care-action-btn is-note"
+              onClick={() => openWorkflowForm("home_visit_record")}
+            >
+              <WorkflowActionIcon type="activity" /> Home Visit Record
+            </button>
+          </div>
+        )}
+        {isClinicalResearchModule && (
+          <div className="clinical-research-action-bar">
+            <button
+              type="button"
+              className="clinical-research-action-btn is-protocol"
+              onClick={() => openWorkflowForm("research_protocol_registration")}
+            >
+              <WorkflowActionIcon type="settings" /> Research Protocol Registration
+            </button>
+            <button
+              type="button"
+              className="clinical-research-action-btn is-enrolment"
+              onClick={() => openWorkflowForm("patient_enrolment")}
+            >
+              <WorkflowActionIcon type="activity" /> Patient Enrolment
+            </button>
+            <button
+              type="button"
+              className="clinical-research-action-btn is-event"
+              onClick={() => openWorkflowForm("adverse_event_report")}
+            >
+              <WorkflowActionIcon type="triage" /> Adverse Event Report
+            </button>
+          </div>
+        )}
+        {isCdssModule && (
+          <div className="cdss-action-bar">
+            <button
+              type="button"
+              className="cdss-action-btn is-rule"
+              onClick={() => openWorkflowForm("cdss_rule_configuration")}
+            >
+              <WorkflowActionIcon type="settings" /> CDSS Rule Configuration
+            </button>
+            <button
+              type="button"
+              className="cdss-action-btn is-override"
+              onClick={() => openWorkflowForm("cdss_alert_override")}
+            >
+              <WorkflowActionIcon type="triage" /> CDSS Alert Override
+            </button>
+          </div>
+        )}
+        {isIctModule && (
+          <div className="ict-action-bar">
+            <button type="button" className="ict-action-btn is-incident" onClick={() => openWorkflowForm("security_incident_report")}>
+              <WorkflowActionIcon type="triage" /> Security Incident Report
+            </button>
+            <button type="button" className="ict-action-btn is-config" onClick={() => openWorkflowForm("system_configuration_change")}>
+              <WorkflowActionIcon type="settings" /> System Configuration Change
+            </button>
+          </div>
+        )}
+        {isNursingAdminModule && (
+          <div className="matron-action-bar">
+            <button type="button" className="matron-action-btn is-roster" onClick={() => openWorkflowForm("duty_roster")}>
+              <WorkflowActionIcon type="calendar" /> Duty Roster
+            </button>
+            <button type="button" className="matron-action-btn is-competency" onClick={() => openWorkflowForm("nursing_competency_assessment")}>
+              <WorkflowActionIcon type="triage" /> Nursing Competency Assessment
+            </button>
+          </div>
+        )}
+        {isMedicalDirectorModule && (
+          <div className="medical-director-action-bar">
+            {[
+              ["medical_director_doctor_profile", "Doctor Profile Governance", "consultation", "#16a34a"],
+              ["medical_director_doctor_privilege", "Doctor Privilege Assignment", "consultation", "#2563eb"],
+              ["medical_director_clinical_protocol", "Clinical Protocol", "settings", "#7c3aed"],
+              ["medical_director_protocol_version", "Protocol Version", "settings", "#0d9488"],
+              ["medical_director_mortality_review", "Mortality Review", "triage", "#dc2626"],
+              ["medical_director_complication_report", "Complication Report", "activity", "#f59e0b"],
+              ["medical_director_clinical_risk_alert", "Clinical Risk Alert", "activity", "#be123c"],
+              ["medical_director_restricted_drug_approval", "Restricted Drug Approval", "admission", "#9333ea"],
+              ["medical_director_mmr_meeting", "M&M Review Meeting", "triage", "#0891b2"],
+              ["medical_director_performance_score", "Doctor Performance Score", "activity", "#1d4ed8"],
+              ["medical_director_outcome_metric", "Clinical Outcome Metric", "activity", "#059669"],
+              ["medical_director_critical_case_alert", "Critical Case Alert", "activity", "#e11d48"],
+            ].map(([formId, label, iconType, color]) => (
+              <button
+                key={formId}
+                type="button"
+                className="medical-director-action-btn"
+                style={{ backgroundColor: color }}
+                onClick={() => openWorkflowForm(formId)}
+              >
+                <WorkflowActionIcon type={iconType as any} /> {label}
+              </button>
+            ))}
+          </div>
+        )}
+        {isRevenueCycleModule && (
+          <div className="revenue-cycle-action-bar">
+            <button
+              type="button"
+              className="revenue-cycle-action-btn is-denial"
+              onClick={() => openWorkflowForm("denial_management")}
+            >
+              <WorkflowActionIcon type="triage" /> Denial Management
+            </button>
+            <button
+              type="button"
+              className="revenue-cycle-action-btn is-writeoff"
+              onClick={() => openWorkflowForm("write_off_authorisation")}
+            >
+              <WorkflowActionIcon type="discharge" /> Write-off Authorisation
+            </button>
+          </div>
+        )}
+        {isCostAccountingModule && (
+          <div className="cost-accounting-action-bar">
+            <button
+              type="button"
+              className="cost-accounting-action-btn is-centre"
+              onClick={() => openWorkflowForm("cost_center_setup")}
+            >
+              <WorkflowActionIcon type="settings" /> Cost Centre Setup
+            </button>
+            <button
+              type="button"
+              className="cost-accounting-action-btn is-allocation"
+              onClick={() => openWorkflowForm("overhead_allocation")}
+            >
+              <WorkflowActionIcon type="transfer" /> Cost Allocation
+            </button>
+          </div>
+        )}
+        {isStrategicPlanningModule && (
+          <div className="executive-dashboard-action-bar">
+            {[
+              ["strategic_kpi_definition", "Strategic KPI Definition", "activity", "#1d4ed8"],
+              ["strategic_kpi_target", "Strategic KPI Target", "activity", "#7c3aed"],
+              ["strategic_kpi_value", "Strategic KPI Value", "activity", "#9333ea"],
+              ["strategic_goal", "Strategic Goal", "settings", "#16a34a"],
+              ["strategic_facility_ranking", "Facility Ranking", "activity", "#0891b2"],
+              ["strategic_forecasting_model", "Forecasting Model", "activity", "#f59e0b"],
+              ["strategic_scenario_simulation", "Scenario Simulation", "transfer", "#0d9488"],
+              ["strategic_risk_alert", "Strategic Risk Alert", "triage", "#dc2626"],
+              ["executive_note", "Executive Note", "form", "#475569"],
+            ].map(([formId, label, iconType, color]) => (
+              <button
+                key={formId}
+                type="button"
+                className="executive-dashboard-action-btn"
+                style={{ backgroundColor: color }}
+                onClick={() => openWorkflowForm(formId)}
+              >
+                <WorkflowActionIcon type={iconType as any} /> {label}
+              </button>
+            ))}
+          </div>
+        )}
         {isAppointmentModule && (
           <div className="appointment-action-bar">
             <button
@@ -19736,6 +23607,1031 @@ export function WorkflowModuleView({
           </div>
         )}
       </div>
+
+      {isNicuModule && (
+        <>
+          <div className="pv-stats nicu-stat-grid">
+            <article className="pv-stat-card" style={{ borderLeftColor: "#1e3a8a" }}>
+              <p className="pv-stat-label">Admissions</p>
+              <strong>8</strong>
+            </article>
+            <article className="pv-stat-card" style={{ borderLeftColor: "#dc2626" }}>
+              <p className="pv-stat-label">On CPAP</p>
+              <strong>3</strong>
+            </article>
+            <article className="pv-stat-card" style={{ borderLeftColor: "#f59e0b" }}>
+              <p className="pv-stat-label">Phototherapy</p>
+              <strong>2</strong>
+            </article>
+            <article className="pv-stat-card" style={{ borderLeftColor: "#0d9488" }}>
+              <p className="pv-stat-label">Avg LOS</p>
+              <strong>5.2 days</strong>
+            </article>
+          </div>
+
+          <div className="pv-search-bar nicu-search-row">
+            <div className="pv-search-wrap">
+              <WorkflowActionIcon type="search" className="pv-search-icon" />
+              <input
+                className="pv-search"
+                type="search"
+                value={search}
+                onChange={(event) => setSearch(event.target.value)}
+                placeholder="Search NICU admissions"
+              />
+            </div>
+          </div>
+
+          <section className="pv-table-wrap nicu-table-wrap">
+            <div className="reporting-table-header">
+              <h3>NICU Admissions</h3>
+              <p>
+                Records shown: <strong>{filteredNicuRows.length}</strong>
+              </p>
+            </div>
+            <table className="pv-table">
+              <thead>
+                <tr>
+                  <th>Neonate</th>
+                  <th>Gest Age</th>
+                  <th>Weight</th>
+                  <th>Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filteredNicuRows.length === 0 ? (
+                  <tr>
+                    <td colSpan={4} className="pv-empty">
+                      No records found.
+                    </td>
+                  </tr>
+                ) : (
+                  filteredNicuRows.map((row, index) => (
+                    <tr key={`${row.neonate}-${index}`}>
+                      <td className="pv-name">{row.neonate}</td>
+                      <td>{row.gestAge}</td>
+                      <td>{row.weight}</td>
+                      <td>
+                        <span className="pv-badge">{row.status}</span>
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </section>
+        </>
+      )}
+
+      {isPhysioModule && (
+        <>
+          <div className="pv-stats physio-stat-grid">
+            <article className="pv-stat-card" style={{ borderLeftColor: "#1e3a8a" }}>
+              <p className="pv-stat-label">Active Plans</p>
+              <strong>16</strong>
+            </article>
+            <article className="pv-stat-card" style={{ borderLeftColor: "#0d9488" }}>
+              <p className="pv-stat-label">Sessions Today</p>
+              <strong>9</strong>
+            </article>
+            <article className="pv-stat-card" style={{ borderLeftColor: "#f59e0b" }}>
+              <p className="pv-stat-label">Equipment Bookings</p>
+              <strong>5</strong>
+            </article>
+            <article className="pv-stat-card" style={{ borderLeftColor: "#16a34a" }}>
+              <p className="pv-stat-label">Discharge Ready</p>
+              <strong>3</strong>
+            </article>
+          </div>
+
+          <div className="pv-search-bar physio-search-row">
+            <div className="pv-search-wrap">
+              <WorkflowActionIcon type="search" className="pv-search-icon" />
+              <input
+                className="pv-search"
+                type="search"
+                value={search}
+                onChange={(event) => setSearch(event.target.value)}
+                placeholder="Search rehab sessions"
+              />
+            </div>
+          </div>
+
+          <section className="pv-table-wrap physio-table-wrap">
+            <div className="reporting-table-header">
+              <h3>Rehabilitation Sessions</h3>
+              <p>
+                Records shown: <strong>{filteredPhysioRows.length}</strong>
+              </p>
+            </div>
+            <table className="pv-table">
+              <thead>
+                <tr>
+                  <th>Patient</th>
+                  <th>Therapist</th>
+                  <th>Session</th>
+                  <th>Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filteredPhysioRows.length === 0 ? (
+                  <tr>
+                    <td colSpan={4} className="pv-empty">
+                      No records found.
+                    </td>
+                  </tr>
+                ) : (
+                  filteredPhysioRows.map((row, index) => (
+                    <tr key={`${row.patient}-${row.session}-${index}`}>
+                      <td className="pv-name">{row.patient}</td>
+                      <td>{row.therapist}</td>
+                      <td>{row.session}</td>
+                      <td>
+                        <span className="pv-badge">{row.status}</span>
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </section>
+        </>
+      )}
+
+      {isNutritionModule && (
+        <>
+          <div className="pv-stats nutrition-stat-grid">
+            <article className="pv-stat-card" style={{ borderLeftColor: "#dc2626" }}>
+              <p className="pv-stat-label">At-Risk Patients</p>
+              <strong>7</strong>
+            </article>
+            <article className="pv-stat-card" style={{ borderLeftColor: "#1e3a8a" }}>
+              <p className="pv-stat-label">Diet Plans</p>
+              <strong>24</strong>
+            </article>
+            <article className="pv-stat-card" style={{ borderLeftColor: "#0d9488" }}>
+              <p className="pv-stat-label">Enteral Orders</p>
+              <strong>6</strong>
+            </article>
+            <article className="pv-stat-card" style={{ borderLeftColor: "#f59e0b" }}>
+              <p className="pv-stat-label">Follow-ups</p>
+              <strong>5</strong>
+            </article>
+          </div>
+
+          <div className="pv-search-bar nutrition-search-row">
+            <div className="pv-search-wrap">
+              <WorkflowActionIcon type="search" className="pv-search-icon" />
+              <input
+                className="pv-search"
+                type="search"
+                value={search}
+                onChange={(event) => setSearch(event.target.value)}
+                placeholder="Search nutrition plans"
+              />
+            </div>
+          </div>
+
+          <section className="pv-table-wrap nutrition-table-wrap">
+            <div className="reporting-table-header">
+              <h3>Nutrition Plans</h3>
+              <p>
+                Records shown: <strong>{filteredNutritionRows.length}</strong>
+              </p>
+            </div>
+            <table className="pv-table">
+              <thead>
+                <tr>
+                  <th>Patient</th>
+                  <th>Plan</th>
+                  <th>Calories</th>
+                  <th>Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filteredNutritionRows.length === 0 ? (
+                  <tr>
+                    <td colSpan={4} className="pv-empty">
+                      No records found.
+                    </td>
+                  </tr>
+                ) : (
+                  filteredNutritionRows.map((row, index) => (
+                    <tr key={`${row.patient}-${row.plan}-${index}`}>
+                      <td className="pv-name">{row.patient}</td>
+                      <td>{row.plan}</td>
+                      <td>{row.calories}</td>
+                      <td>
+                        <span className="pv-badge">{row.status}</span>
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </section>
+        </>
+      )}
+
+      {isDentalModule && (
+        <>
+          <div className="pv-stats dental-stat-grid">
+            <article className="pv-stat-card" style={{ borderLeftColor: "#1e3a8a" }}>
+              <p className="pv-stat-label">Patients Today</p>
+              <strong>12</strong>
+            </article>
+            <article className="pv-stat-card" style={{ borderLeftColor: "#0d9488" }}>
+              <p className="pv-stat-label">Procedures</p>
+              <strong>18</strong>
+            </article>
+            <article className="pv-stat-card" style={{ borderLeftColor: "#f59e0b" }}>
+              <p className="pv-stat-label">Pending Approvals</p>
+              <strong>3</strong>
+            </article>
+            <article className="pv-stat-card" style={{ borderLeftColor: "#16a34a" }}>
+              <p className="pv-stat-label">Revenue</p>
+              <strong>KES 142k</strong>
+            </article>
+          </div>
+
+          <div className="pv-search-bar dental-search-row">
+            <div className="pv-search-wrap">
+              <WorkflowActionIcon type="search" className="pv-search-icon" />
+              <input
+                className="pv-search"
+                type="search"
+                value={search}
+                onChange={(event) => setSearch(event.target.value)}
+                placeholder="Search dental procedures"
+              />
+            </div>
+          </div>
+
+          <section className="pv-table-wrap dental-table-wrap">
+            <div className="reporting-table-header">
+              <h3>Dental Procedures</h3>
+              <p>
+                Records shown: <strong>{filteredDentalRows.length}</strong>
+              </p>
+            </div>
+            <table className="pv-table">
+              <thead>
+                <tr>
+                  <th>Patient</th>
+                  <th>Tooth</th>
+                  <th>Procedure</th>
+                  <th>Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filteredDentalRows.length === 0 ? (
+                  <tr>
+                    <td colSpan={4} className="pv-empty">
+                      No records found.
+                    </td>
+                  </tr>
+                ) : (
+                  filteredDentalRows.map((row, index) => (
+                    <tr key={`${row.patient}-${row.tooth}-${index}`}>
+                      <td className="pv-name">{row.patient}</td>
+                      <td>{row.tooth}</td>
+                      <td>{row.procedure}</td>
+                      <td>
+                        <span className="pv-badge">{row.status}</span>
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </section>
+        </>
+      )}
+
+      {isInfectionControlModule && (
+        <>
+          <div className="pv-stats infection-stat-grid">
+            <article className="pv-stat-card" style={{ borderLeftColor: "#dc2626" }}>
+              <p className="pv-stat-label">HAI Alerts</p>
+              <strong>2</strong>
+            </article>
+            <article className="pv-stat-card" style={{ borderLeftColor: "#f59e0b" }}>
+              <p className="pv-stat-label">Open Incidents</p>
+              <strong>5</strong>
+            </article>
+            <article className="pv-stat-card" style={{ borderLeftColor: "#0d9488" }}>
+              <p className="pv-stat-label">CSSD Cycles</p>
+              <strong>34</strong>
+            </article>
+            <article className="pv-stat-card" style={{ borderLeftColor: "#16a34a" }}>
+              <p className="pv-stat-label">Compliance</p>
+              <strong>91%</strong>
+            </article>
+          </div>
+
+          <div className="pv-search-bar infection-search-row">
+            <div className="pv-search-wrap">
+              <WorkflowActionIcon type="search" className="pv-search-icon" />
+              <input
+                className="pv-search"
+                type="search"
+                value={search}
+                onChange={(event) => setSearch(event.target.value)}
+                placeholder="Search infection control items"
+              />
+            </div>
+          </div>
+
+          <section className="pv-table-wrap infection-table-wrap">
+            <div className="reporting-table-header">
+              <h3>Infection Control Items</h3>
+              <p>
+                Records shown: <strong>{filteredInfectionRows.length}</strong>
+              </p>
+            </div>
+            <table className="pv-table">
+              <thead>
+                <tr>
+                  <th>Type</th>
+                  <th>Unit</th>
+                  <th>Status</th>
+                  <th>Action</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filteredInfectionRows.length === 0 ? (
+                  <tr>
+                    <td colSpan={4} className="pv-empty">
+                      No records found.
+                    </td>
+                  </tr>
+                ) : (
+                  filteredInfectionRows.map((row, index) => (
+                    <tr key={`${row.type}-${row.unit}-${index}`}>
+                      <td className="pv-name">{row.type}</td>
+                      <td>{row.unit}</td>
+                      <td>
+                        <span className="pv-badge">{row.status}</span>
+                      </td>
+                      <td>{row.action}</td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </section>
+        </>
+      )}
+
+      {isCommunityHealthModule && (
+        <>
+          <div className="pv-stats community-stat-grid">
+            <article className="pv-stat-card" style={{ borderLeftColor: "#1e3a8a" }}>
+              <p className="pv-stat-label">Households</p>
+              <strong>320</strong>
+            </article>
+            <article className="pv-stat-card" style={{ borderLeftColor: "#0d9488" }}>
+              <p className="pv-stat-label">Visits Today</p>
+              <strong>27</strong>
+            </article>
+            <article className="pv-stat-card" style={{ borderLeftColor: "#dc2626" }}>
+              <p className="pv-stat-label">Defaulters</p>
+              <strong>12</strong>
+            </article>
+            <article className="pv-stat-card" style={{ borderLeftColor: "#f59e0b" }}>
+              <p className="pv-stat-label">Referrals</p>
+              <strong>9</strong>
+            </article>
+          </div>
+
+          <div className="pv-search-bar community-search-row">
+            <div className="pv-search-wrap">
+              <WorkflowActionIcon type="search" className="pv-search-icon" />
+              <input
+                className="pv-search"
+                type="search"
+                value={search}
+                onChange={(event) => setSearch(event.target.value)}
+                placeholder="Search community visits"
+              />
+            </div>
+          </div>
+
+          <section className="pv-table-wrap community-table-wrap">
+            <div className="reporting-table-header">
+              <h3>Community Visits</h3>
+              <p>
+                Records shown: <strong>{filteredCommunityRows.length}</strong>
+              </p>
+            </div>
+            <table className="pv-table">
+              <thead>
+                <tr>
+                  <th>CHW</th>
+                  <th>Household</th>
+                  <th>Visit</th>
+                  <th>Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filteredCommunityRows.length === 0 ? (
+                  <tr>
+                    <td colSpan={4} className="pv-empty">
+                      No records found.
+                    </td>
+                  </tr>
+                ) : (
+                  filteredCommunityRows.map((row, index) => (
+                    <tr key={`${row.chw}-${row.household}-${index}`}>
+                      <td className="pv-name">{row.chw}</td>
+                      <td>{row.household}</td>
+                      <td>{row.visit}</td>
+                      <td>
+                        <span className="pv-badge">{row.status}</span>
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </section>
+        </>
+      )}
+
+      {isConsentModule && (
+        <>
+          <div className="pv-stats consent-stat-grid">
+            <article className="pv-stat-card" style={{ borderLeftColor: "#dc2626" }}>
+              <p className="pv-stat-label">Pending Consents</p>
+              <strong>11</strong>
+            </article>
+            <article className="pv-stat-card" style={{ borderLeftColor: "#0d9488" }}>
+              <p className="pv-stat-label">Signed Today</p>
+              <strong>26</strong>
+            </article>
+            <article className="pv-stat-card" style={{ borderLeftColor: "#f59e0b" }}>
+              <p className="pv-stat-label">Withdrawn</p>
+              <strong>1</strong>
+            </article>
+            <article className="pv-stat-card" style={{ borderLeftColor: "#1e3a8a" }}>
+              <p className="pv-stat-label">Expiring</p>
+              <strong>4</strong>
+            </article>
+          </div>
+
+          <div className="pv-search-bar consent-search-row">
+            <div className="pv-search-wrap">
+              <WorkflowActionIcon type="search" className="pv-search-icon" />
+              <input
+                className="pv-search"
+                type="search"
+                value={search}
+                onChange={(event) => setSearch(event.target.value)}
+                placeholder="Search consents"
+              />
+            </div>
+          </div>
+
+          <section className="pv-table-wrap consent-table-wrap">
+            <div className="reporting-table-header">
+              <h3>Consent Records</h3>
+              <p>
+                Records shown: <strong>{filteredConsentRows.length}</strong>
+              </p>
+            </div>
+            <table className="pv-table">
+              <thead>
+                <tr>
+                  <th>Patient</th>
+                  <th>Consent</th>
+                  <th>Status</th>
+                  <th>Witness</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filteredConsentRows.length === 0 ? (
+                  <tr>
+                    <td colSpan={4} className="pv-empty">
+                      No records found.
+                    </td>
+                  </tr>
+                ) : (
+                  filteredConsentRows.map((row, index) => (
+                    <tr key={`${row.patient}-${row.consent}-${index}`}>
+                      <td className="pv-name">{row.patient}</td>
+                      <td>{row.consent}</td>
+                      <td>
+                        <span className="pv-badge">{row.status}</span>
+                      </td>
+                      <td>{row.witness}</td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </section>
+        </>
+      )}
+
+      {isReferralManagementModule && (
+        <>
+          <div className="pv-stats referral-stat-grid">
+            <article className="pv-stat-card" style={{ borderLeftColor: "#1e3a8a" }}>
+              <p className="pv-stat-label">Outgoing</p>
+              <strong>14</strong>
+            </article>
+            <article className="pv-stat-card" style={{ borderLeftColor: "#0d9488" }}>
+              <p className="pv-stat-label">Incoming</p>
+              <strong>6</strong>
+            </article>
+            <article className="pv-stat-card" style={{ borderLeftColor: "#16a34a" }}>
+              <p className="pv-stat-label">Accepted</p>
+              <strong>8</strong>
+            </article>
+            <article className="pv-stat-card" style={{ borderLeftColor: "#f59e0b" }}>
+              <p className="pv-stat-label">Pending</p>
+              <strong>5</strong>
+            </article>
+          </div>
+
+          <div className="pv-search-bar referral-search-row">
+            <div className="pv-search-wrap">
+              <WorkflowActionIcon type="search" className="pv-search-icon" />
+              <input
+                className="pv-search"
+                type="search"
+                value={search}
+                onChange={(event) => setSearch(event.target.value)}
+                placeholder="Search referrals"
+              />
+            </div>
+          </div>
+
+          <section className="pv-table-wrap referral-table-wrap">
+            <div className="reporting-table-header">
+              <h3>Referral Records</h3>
+              <p>
+                Records shown: <strong>{filteredReferralRows.length}</strong>
+              </p>
+            </div>
+            <table className="pv-table">
+              <thead>
+                <tr>
+                  <th>Patient</th>
+                  <th>Facility</th>
+                  <th>Urgency</th>
+                  <th>Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filteredReferralRows.length === 0 ? (
+                  <tr>
+                    <td colSpan={4} className="pv-empty">
+                      No records found.
+                    </td>
+                  </tr>
+                ) : (
+                  filteredReferralRows.map((row, index) => (
+                    <tr key={`${row.patient}-${row.facility}-${index}`}>
+                      <td className="pv-name">{row.patient}</td>
+                      <td>{row.facility}</td>
+                      <td>{row.urgency}</td>
+                      <td>
+                        <span className="pv-badge">{row.status}</span>
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </section>
+        </>
+      )}
+
+      {isDocumentManagementModule && (
+        <>
+          <div className="pv-stats document-stat-grid">
+            <article className="pv-stat-card" style={{ borderLeftColor: "#1e3a8a" }}>
+              <p className="pv-stat-label">Uploads Today</p>
+              <strong>18</strong>
+            </article>
+            <article className="pv-stat-card" style={{ borderLeftColor: "#f59e0b" }}>
+              <p className="pv-stat-label">Pending Review</p>
+              <strong>7</strong>
+            </article>
+            <article className="pv-stat-card" style={{ borderLeftColor: "#dc2626" }}>
+              <p className="pv-stat-label">Expiring</p>
+              <strong>3</strong>
+            </article>
+            <article className="pv-stat-card" style={{ borderLeftColor: "#0d9488" }}>
+              <p className="pv-stat-label">OCR Queue</p>
+              <strong>12</strong>
+            </article>
+          </div>
+
+          <div className="pv-search-bar document-search-row">
+            <div className="pv-search-wrap">
+              <WorkflowActionIcon type="search" className="pv-search-icon" />
+              <input
+                className="pv-search"
+                type="search"
+                value={search}
+                onChange={(event) => setSearch(event.target.value)}
+                placeholder="Search documents"
+              />
+            </div>
+          </div>
+
+          <section className="pv-table-wrap document-table-wrap">
+            <div className="reporting-table-header">
+              <h3>Document Records</h3>
+              <p>
+                Records shown: <strong>{filteredDocumentRows.length}</strong>
+              </p>
+            </div>
+            <table className="pv-table">
+              <thead>
+                <tr>
+                  <th>Document</th>
+                  <th>Type</th>
+                  <th>Owner</th>
+                  <th>Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filteredDocumentRows.length === 0 ? (
+                  <tr>
+                    <td colSpan={4} className="pv-empty">
+                      No records found.
+                    </td>
+                  </tr>
+                ) : (
+                  filteredDocumentRows.map((row, index) => (
+                    <tr key={`${row.document}-${row.type}-${index}`}>
+                      <td className="pv-name">{row.document}</td>
+                      <td>{row.type}</td>
+                      <td>{row.owner}</td>
+                      <td>
+                        <span className="pv-badge">{row.status}</span>
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </section>
+        </>
+      )}
+
+      {isMessagingModule && (
+        <>
+          <div className="pv-stats messaging-stat-grid">
+            <article className="pv-stat-card" style={{ borderLeftColor: "#1e3a8a" }}>
+              <p className="pv-stat-label">Messages Sent</p>
+              <strong>214</strong>
+            </article>
+            <article className="pv-stat-card" style={{ borderLeftColor: "#dc2626" }}>
+              <p className="pv-stat-label">Failed</p>
+              <strong>6</strong>
+            </article>
+            <article className="pv-stat-card" style={{ borderLeftColor: "#0d9488" }}>
+              <p className="pv-stat-label">Opt-ins</p>
+              <strong>480</strong>
+            </article>
+            <article className="pv-stat-card" style={{ borderLeftColor: "#f59e0b" }}>
+              <p className="pv-stat-label">Templates</p>
+              <strong>12</strong>
+            </article>
+          </div>
+
+          <div className="pv-search-bar messaging-search-row">
+            <div className="pv-search-wrap">
+              <WorkflowActionIcon type="search" className="pv-search-icon" />
+              <input
+                className="pv-search"
+                type="search"
+                value={search}
+                onChange={(event) => setSearch(event.target.value)}
+                placeholder="Search messages"
+              />
+            </div>
+          </div>
+
+          <section className="pv-table-wrap messaging-table-wrap">
+            <div className="reporting-table-header">
+              <h3>Message Records</h3>
+              <p>
+                Records shown: <strong>{filteredMessagingRows.length}</strong>
+              </p>
+            </div>
+            <table className="pv-table">
+              <thead>
+                <tr>
+                  <th>Recipient</th>
+                  <th>Channel</th>
+                  <th>Status</th>
+                  <th>Sent</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filteredMessagingRows.length === 0 ? (
+                  <tr>
+                    <td colSpan={4} className="pv-empty">
+                      No records found.
+                    </td>
+                  </tr>
+                ) : (
+                  filteredMessagingRows.map((row, index) => (
+                    <tr key={`${row.recipient}-${row.channel}-${index}`}>
+                      <td className="pv-name">{row.recipient}</td>
+                      <td>{row.channel}</td>
+                      <td>
+                        <span className="pv-badge">{row.status}</span>
+                      </td>
+                      <td>{row.sent}</td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </section>
+        </>
+      )}
+
+      {isBiomedicalModule && (
+        <>
+          <div className="pv-stats biomedical-stat-grid">
+            <article className="pv-stat-card" style={{ borderLeftColor: "#1e3a8a" }}>
+              <p className="pv-stat-label">Devices</p>
+              <strong>128</strong>
+            </article>
+            <article className="pv-stat-card" style={{ borderLeftColor: "#f59e0b" }}>
+              <p className="pv-stat-label">Maintenance Due</p>
+              <strong>9</strong>
+            </article>
+            <article className="pv-stat-card" style={{ borderLeftColor: "#0d9488" }}>
+              <p className="pv-stat-label">Calibrations</p>
+              <strong>6</strong>
+            </article>
+            <article className="pv-stat-card" style={{ borderLeftColor: "#dc2626" }}>
+              <p className="pv-stat-label">Recall Alerts</p>
+              <strong>1</strong>
+            </article>
+          </div>
+
+          <div className="pv-search-bar biomedical-search-row">
+            <div className="pv-search-wrap">
+              <WorkflowActionIcon type="search" className="pv-search-icon" />
+              <input
+                className="pv-search"
+                type="search"
+                value={search}
+                onChange={(event) => setSearch(event.target.value)}
+                placeholder="Search devices"
+              />
+            </div>
+          </div>
+
+          <section className="pv-table-wrap biomedical-table-wrap">
+            <div className="reporting-table-header">
+              <h3>Biomedical Equipment</h3>
+              <p>
+                Records shown: <strong>{filteredBiomedicalRows.length}</strong>
+              </p>
+            </div>
+            <table className="pv-table">
+              <thead>
+                <tr>
+                  <th>Device</th>
+                  <th>Dept</th>
+                  <th>Next Service</th>
+                  <th>Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filteredBiomedicalRows.length === 0 ? (
+                  <tr>
+                    <td colSpan={4} className="pv-empty">
+                      No records found.
+                    </td>
+                  </tr>
+                ) : (
+                  filteredBiomedicalRows.map((row, index) => (
+                    <tr key={`${row.device}-${row.dept}-${index}`}>
+                      <td className="pv-name">{row.device}</td>
+                      <td>{row.dept}</td>
+                      <td>{row.nextService}</td>
+                      <td>
+                        <span className="pv-badge">{row.status}</span>
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </section>
+        </>
+      )}
+
+      {isHomeCareModule && (
+        <>
+          <div className="pv-stats home-care-stat-grid">
+            <article className="pv-stat-card" style={{ borderLeftColor: "#1e3a8a" }}>
+              <p className="pv-stat-label">Visits Today</p>
+              <strong>14</strong>
+            </article>
+            <article className="pv-stat-card" style={{ borderLeftColor: "#f59e0b" }}>
+              <p className="pv-stat-label">Pending</p>
+              <strong>5</strong>
+            </article>
+            <article className="pv-stat-card" style={{ borderLeftColor: "#0d9488" }}>
+              <p className="pv-stat-label">Equipment Dispatch</p>
+              <strong>3</strong>
+            </article>
+            <article className="pv-stat-card" style={{ borderLeftColor: "#dc2626" }}>
+              <p className="pv-stat-label">Escalations</p>
+              <strong>1</strong>
+            </article>
+          </div>
+
+          <div className="pv-search-bar home-care-search-row">
+            <div className="pv-search-wrap">
+              <WorkflowActionIcon type="search" className="pv-search-icon" />
+              <input
+                className="pv-search"
+                type="search"
+                value={search}
+                onChange={(event) => setSearch(event.target.value)}
+                placeholder="Search home care visits"
+              />
+            </div>
+          </div>
+
+          <section className="pv-table-wrap home-care-table-wrap">
+            <div className="reporting-table-header">
+              <h3>Home Care Visits</h3>
+              <p>
+                Records shown: <strong>{filteredHomeCareRows.length}</strong>
+              </p>
+            </div>
+            <table className="pv-table">
+              <thead>
+                <tr>
+                  <th>Patient</th>
+                  <th>Caregiver</th>
+                  <th>Visit</th>
+                  <th>Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filteredHomeCareRows.length === 0 ? (
+                  <tr>
+                    <td colSpan={4} className="pv-empty">
+                      No records found.
+                    </td>
+                  </tr>
+                ) : (
+                  filteredHomeCareRows.map((row, index) => (
+                    <tr key={`${row.patient}-${row.caregiver}-${index}`}>
+                      <td className="pv-name">{row.patient}</td>
+                      <td>{row.caregiver}</td>
+                      <td>{row.visit}</td>
+                      <td>
+                        <span className="pv-badge">{row.status}</span>
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </section>
+        </>
+      )}
+
+      {isClinicalResearchModule && (
+        <>
+          <div className="pv-search-bar clinical-research-search-row">
+            <div className="pv-search-wrap">
+              <WorkflowActionIcon type="search" className="pv-search-icon" />
+              <input
+                className="pv-search"
+                type="search"
+                value={search}
+                onChange={(event) => setSearch(event.target.value)}
+                placeholder="Search clinical research records"
+              />
+            </div>
+          </div>
+
+          <section className="pv-table-wrap clinical-research-table-wrap">
+            <table className="pv-table">
+              <thead>
+                <tr>
+                  <th>Record</th>
+                  <th>Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filteredClinicalResearchRows.length === 0 ? (
+                  <tr>
+                    <td colSpan={2} className="pv-empty">
+                      No records found.
+                    </td>
+                  </tr>
+                ) : (
+                  filteredClinicalResearchRows.map((row, index) => (
+                    <tr key={`${row.record}-${index}`}>
+                      <td className="pv-name">{row.record}</td>
+                      <td>
+                        <span className="pv-badge">{row.status}</span>
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </section>
+        </>
+      )}
+
+      {isCdssModule && (
+        <>
+          <div className="pv-stats cdss-stat-grid">
+            <article className="pv-stat-card" style={{ borderLeftColor: "#1e3a8a" }}>
+              <p className="pv-stat-label">Active Rules</p>
+              <strong>28</strong>
+            </article>
+            <article className="pv-stat-card" style={{ borderLeftColor: "#dc2626" }}>
+              <p className="pv-stat-label">Critical Alerts</p>
+              <strong>4</strong>
+            </article>
+            <article className="pv-stat-card" style={{ borderLeftColor: "#b91c1c" }}>
+              <p className="pv-stat-label">Hard Stops</p>
+              <strong>2</strong>
+            </article>
+            <article className="pv-stat-card" style={{ borderLeftColor: "#0d9488" }}>
+              <p className="pv-stat-label">Pending Reviews</p>
+              <strong>6</strong>
+            </article>
+          </div>
+
+          <div className="pv-search-bar cdss-search-row">
+            <div className="pv-search-wrap">
+              <WorkflowActionIcon type="search" className="pv-search-icon" />
+              <input
+                className="pv-search"
+                type="search"
+                value={search}
+                onChange={(event) => setSearch(event.target.value)}
+                placeholder="Search CDSS rules"
+              />
+            </div>
+          </div>
+
+          <section className="pv-table-wrap cdss-table-wrap">
+            <div className="reporting-table-header">
+              <h3>Clinical Decision Support Rules</h3>
+              <p>
+                Records shown: <strong>{filteredCdssRows.length}</strong>
+              </p>
+            </div>
+            <table className="pv-table">
+              <thead>
+                <tr>
+                  <th>Rule</th>
+                  <th>Trigger</th>
+                  <th>Severity</th>
+                  <th>Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filteredCdssRows.length === 0 ? (
+                  <tr>
+                    <td colSpan={4} className="pv-empty">
+                      No records found.
+                    </td>
+                  </tr>
+                ) : (
+                  filteredCdssRows.map((row, index) => (
+                    <tr key={`${row.rule}-${row.trigger}-${index}`}>
+                      <td className="pv-name">{row.rule}</td>
+                      <td>{row.trigger}</td>
+                      <td>
+                        <span className={`pv-badge ${row.severity === "HARD_STOP" || row.severity === "CRITICAL" ? "is-danger" : ""}`}>
+                          {row.severity}
+                        </span>
+                      </td>
+                      <td>
+                        <span className="pv-badge">{row.status}</span>
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </section>
+        </>
+      )}
 
       {isInpatientModule && (
         <>
@@ -19870,6 +24766,12 @@ export function WorkflowModuleView({
           </div>
 
           <section className="pv-table-wrap" style={{ marginBottom: 14 }}>
+            <div className="reporting-table-header">
+              <h3>Chart of Accounts</h3>
+              <p>
+                Accounts shown: <strong>{accAccounts.length}</strong>
+              </p>
+            </div>
             <table className="pv-table">
               <thead>
                 <tr>
@@ -19905,123 +24807,63 @@ export function WorkflowModuleView({
 
       {isOpdFlowModule && (
         <>
-          <div className="pv-header" style={{ marginBottom: 10 }}>
-            <div>
-              <p className="pv-subtitle">
-                Real-time OPD/Triage flow board with queue, consultation load, and routing outcomes.
-              </p>
-            </div>
-            <button
-              type="button"
-              className="btn-primary"
-              onClick={() => void loadOpdControlCenter()}
-              disabled={opdLoading}
-            >
-              {opdLoading ? "Refreshing..." : "Refresh OPD Flow"}
-            </button>
-          </div>
-
           {opdError && <div className="workflow-notice is-error">{opdError}</div>}
 
-          <div className="ehr-summary-grid" style={{ marginBottom: 14 }}>
-            <article className="ehr-summary-card">
-              <span>Visits Today</span>
+          <div className="pv-stats opd-stat-grid">
+            <article className="pv-stat-card" style={{ borderLeftColor: "#16a34a" }}>
+              <p className="pv-stat-label">Today's Visits</p>
               <strong>{opdFlowSummary.visitsToday}</strong>
             </article>
-            <article className="ehr-summary-card">
-              <span>Waiting</span>
+            <article className="pv-stat-card" style={{ borderLeftColor: "#dc2626" }}>
+              <p className="pv-stat-label">Waiting</p>
               <strong>{opdFlowSummary.waiting}</strong>
             </article>
-            <article className="ehr-summary-card">
-              <span>In Consultation</span>
+            <article className="pv-stat-card" style={{ borderLeftColor: "#1e3a8a" }}>
+              <p className="pv-stat-label">In Progress</p>
               <strong>{opdFlowSummary.inConsultation}</strong>
             </article>
-            <article className="ehr-summary-card">
-              <span>Average Wait (min)</span>
-              <strong>{opdFlowSummary.averageWaitingMinutes.toFixed(2)}</strong>
-            </article>
-            <article className="ehr-summary-card">
-              <span>Ordered Lab</span>
-              <strong>{opdFlowSummary.orderedLab}</strong>
-            </article>
-            <article className="ehr-summary-card">
-              <span>Ordered Radiology</span>
-              <strong>{opdFlowSummary.orderedRadiology}</strong>
-            </article>
-            <article className="ehr-summary-card">
-              <span>Completed Today</span>
-              <strong>{opdFlowSummary.completedToday}</strong>
-            </article>
-            <article className="ehr-summary-card">
-              <span>Admitted Today</span>
+            <article className="pv-stat-card" style={{ borderLeftColor: "#7c3aed" }}>
+              <p className="pv-stat-label">Admitted</p>
               <strong>{opdFlowSummary.admittedToday}</strong>
             </article>
-            <article className="ehr-summary-card">
-              <span>Referred Today</span>
+            <article className="pv-stat-card" style={{ borderLeftColor: "#2563eb" }}>
+              <p className="pv-stat-label">Referred Today</p>
               <strong>{opdFlowSummary.referredToday}</strong>
-            </article>
-            <article className="ehr-summary-card">
-              <span>Queue Tokens Issued</span>
-              <strong>{opdFlowSummary.queueTokensIssued}</strong>
             </article>
           </div>
 
-          {Array.isArray(opdFlowSummary.doctorLoad) && opdFlowSummary.doctorLoad.length > 0 && (
-            <section className="pv-table-wrap" style={{ marginBottom: 14 }}>
-              <table className="pv-table">
-                <thead>
-                  <tr>
-                    <th>Doctor</th>
-                    <th>Active Queue Load</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {opdFlowSummary.doctorLoad.slice(0, 8).map((row: any) => (
-                    <tr key={`opd-doctor-load-${row?.doctorId || row?.doctorName}`}>
-                      <td>{String(row?.doctorName || row?.doctorId || "-")}</td>
-                      <td>{Number(row?.activeCount || 0)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </section>
-          )}
+          <div className="workflow-top-search opd-top-search">
+            <input
+              className="pv-search"
+              placeholder="Search OPD queue"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+            />
+          </div>
 
           <section className="pv-table-wrap" style={{ marginBottom: 14 }}>
             <table className="pv-table">
               <thead>
                 <tr>
-                  <th>Visit ID</th>
                   <th>Patient</th>
-                  <th>Status</th>
-                  <th>Visit Type</th>
                   <th>Doctor</th>
-                  <th>Chief Complaint</th>
+                  <th>Status</th>
+                  <th>Arrival</th>
                 </tr>
               </thead>
               <tbody>
-                {opdQueue.slice(0, 12).map((row: any) => (
-                  <tr key={`opd-flow-row-${row?.id}`}>
-                    <td className="pv-name">{String(row?.id || "-").slice(0, 12)}</td>
-                    <td>
-                      {`${row?.patient?.firstName || ""} ${row?.patient?.lastName || ""}`.trim() ||
-                        "-"}
-                    </td>
-                    <td>
-                      <span className="pv-badge">{String(row?.status || "-")}</span>
-                    </td>
-                    <td>{String(row?.visitType || "-")}</td>
-                    <td>
-                      {`${row?.doctor?.firstName || ""} ${row?.doctor?.lastName || ""}`.trim() ||
-                        "-"}
-                    </td>
-                    <td>{String(row?.medicalRecord?.chiefComplaint || "-")}</td>
+                {outpatientRows.map((row) => (
+                  <tr key={row.id}>
+                    <td className="pv-name">{row.patient}</td>
+                    <td>{row.doctor}</td>
+                    <td><span className="pv-badge">{row.status}</span></td>
+                    <td>{row.arrival}</td>
                   </tr>
                 ))}
-                {!opdLoading && opdQueue.length === 0 && (
+                {!opdLoading && outpatientRows.length === 0 && (
                   <tr>
-                    <td colSpan={6} className="pv-empty">
-                      No active OPD/Triage queue records found.
+                    <td colSpan={4} className="pv-empty">
+                      No records found.
                     </td>
                   </tr>
                 )}
@@ -20495,264 +25337,204 @@ export function WorkflowModuleView({
 
       {isNursingModule && (
         <>
-          <div className="pv-header" style={{ marginBottom: 10 }}>
+          <div className="pv-header">
             <div>
-              <p className="pv-subtitle">
-                Nursing control center: assigned patients, medication administration risk, vitals alerts,
-                incidents, shift handovers, and bedside task tracking.
-              </p>
+              <h2 className="pv-title">Nursing Station</h2>
+              <p className="pv-subtitle">Daily observations and medication administration</p>
             </div>
-            <button
-              type="button"
-              className="btn-primary"
-              onClick={() => void loadNursingControlCenter()}
-              disabled={nursingLoading}
-            >
-              {nursingLoading ? "Refreshing..." : "Refresh Nursing"}
-            </button>
+            <div className="module-actions">
+              {formsForDisplay.map((moduleForm) => (
+                <button
+                  key={moduleForm.id}
+                  type="button"
+                  onClick={() => openWorkflowForm(moduleForm.id)}
+                >
+                  <WorkflowActionIcon type="form" />
+                  {cleanWorkflowFormTitle(moduleForm.title)}
+                </button>
+              ))}
+              <button
+                type="button"
+                onClick={() => void loadNursingControlCenter()}
+                disabled={nursingLoading}
+              >
+                <WorkflowActionIcon type="refresh" />
+                {nursingLoading ? "Refreshing..." : "Refresh"}
+              </button>
+            </div>
           </div>
 
           {nursingError && <div className="workflow-notice is-error">{nursingError}</div>}
 
-          <div className="ehr-summary-grid" style={{ marginBottom: 14 }}>
-            <article className="ehr-summary-card">
-              <span>Active Admissions</span>
-              <strong>{nursingSummary.activeAdmissions}</strong>
-            </article>
-            <article className="ehr-summary-card">
-              <span>Assigned Patients</span>
-              <strong>{nursingSummary.assignedPatients}</strong>
-            </article>
-            <article className="ehr-summary-card">
-              <span>Pending Medication</span>
-              <strong>{nursingSummary.pendingMedicationCount}</strong>
-            </article>
-            <article className="ehr-summary-card">
-              <span>Abnormal Vitals</span>
-              <strong>{nursingSummary.abnormalVitalsCount}</strong>
-            </article>
-            <article className="ehr-summary-card">
-              <span>Open Incidents</span>
-              <strong>{nursingSummary.unresolvedIncidentCount}</strong>
-            </article>
-            <article className="ehr-summary-card">
-              <span>Critical Incidents</span>
-              <strong>{nursingSummary.criticalIncidentCount}</strong>
-            </article>
-            <article className="ehr-summary-card">
-              <span>Open Tasks</span>
-              <strong>{nursingSummary.openTaskCount}</strong>
-            </article>
-            <article className="ehr-summary-card">
-              <span>Overdue Tasks</span>
-              <strong>{nursingSummary.overdueTaskCount}</strong>
-            </article>
-            <article className="ehr-summary-card">
-              <span>Medications Logged</span>
-              <strong>{nursingSummary.medicationGivenByCurrentNurse}</strong>
-            </article>
-            <article className="ehr-summary-card">
-              <span>Notes Today</span>
-              <strong>{nursingSummary.notesLoggedToday}</strong>
-            </article>
-            <article className="ehr-summary-card">
-              <span>Recent Handovers</span>
-              <strong>{nursingSummary.recentHandoverCount}</strong>
-            </article>
+          <div className="pv-stats nursing-stats-grid">
+            {nursingStatCards.map((stat) => (
+              <article
+                key={stat.label}
+                className="pv-stat-card"
+                style={{ borderLeftColor: stat.color }}
+              >
+                <p className="pv-stat-label">{stat.label}</p>
+                <p className="pv-stat-value">{nursingLoading ? "..." : stat.value}</p>
+              </article>
+            ))}
           </div>
 
-          <section className="pv-table-wrap" style={{ marginBottom: 14 }}>
+          <div className="pv-search-bar">
+            <div className="pv-search-wrap">
+              <WorkflowActionIcon type="search" className="pv-search-icon" />
+              <input
+                className="pv-search"
+                placeholder="Search patients..."
+                value={search}
+                onChange={(event) => setSearch(event.target.value)}
+              />
+            </div>
+          </div>
+
+          <section className="pv-table-wrap nursing-patient-table-wrap">
+            <div className="nursing-table-meta">
+              <h3>Patient Records</h3>
+              <span>{nursingLoading ? "Loading..." : `${nursingTableRows.length} records`}</span>
+            </div>
             <table className="pv-table">
               <thead>
                 <tr>
                   <th>Patient</th>
-                  <th>Code</th>
                   <th>Status</th>
-                  <th>Ward</th>
-                  <th>Bed</th>
-                  <th>Admission Date</th>
+                  <th>Visit</th>
+                  <th>Actions</th>
                 </tr>
               </thead>
               <tbody>
-                {nursingAssignedPatients.slice(0, 10).map((row: any) => (
-                  <tr key={`nursing-assigned-${row?.inpatientId || row?.patientId}`}>
-                    <td className="pv-name">{String(row?.patientName || "-")}</td>
-                    <td>{String(row?.patientCode || "-")}</td>
-                    <td>
-                      <span className="pv-badge">{String(row?.status || "-")}</span>
-                    </td>
-                    <td>{String(row?.ward || "-")}</td>
-                    <td>{String(row?.bed || "-")}</td>
-                    <td>
-                      {row?.admissionDate ? new Date(row.admissionDate).toLocaleString() : "-"}
-                    </td>
-                  </tr>
-                ))}
-                {!nursingLoading && nursingAssignedPatients.length === 0 && (
+                {nursingLoading ? (
                   <tr>
-                    <td colSpan={6} className="pv-empty">
-                      No assigned in-patient records found for the current nursing context.
-                    </td>
+                    <td colSpan={4} className="pv-empty">Loading visits...</td>
                   </tr>
-                )}
-              </tbody>
-            </table>
-          </section>
-
-          <section className="pv-table-wrap" style={{ marginBottom: 14 }}>
-            <table className="pv-table">
-              <thead>
-                <tr>
-                  <th>Patient</th>
-                  <th>Medication</th>
-                  <th>Dosage</th>
-                  <th>Frequency</th>
-                  <th>Status</th>
-                  <th>Created</th>
-                </tr>
-              </thead>
-              <tbody>
-                {nursingPendingMedications.slice(0, 10).map((row: any) => (
-                  <tr key={`nursing-rx-${row?.id}`}>
-                    <td className="pv-name">{String(row?.patientName || "-")}</td>
-                    <td>{String(row?.medication || "-")}</td>
-                    <td>{String(row?.dosage || "-")}</td>
-                    <td>{String(row?.frequency || "-")}</td>
-                    <td>
-                      <span className="pv-badge">{String(row?.status || "-")}</span>
-                    </td>
-                    <td>{row?.createdAt ? new Date(row.createdAt).toLocaleString() : "-"}</td>
-                  </tr>
-                ))}
-                {!nursingLoading && nursingPendingMedications.length === 0 && (
+                ) : nursingTableRows.length === 0 ? (
                   <tr>
-                    <td colSpan={6} className="pv-empty">
-                      No pending medication administration records.
-                    </td>
+                    <td colSpan={4} className="pv-empty">No active patients found.</td>
                   </tr>
-                )}
-              </tbody>
-            </table>
-          </section>
-
-          {nursingAbnormalVitals.length > 0 && (
-            <section className="pv-table-wrap" style={{ marginBottom: 14 }}>
-              <table className="pv-table">
-                <thead>
-                  <tr>
-                    <th>Patient</th>
-                    <th>Patient Code</th>
-                    <th>Flags</th>
-                    <th>Recorded</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {nursingAbnormalVitals.slice(0, 10).map((row: any) => (
-                    <tr key={`nursing-alert-${row?.id}`}>
+                ) : (
+                  nursingTableRows.map((row: any) => (
+                    <tr
+                      key={`nursing-assigned-${row?.inpatientId || row?.patientId}`}
+                      onClick={() => row?.patientId && setSelectedPatientId(String(row.patientId))}
+                    >
                       <td className="pv-name">{String(row?.patientName || "-")}</td>
-                      <td>{String(row?.patientCode || "-")}</td>
-                      <td>{Array.isArray(row?.flags) ? row.flags.join(", ") : "-"}</td>
-                      <td>{row?.recordedAt ? new Date(row.recordedAt).toLocaleString() : "-"}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </section>
-          )}
-
-          {(nursingOpenIncidents.length > 0 || nursingOpenTasks.length > 0) && (
-            <section className="pv-table-wrap" style={{ marginBottom: 14 }}>
-              <table className="pv-table">
-                <thead>
-                  <tr>
-                    <th>Type</th>
-                    <th>Title / Category</th>
-                    <th>Status</th>
-                    <th>Severity / Priority</th>
-                    <th>Details</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {nursingOpenIncidents.slice(0, 6).map((row: any, index: number) => (
-                    <tr key={`nursing-incident-${index}`}>
-                      <td>Incident</td>
-                      <td>{String(row?.category || "GENERAL")}</td>
                       <td>
                         <span className="pv-badge">{String(row?.status || "OPEN")}</span>
                       </td>
-                      <td>{String(row?.severity || "MEDIUM")}</td>
-                      <td>{String(row?.description || "-")}</td>
-                    </tr>
-                  ))}
-                  {nursingOpenTasks.slice(0, 6).map((row: any, index: number) => (
-                    <tr key={`nursing-task-${index}`}>
-                      <td>Task</td>
-                      <td>{String(row?.title || "Nursing Task")}</td>
                       <td>
-                        <span className="pv-badge">{String(row?.status || "PENDING")}</span>
+                        {String(row?.visitType || row?.ward || "IPD")}
+                        {row?.bed ? ` / ${String(row.bed)}` : ""}
                       </td>
-                      <td>{String(row?.priority || "MEDIUM")}</td>
-                      <td>{String(row?.details || "-")}</td>
+                      <td>
+                        <button
+                          type="button"
+                          className="pv-del nursing-log-care-btn"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            if (row?.patientId) setSelectedPatientId(String(row.patientId));
+                          }}
+                        >
+                          Log Care
+                        </button>
+                      </td>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
-            </section>
-          )}
+                  ))
+                )}
+              </tbody>
+            </table>
+          </section>
 
-          {nursingRecentHandovers.length > 0 && (
-            <section className="pv-table-wrap" style={{ marginBottom: 14 }}>
-              <table className="pv-table">
-                <thead>
-                  <tr>
-                    <th>From Nurse</th>
-                    <th>To Nurse</th>
-                    <th>Patient Count</th>
-                    <th>Acknowledged</th>
-                    <th>Time</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {nursingRecentHandovers.slice(0, 10).map((row: any, index: number) => {
-                    const patientIds = Array.isArray(row?.patientIds) ? row.patientIds : [];
-                    const count = patientIds.length > 0 ? patientIds.length : row?.patientId ? 1 : 0;
-                    return (
-                      <tr key={`nursing-handover-${index}`}>
-                        <td className="pv-name">{String(row?.fromNurseName || "-")}</td>
-                        <td>{String(row?.toNurseName || "-")}</td>
-                        <td>{count}</td>
-                        <td>
-                          <span className="pv-badge">
-                            {String(row?.acknowledged ? "YES" : "NO")}
-                          </span>
-                        </td>
-                        <td>
-                          {row?._createdAt || row?.createdAt
-                            ? new Date(row._createdAt || row.createdAt).toLocaleString()
-                            : "-"}
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </section>
-          )}
-
-          {selectedPatientId && nursingPatientBoard && (
-            <section className="pv-table-wrap" style={{ marginBottom: 14 }}>
-              <div className="reporting-table-header">
-                <h3>Nursing Board: {String((nursingPatientBoard as any)?.patient?.patientCode || selectedPatientId)}</h3>
-                <p>
-                  Visits: <strong>{Number(((nursingPatientBoard as any)?.visits || []).length)}</strong> •
-                  Care Plans: <strong>{Number(((nursingPatientBoard as any)?.carePlans || []).length)}</strong> •
-                  Intake/Output: <strong>{Number(((nursingPatientBoard as any)?.intakeOutputs || []).length)}</strong> •
-                  Incidents: <strong>{Number(((nursingPatientBoard as any)?.incidents || []).length)}</strong> •
-                  Tasks: <strong>{Number(((nursingPatientBoard as any)?.tasks || []).length)}</strong>
-                </p>
+          {selectedNursingPatient ? (
+            <section className="nursing-care-panel">
+              <div className="nursing-care-header">
+                <div>
+                  <span>Selected Patient</span>
+                  <strong>{String(selectedNursingPatient?.patientName || "-")}</strong>
+                </div>
+                <span className="pv-badge">
+                  {String(selectedNursingPatient?.ward || selectedNursingPatient?.visitType || "IPD")}
+                </span>
+              </div>
+              <div className="nursing-care-body">
+                <div className="nursing-clinical-card">
+                  <div>
+                    <h3 className="form-title">Nursing Observation</h3>
+                    <p className="form-title-note">
+                      Record bedside notes, care observations, and shift updates for the selected patient.
+                    </p>
+                  </div>
+                  <textarea
+                    className="nursing-note-input"
+                    placeholder="Write nursing note..."
+                    readOnly
+                    value=""
+                    onClick={() => {
+                      if (formsForDisplay[0]) openWorkflowForm(formsForDisplay[0].id);
+                    }}
+                  />
+                  <div className="nursing-card-actions">
+                    <button
+                      type="button"
+                      className="nursing-action-btn"
+                      onClick={() => {
+                        if (formsForDisplay[0]) openWorkflowForm(formsForDisplay[0].id);
+                      }}
+                      disabled={!formsForDisplay[0]}
+                    >
+                      Save Note
+                    </button>
+                  </div>
+                </div>
+                <div className="nursing-clinical-card">
+                  <div>
+                    <h3 className="form-title">Medication Administration (MAR)</h3>
+                    <p className="form-title-note">
+                      Review pending medicines and open the administration workflow when a dose is given.
+                    </p>
+                  </div>
+                  <div className="nursing-mar-list">
+                    {selectedNursingMedications.length === 0 ? (
+                      <div className="nursing-empty-card">
+                        <WorkflowActionIcon type="activity" className="nursing-empty-icon" />
+                        <p>No prescriptions found for this visit.</p>
+                      </div>
+                    ) : (
+                      selectedNursingMedications.slice(0, 5).map((row: any) => (
+                        <div key={`nursing-mar-${row?.id || row?.medication}`} className="nursing-mar-item">
+                          <div className="nursing-mar-main">
+                            <span className="nursing-mar-icon">
+                              <WorkflowActionIcon type="activity" />
+                            </span>
+                            <div>
+                              <p className="nursing-mar-drug">{String(row?.medication || "Medication")}</p>
+                              <p className="nursing-mar-dose">
+                                {String(row?.dosage || "-")} • {String(row?.frequency || "-")}
+                              </p>
+                            </div>
+                          </div>
+                          <div className="nursing-mar-actions">
+                            <span className="pv-badge">{String(row?.status || "PENDING")}</span>
+                            <button
+                              type="button"
+                              className="nursing-dose-btn"
+                              onClick={() => {
+                                if (formsForDisplay[0]) openWorkflowForm(formsForDisplay[0].id);
+                              }}
+                            >
+                              Administer
+                            </button>
+                          </div>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                </div>
               </div>
             </section>
-          )}
+          ) : null}
         </>
       )}
 
@@ -21150,217 +25932,66 @@ export function WorkflowModuleView({
 
       {isIcuModule && (
         <>
-          <div className="pv-header" style={{ marginBottom: 10 }}>
-            <div>
-              <p className="pv-subtitle">
-                ICU control center: high-acuity admissions, ventilator burden, infusion oversight,
-                critical alerts, and disposition outcomes.
-              </p>
-              <p className="pv-subtitle">Auto-refresh interval: 15 seconds.</p>
-            </div>
-            <button
-              type="button"
-              className="btn-primary"
-              onClick={() => void loadIcuControlCenter()}
-              disabled={icuLoading}
-            >
-              {icuLoading ? "Refreshing..." : "Refresh ICU"}
-            </button>
-          </div>
-
           {icuError && <div className="workflow-notice is-error">{icuError}</div>}
 
-          <section className="pv-grid" style={{ marginBottom: 14 }}>
-            <div className="pv-field">
-              <span>Search ICU</span>
-              <input
-                className="form-input"
-                value={icuSearch}
-                onChange={(e) => setIcuSearch(e.target.value)}
-                placeholder="Admission ID, patient, diagnosis..."
-              />
-            </div>
-            <div className="pv-field">
-              <span>Status Filter</span>
-              <select
-                className="form-input"
-                value={icuStatusFilter}
-                onChange={(e) => setIcuStatusFilter(e.target.value)}
-              >
-                <option value="ALL">All</option>
-                <option value="ACTIVE">ACTIVE</option>
-                <option value="DISCHARGED">DISCHARGED</option>
-                <option value="DECEASED">DECEASED</option>
-                <option value="TRANSFERRED">TRANSFERRED</option>
-              </select>
-            </div>
-          </section>
-
-          <div className="ehr-summary-grid" style={{ marginBottom: 14 }}>
-            <article className="ehr-summary-card">
-              <span>Total Admissions</span>
-              <strong>{icuSummary.totalAdmissions}</strong>
-            </article>
-            <article className="ehr-summary-card">
-              <span>Active Admissions</span>
+          <div className="pv-stats icu-stat-grid">
+            <article className="pv-stat-card" style={{ borderLeftColor: "#16a34a" }}>
+              <p className="pv-stat-label">Active</p>
               <strong>{icuSummary.activeAdmissions}</strong>
             </article>
-            <article className="ehr-summary-card">
-              <span>Ventilated Patients</span>
+            <article className="pv-stat-card" style={{ borderLeftColor: "#2563eb" }}>
+              <p className="pv-stat-label">Ventilated</p>
               <strong>{icuSummary.ventilatedPatients}</strong>
             </article>
-            <article className="ehr-summary-card">
-              <span>Alerts Total</span>
-              <strong>{icuSummary.alertsTotal}</strong>
-            </article>
-            <article className="ehr-summary-card">
-              <span>Critical Alerts</span>
+            <article className="pv-stat-card" style={{ borderLeftColor: "#dc2626" }}>
+              <p className="pv-stat-label">Critical Alerts</p>
               <strong>{icuSummary.criticalAlerts}</strong>
             </article>
-            <article className="ehr-summary-card">
-              <span>Avg LOS (hours)</span>
-              <strong>{icuSummary.avgLosHours.toFixed(2)}</strong>
+            <article className="pv-stat-card" style={{ borderLeftColor: "#7c3aed" }}>
+              <p className="pv-stat-label">Avg LOS</p>
+              <strong>{icuSummary.avgLosHours.toFixed(1)} hrs</strong>
             </article>
-            <article className="ehr-summary-card">
-              <span>Vitals Entries</span>
-              <strong>{icuSummary.recordedVitals}</strong>
-            </article>
-            <article className="ehr-summary-card">
-              <span>Discharged</span>
-              <strong>{icuSummary.discharged}</strong>
-            </article>
-            <article className="ehr-summary-card">
-              <span>Deceased</span>
-              <strong>{icuSummary.deceased}</strong>
-            </article>
+          </div>
+
+          <div className="workflow-top-search icu-top-search">
+            <input
+              className="pv-search"
+              value={icuSearch}
+              onChange={(e) => setIcuSearch(e.target.value)}
+              placeholder="Search ICU records"
+            />
           </div>
 
           <section className="pv-table-wrap" style={{ marginBottom: 14 }}>
             <table className="pv-table">
               <thead>
                 <tr>
-                  <th>ICU ID</th>
                   <th>Patient</th>
                   <th>Status</th>
-                  <th>Source</th>
-                  <th>Diagnosis</th>
-                  <th>Bed</th>
                   <th>Admitted</th>
+                  <th>LOS</th>
                 </tr>
               </thead>
               <tbody>
                 {icuFilteredAdmissions.slice(0, 12).map((row: any, index: number) => {
                   const rowId = String(row?.icuAdmissionId || row?.id || "");
-                  const isSelected = rowId && rowId === selectedIcuAdmissionId;
+                  const admitted = row?.admittedAt ? new Date(row.admittedAt) : null;
+                  const losHours = admitted
+                    ? Math.max(0, Math.round((Date.now() - admitted.getTime()) / 36_000) / 10)
+                    : null;
                   return (
-                    <tr
-                      key={`icu-admission-${rowId || index}`}
-                      onClick={() => rowId && setSelectedIcuAdmissionId(rowId)}
-                      style={isSelected ? { background: "rgba(19, 216, 2, 0.12)" } : undefined}
-                    >
-                      <td className="pv-name">{rowId ? rowId.slice(0, 14) : "-"}</td>
-                      <td>{String(row?.patientName || row?.patientCode || "-")}</td>
-                      <td>
-                        <span className="pv-badge">{String(row?.status || "-")}</span>
-                      </td>
-                      <td>{String(row?.source || "-")}</td>
-                      <td>{String(row?.primaryDiagnosis || row?.reasonForAdmission || "-")}</td>
-                      <td>{String(row?.bedLocation || "-")}</td>
-                      <td>
-                        {row?.admittedAt ? new Date(row.admittedAt).toLocaleString() : "-"}
-                      </td>
+                    <tr key={`icu-admission-${rowId || index}`}>
+                      <td className="pv-name">{String(row?.patientName || row?.patientCode || "-")}</td>
+                      <td><span className="pv-badge">{String(row?.status || "-")}</span></td>
+                      <td>{admitted ? admitted.toLocaleString() : "-"}</td>
+                      <td>{losHours !== null ? `${losHours} hrs` : "-"}</td>
                     </tr>
                   );
                 })}
                 {!icuLoading && icuFilteredAdmissions.length === 0 && (
                   <tr>
-                    <td colSpan={7} className="pv-empty">
-                      No ICU admissions found for current filters.
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </section>
-
-          <section className="pv-table-wrap" style={{ marginBottom: 14 }}>
-            <table className="pv-table">
-              <thead>
-                <tr>
-                  <th>Severity</th>
-                  <th>Alert Type</th>
-                  <th>Patient</th>
-                  <th>Message</th>
-                  <th>Time</th>
-                </tr>
-              </thead>
-              <tbody>
-                {icuCriticalAlerts.map((row: any, index: number) => (
-                  <tr key={`icu-alert-${row?.id || index}`}>
-                    <td>
-                      <span className="pv-badge">{String(row?.severity || "-")}</span>
-                    </td>
-                    <td className="pv-name">{String(row?.type || "-")}</td>
-                    <td>{String(row?.patientName || row?.patientCode || "-")}</td>
-                    <td>{String(row?.message || "-")}</td>
-                    <td>{row?.createdAt ? new Date(row.createdAt).toLocaleString() : "-"}</td>
-                  </tr>
-                ))}
-                {!icuLoading && icuCriticalAlerts.length === 0 && (
-                  <tr>
-                    <td colSpan={5} className="pv-empty">
-                      No ICU alerts currently available.
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </section>
-
-          <section className="pv-table-wrap" style={{ marginBottom: 14 }}>
-            <div className="reporting-table-header">
-              <h3>
-                ICU Timeline{selectedIcuAdmissionId ? `: ${selectedIcuAdmissionId.slice(0, 14)}` : ""}
-              </h3>
-              <p>
-                Events tracked: <strong>{selectedIcuTimelineRows.length}</strong>
-              </p>
-            </div>
-            <table className="pv-table">
-              <thead>
-                <tr>
-                  <th>Time</th>
-                  <th>Event</th>
-                  <th>Details</th>
-                </tr>
-              </thead>
-              <tbody>
-                {selectedIcuTimelineRows.slice(-12).reverse().map((row: any, index: number) => (
-                  <tr key={`icu-timeline-${index}`}>
-                    <td>{row?.createdAt ? new Date(row.createdAt).toLocaleString() : "-"}</td>
-                    <td className="pv-name">{String(row?.type || "-")}</td>
-                    <td>
-                      {String(
-                        row?.data?.message ||
-                          row?.data?.progressNote ||
-                          row?.data?.notes ||
-                          row?.data?.status ||
-                          "-",
-                      ).slice(0, 180)}
-                    </td>
-                  </tr>
-                ))}
-                {!selectedIcuAdmissionId && (
-                  <tr>
-                    <td colSpan={3} className="pv-empty">
-                      Select an ICU admission to view timeline events.
-                    </td>
-                  </tr>
-                )}
-                {selectedIcuAdmissionId && selectedIcuTimelineRows.length === 0 && (
-                  <tr>
-                    <td colSpan={3} className="pv-empty">
-                      No timeline events found for selected ICU admission.
+                    <td colSpan={4} className="pv-empty">
+                      No ICU admissions found.
                     </td>
                   </tr>
                 )}
@@ -21372,189 +26003,71 @@ export function WorkflowModuleView({
 
       {isMaternityModule && (
         <>
-          <div className="pv-header" style={{ marginBottom: 10 }}>
-            <div>
-              <p className="pv-subtitle">
-                Maternity control center: ANC tracking, labor monitoring, delivery/newborn linkage,
-                postnatal records, and complication visibility.
-              </p>
-            </div>
-            <button
-              type="button"
-              className="btn-primary"
-              onClick={() => void loadMaternityControlCenter()}
-              disabled={maternityLoading}
-            >
-              {maternityLoading ? "Refreshing..." : "Refresh Maternity"}
-            </button>
-          </div>
-
           {maternityError && <div className="workflow-notice is-error">{maternityError}</div>}
 
-          <div className="ehr-summary-grid" style={{ marginBottom: 14 }}>
-            <article className="ehr-summary-card">
-              <span>Active Pregnancies</span>
+          <div className="pv-stats maternity-stat-grid">
+            <article className="pv-stat-card" style={{ borderLeftColor: "#16a34a" }}>
+              <p className="pv-stat-label">Active Pregnancies</p>
               <strong>{maternitySummary.activePregnancies}</strong>
             </article>
-            <article className="ehr-summary-card">
-              <span>High-Risk Cases</span>
+            <article className="pv-stat-card" style={{ borderLeftColor: "#2563eb" }}>
+              <p className="pv-stat-label">ANC Visits Today</p>
+              <strong>{maternitySummary.ancVisits || maternitySummary.ancVisits30d}</strong>
+            </article>
+            <article className="pv-stat-card" style={{ borderLeftColor: "#7c3aed" }}>
+              <p className="pv-stat-label">Deliveries Today</p>
+              <strong>{maternitySummary.deliveries || maternitySummary.deliveries30d}</strong>
+            </article>
+            <article className="pv-stat-card" style={{ borderLeftColor: "#0d9488" }}>
+              <p className="pv-stat-label">Newborn Assessments</p>
+              <strong>{maternitySummary.deliveries}</strong>
+            </article>
+            <article className="pv-stat-card" style={{ borderLeftColor: "#dc2626" }}>
+              <p className="pv-stat-label">High Risk</p>
               <strong>{maternitySummary.highRiskPregnancies}</strong>
             </article>
-            <article className="ehr-summary-card">
-              <span>Expected Deliveries Today</span>
-              <strong>{maternitySummary.expectedDeliveriesToday}</strong>
-            </article>
-            <article className="ehr-summary-card">
-              <span>Active Labor Cases</span>
-              <strong>{maternitySummary.activeLaborCases}</strong>
-            </article>
-            <article className="ehr-summary-card">
-              <span>ANC Visits (30d)</span>
-              <strong>{maternitySummary.ancVisits30d}</strong>
-            </article>
-            <article className="ehr-summary-card">
-              <span>Deliveries (30d)</span>
-              <strong>{maternitySummary.deliveries30d}</strong>
-            </article>
-            <article className="ehr-summary-card">
-              <span>C-Section Rate (30d)</span>
-              <strong>{maternitySummary.cSectionRate30d.toFixed(1)}%</strong>
-            </article>
-            <article className="ehr-summary-card">
-              <span>NICU Transfers (30d)</span>
+            <article className="pv-stat-card" style={{ borderLeftColor: "#0891b2" }}>
+              <p className="pv-stat-label">NICU Transfers (30d)</p>
               <strong>{maternitySummary.nicuTransfers30d}</strong>
             </article>
-            <article className="ehr-summary-card">
-              <span>Postnatal Records (30d)</span>
-              <strong>{maternitySummary.postnatalRecords30d}</strong>
+            <article className="pv-stat-card" style={{ borderLeftColor: "#f59e0b" }}>
+              <p className="pv-stat-label">Expected Deliveries Today</p>
+              <strong>{maternitySummary.expectedDeliveriesToday}</strong>
             </article>
-            <article className="ehr-summary-card">
-              <span>Complications (30d)</span>
-              <strong>{maternitySummary.complications30d}</strong>
-            </article>
-            <article className="ehr-summary-card">
-              <span>Maternal Complications</span>
-              <strong>{maternitySummary.maternalComplications30d}</strong>
-            </article>
-            <article className="ehr-summary-card">
-              <span>Neonatal Complications</span>
-              <strong>{maternitySummary.neonatalComplications30d}</strong>
-            </article>
+          </div>
+
+          <div className="workflow-top-search maternity-top-search">
+            <input
+              className="pv-search"
+              placeholder="Search maternity records"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+            />
           </div>
 
           <section className="pv-table-wrap" style={{ marginBottom: 14 }}>
             <table className="pv-table">
               <thead>
                 <tr>
-                  <th>Pregnancy ID</th>
                   <th>Mother</th>
+                  <th>Stage</th>
                   <th>Risk</th>
-                  <th>Status</th>
-                  <th>EDD</th>
-                  <th>Gestation (weeks)</th>
+                  <th>Updated</th>
                 </tr>
               </thead>
               <tbody>
-                {filteredMaternityPregnancies.slice(0, 12).map((row: any) => (
-                  <tr key={`mat-preg-${row?.pregnancyId || row?.id}`}>
-                    <td className="pv-name">{String(row?.pregnancyId || "-")}</td>
-                    <td>{String(row?.motherName || row?.motherPatientCode || "-")}</td>
-                    <td>
-                      <span className="pv-badge">{String(row?.riskLevel || "-")}</span>
-                    </td>
-                    <td>
-                      <span className="pv-badge">{String(row?.status || "-")}</span>
-                    </td>
-                    <td>
-                      {row?.estimatedDueDate
-                        ? new Date(row.estimatedDueDate).toLocaleDateString()
-                        : "-"}
-                    </td>
-                    <td>{Number(row?.gestationalAgeWeeks || 0)}</td>
+                {maternityRows.map((row) => (
+                  <tr key={row.id}>
+                    <td className="pv-name">{row.mother}</td>
+                    <td>{row.stage}</td>
+                    <td><span className="pv-badge">{row.risk}</span></td>
+                    <td>{row.updated}</td>
                   </tr>
                 ))}
-                {!maternityLoading && filteredMaternityPregnancies.length === 0 && (
+                {!maternityLoading && maternityRows.length === 0 && (
                   <tr>
-                    <td colSpan={6} className="pv-empty">
-                      No maternity pregnancy records found.
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </section>
-
-          <section className="pv-table-wrap" style={{ marginBottom: 14 }}>
-            <table className="pv-table">
-              <thead>
-                <tr>
-                  <th>Delivery ID</th>
-                  <th>Pregnancy ID</th>
-                  <th>Mother Patient ID</th>
-                  <th>Newborn Patient ID</th>
-                  <th>Mode</th>
-                  <th>Delivery Time</th>
-                  <th>NICU</th>
-                </tr>
-              </thead>
-              <tbody>
-                {maternityDeliveries.slice(0, 10).map((row: any) => (
-                  <tr key={`mat-delivery-${row?.deliveryId || row?.id}`}>
-                    <td className="pv-name">{String(row?.deliveryId || "-")}</td>
-                    <td>{String(row?.pregnancyId || "-")}</td>
-                    <td>{String(row?.motherPatientId || "-")}</td>
-                    <td>{String(row?.newbornPatientId || "-")}</td>
-                    <td>{String(row?.modeOfDelivery || "-")}</td>
-                    <td>
-                      {row?.deliveryDateTime
-                        ? new Date(row.deliveryDateTime).toLocaleString()
-                        : "-"}
-                    </td>
-                    <td>{row?.nicuTransfer ? "YES" : "NO"}</td>
-                  </tr>
-                ))}
-                {!maternityLoading && maternityDeliveries.length === 0 && (
-                  <tr>
-                    <td colSpan={7} className="pv-empty">
-                      No delivery records found.
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </section>
-
-          <section className="pv-table-wrap" style={{ marginBottom: 14 }}>
-            <table className="pv-table">
-              <thead>
-                <tr>
-                  <th>Complication ID</th>
-                  <th>Pregnancy ID</th>
-                  <th>Subject</th>
-                  <th>Type</th>
-                  <th>Severity</th>
-                  <th>Occurred</th>
-                </tr>
-              </thead>
-              <tbody>
-                {maternityComplications.slice(0, 10).map((row: any) => (
-                  <tr key={`mat-comp-${row?.complicationId || row?.id}`}>
-                    <td className="pv-name">{String(row?.complicationId || "-")}</td>
-                    <td>{String(row?.pregnancyId || "-")}</td>
-                    <td>{String(row?.subject || "-")}</td>
-                    <td>{String(row?.type || "-")}</td>
-                    <td>
-                      <span className="pv-badge">{String(row?.severity || "-")}</span>
-                    </td>
-                    <td>
-                      {row?.occurredAt ? new Date(row.occurredAt).toLocaleString() : "-"}
-                    </td>
-                  </tr>
-                ))}
-                {!maternityLoading && maternityComplications.length === 0 && (
-                  <tr>
-                    <td colSpan={6} className="pv-empty">
-                      No complication records found.
+                    <td colSpan={4} className="pv-empty">
+                      No records found.
                     </td>
                   </tr>
                 )}
@@ -21566,104 +26079,114 @@ export function WorkflowModuleView({
 
       {isLaboratoryModule && (
         <>
-          <div className="pv-header" style={{ marginBottom: 10 }}>
+          <div className="pv-header">
             <div>
-              <p className="pv-subtitle">
-                Laboratory control center: orders, sample tracking, result workflow, and TAT monitoring.
-              </p>
+              <h2 className="pv-title">Lab Services Terminal</h2>
+              <p className="pv-subtitle">Process diagnostic tests and upload results</p>
             </div>
-            <button
-              type="button"
-              className="btn-primary"
-              onClick={() => void loadLaboratoryControlCenter()}
-              disabled={labLoading}
-            >
-              {labLoading ? "Refreshing..." : "Refresh Laboratory"}
-            </button>
+            <div className="module-actions">
+              {formsForDisplay.map((moduleForm) => (
+                <button
+                  key={moduleForm.id}
+                  type="button"
+                  onClick={() => openWorkflowFormWithPrefill(moduleForm.id)}
+                >
+                  <WorkflowActionIcon type="form" />
+                  {cleanWorkflowFormTitle(moduleForm.title)}
+                </button>
+              ))}
+            </div>
           </div>
 
           {labError && <div className="workflow-notice is-error">{labError}</div>}
 
-          <div className="ehr-summary-grid" style={{ marginBottom: 14 }}>
-            <article className="ehr-summary-card">
-              <span>Total Orders</span>
-              <strong>{laboratorySummary.totalRequests}</strong>
-            </article>
-            <article className="ehr-summary-card">
-              <span>Ordered</span>
-              <strong>{laboratorySummary.ordered}</strong>
-            </article>
-            <article className="ehr-summary-card">
-              <span>Samples Collected</span>
-              <strong>{laboratorySummary.sampleCollected}</strong>
-            </article>
-            <article className="ehr-summary-card">
-              <span>In Process</span>
-              <strong>{laboratorySummary.inProcess}</strong>
-            </article>
-            <article className="ehr-summary-card">
-              <span>Result Entered</span>
-              <strong>{laboratorySummary.resultEntered}</strong>
-            </article>
-            <article className="ehr-summary-card">
-              <span>Verified</span>
-              <strong>{laboratorySummary.verified}</strong>
-            </article>
-            <article className="ehr-summary-card">
-              <span>Released</span>
-              <strong>{laboratorySummary.released}</strong>
-            </article>
-            <article className="ehr-summary-card">
-              <span>Overdue TAT</span>
-              <strong>{laboratorySummary.overdueTat}</strong>
-            </article>
-            <article className="ehr-summary-card">
-              <span>Critical Results</span>
-              <strong>{laboratorySummary.criticalResults}</strong>
-            </article>
-            <article className="ehr-summary-card">
-              <span>Avg TAT (hrs)</span>
-              <strong>{laboratorySummary.averageTatHours.toFixed(2)}</strong>
-            </article>
+          <div className="pv-stats laboratory-stats-grid">
+            {laboratoryStatCards.map((stat) => (
+              <article
+                key={stat.label}
+                className="pv-stat-card"
+                style={{ borderLeftColor: stat.color }}
+              >
+                <p className="pv-stat-label">{stat.label}</p>
+                <p className="pv-stat-value">{labLoading ? "..." : stat.value}</p>
+              </article>
+            ))}
           </div>
 
-          <section className="pv-table-wrap" style={{ marginBottom: 14 }}>
+          <div className="pv-search-bar laboratory-search-row">
+            <div className="pv-search-wrap">
+              <WorkflowActionIcon type="search" className="pv-search-icon" />
+              <input
+                className="pv-search"
+                placeholder="Search Patient (ID / Reg No / Name / Phone)"
+                value={search}
+                onChange={(event) => setSearch(event.target.value)}
+              />
+            </div>
+            <select
+              value={labStatusFilter}
+              onChange={(event) => setLabStatusFilter(event.target.value)}
+              className="form-input laboratory-status-filter"
+            >
+              {["ALL", "PENDING", "COLLECTED", "IN_PROCESS", "VERIFIED", "RELEASED", "CANCELLED"].map((status) => (
+                <option key={status} value={status}>{status}</option>
+              ))}
+            </select>
+          </div>
+
+          <section className="pv-table-wrap laboratory-table-wrap">
             <table className="pv-table">
               <thead>
                 <tr>
-                  <th>Request ID</th>
+                  <th>Reg No</th>
                   <th>Patient</th>
-                  <th>Test</th>
-                  <th>Priority</th>
-                  <th>Status</th>
-                  <th>Created</th>
+                  <th>Test Requested</th>
+                  <th>Ordered By</th>
+                  <th>Actions</th>
                 </tr>
               </thead>
               <tbody>
-                {labRequests.slice(0, 12).map((row: any) => (
-                  <tr key={`lab-row-${row?.id}`}>
-                    <td className="pv-name">{String(row?.id || "-").slice(0, 12)}</td>
-                    <td>
-                      {`${row?.visit?.patient?.firstName || ""} ${row?.visit?.patient?.lastName || ""}`.trim() ||
-                        "-"}
-                    </td>
-                    <td>{String(row?.testName || row?.testCode || "-")}</td>
-                    <td>{String(row?.priority || "ROUTINE")}</td>
-                    <td>
-                      <span className="pv-badge">
-                        {String(row?.normalizedStatus || row?.status || "-")}
-                      </span>
-                    </td>
-                    <td>{row?.createdAt ? new Date(row.createdAt).toLocaleString() : "-"}</td>
-                  </tr>
-                ))}
-                {!labLoading && labRequests.length === 0 && (
+                {labLoading ? (
                   <tr>
-                    <td colSpan={6} className="pv-empty">
-                      No laboratory requests found.
+                    <td colSpan={5} className="pv-empty">
+                      Loading lab requests...
                     </td>
                   </tr>
-                )}
+                ) : filteredLabRequests.length === 0 ? (
+                  <tr>
+                    <td colSpan={5} className="pv-empty">
+                      No patients in Lab Queue. Try searching...
+                    </td>
+                  </tr>
+                ) : filteredLabRequests.map((row: any) => {
+                  const patientName =
+                    row?.patientName ||
+                    `${row?.visit?.patient?.firstName || ""} ${row?.visit?.patient?.lastName || ""}`.trim() ||
+                    "Patient";
+                  const resultForm =
+                    formsForDisplay.find((moduleForm) => /result/i.test(moduleForm.title)) ||
+                    formsForDisplay[0];
+                  return (
+                  <tr key={`lab-row-${row?.id}`}>
+                    <td className="pv-code">{String(row?.patientCode || row?.patientId || row?.id || "-")}</td>
+                    <td className="pv-name">{patientName}</td>
+                    <td>{String(row?.testName || row?.testCode || "-")}</td>
+                    <td>{String(row?.orderedBy || row?.doctorName || "-")}</td>
+                    <td>
+                      <button
+                        type="button"
+                        className="btn-primary"
+                        onClick={() =>
+                          resultForm &&
+                          openWorkflowFormWithPrefill(resultForm.id, getLaboratoryRequestPrefill(row))
+                        }
+                      >
+                        Record Results
+                      </button>
+                    </td>
+                  </tr>
+                  );
+                })}
               </tbody>
             </table>
           </section>
@@ -21672,193 +26195,122 @@ export function WorkflowModuleView({
 
       {isRadiologyModule && (
         <>
-          <div className="pv-header" style={{ marginBottom: 10 }}>
+          <div className="pv-header">
             <div>
-              <p className="pv-subtitle">
-                Radiology control center: imaging orders, modality scheduling, reporting workflow,
-                PACS study metadata, and critical findings alerts.
-              </p>
+              <h2 className="pv-title">Radiology Imaging Desk</h2>
+              <p className="pv-subtitle">Imaging requests, scheduling, and reports</p>
             </div>
-            <button
-              type="button"
-              className="btn-primary"
-              onClick={() => void loadRadiologyControlCenter()}
-              disabled={radLoading}
-            >
-              {radLoading ? "Refreshing..." : "Refresh Radiology"}
-            </button>
-          </div>
-
-          <div className="pv-grid" style={{ marginBottom: 12 }}>
-            <label className="pv-field">
-              <span>Status</span>
-              <select
-                value={radStatusFilter}
-                onChange={(event) => setRadStatusFilter(event.target.value)}
-              >
-                <option value="ALL">All</option>
-                <option value="REQUESTED">Requested</option>
-                <option value="SCHEDULED">Scheduled</option>
-                <option value="PERFORMED">Performed</option>
-                <option value="REPORTED">Reported</option>
-                <option value="VERIFIED">Verified</option>
-                <option value="COMPLETED">Completed</option>
-                <option value="CANCELLED">Cancelled</option>
-              </select>
-            </label>
-            <label className="pv-field">
-              <span>Urgency</span>
-              <select
-                value={radUrgencyFilter}
-                onChange={(event) => setRadUrgencyFilter(event.target.value)}
-              >
-                <option value="ALL">All</option>
-                <option value="ROUTINE">Routine</option>
-                <option value="URGENT">Urgent</option>
-                <option value="STAT">STAT</option>
-              </select>
-            </label>
-            <label className="pv-field" style={{ gridColumn: "span 2" }}>
-              <span>Search</span>
-              <input
-                type="search"
-                value={radSearch}
-                onChange={(event) => setRadSearch(event.target.value)}
-                placeholder="Request ID, patient, indication..."
-              />
-            </label>
+            <div className="module-actions">
+              {formsForDisplay.map((moduleForm) => (
+                <button
+                  key={moduleForm.id}
+                  type="button"
+                  onClick={() => openWorkflowFormWithPrefill(moduleForm.id)}
+                >
+                  <WorkflowActionIcon type={getRadiologyFormIconType(moduleForm.title)} />
+                  {cleanWorkflowFormTitle(moduleForm.title)}
+                </button>
+              ))}
+            </div>
           </div>
 
           {radError && <div className="workflow-notice is-error">{radError}</div>}
 
-          <div className="ehr-summary-grid" style={{ marginBottom: 14 }}>
-            <article className="ehr-summary-card">
-              <span>Total Orders</span>
-              <strong>{radiologySummary.totalOrders}</strong>
-            </article>
-            <article className="ehr-summary-card">
-              <span>Requested</span>
-              <strong>{radiologySummary.requested}</strong>
-            </article>
-            <article className="ehr-summary-card">
-              <span>Scheduled</span>
-              <strong>{radiologySummary.scheduled}</strong>
-            </article>
-            <article className="ehr-summary-card">
-              <span>Performed</span>
-              <strong>{radiologySummary.performed}</strong>
-            </article>
-            <article className="ehr-summary-card">
-              <span>Reported</span>
-              <strong>{radiologySummary.reported}</strong>
-            </article>
-            <article className="ehr-summary-card">
-              <span>Verified</span>
-              <strong>{radiologySummary.verified}</strong>
-            </article>
-            <article className="ehr-summary-card">
-              <span>STAT Cases</span>
-              <strong>{radiologySummary.statCases}</strong>
-            </article>
-            <article className="ehr-summary-card">
-              <span>Critical Alerts</span>
-              <strong>{radiologySummary.criticalAlerts}</strong>
-            </article>
-            <article className="ehr-summary-card">
-              <span>Machines</span>
-              <strong>{radiologySummary.machineCount}</strong>
-            </article>
-            <article className="ehr-summary-card">
-              <span>Avg TAT (hrs)</span>
-              <strong>{radiologySummary.averageTurnaroundHours.toFixed(2)}</strong>
-            </article>
-            <article className="ehr-summary-card">
-              <span>Backlog</span>
-              <strong>{radiologySummary.reportBacklog}</strong>
-            </article>
-            <article className="ehr-summary-card">
-              <span>Studies</span>
-              <strong>{radiologySummary.studies}</strong>
-            </article>
+          <div className="pv-stats radiology-stats-grid">
+            {radiologyStatCards.map((stat) => (
+              <article
+                key={stat.label}
+                className="pv-stat-card"
+                style={{ borderLeftColor: stat.color }}
+              >
+                <p className="pv-stat-label">{stat.label}</p>
+                <p className="pv-stat-value">{radLoading ? "..." : stat.value}</p>
+              </article>
+            ))}
           </div>
 
-          <section className="pv-table-wrap" style={{ marginBottom: 14 }}>
-            <table className="pv-table">
-              <thead>
-                <tr>
-                  <th>Request ID</th>
-                  <th>Patient</th>
-                  <th>Imaging</th>
-                  <th>Urgency</th>
-                  <th>Status</th>
-                  <th>Scheduled</th>
-                </tr>
-              </thead>
-              <tbody>
-                {radRequests.slice(0, 12).map((row: any) => (
-                  <tr key={`rad-order-${row?.id}`}>
-                    <td className="pv-name">{String(row?.id || "-").slice(0, 12)}</td>
-                    <td>
-                      {`${row?.visit?.patient?.firstName || ""} ${row?.visit?.patient?.lastName || ""}`.trim() ||
-                        row?.visit?.patient?.patientCode ||
-                        "-"}
-                    </td>
-                    <td>{String(row?.imagingType || row?.procedureName || "-")}</td>
-                    <td>{String(row?.urgency || "ROUTINE")}</td>
-                    <td>
-                      <span className="pv-badge">
-                        {String(row?.normalizedStatus || row?.status || "-")}
-                      </span>
-                    </td>
-                    <td>
-                      {row?.schedule?.scheduledAt
-                        ? new Date(String(row.schedule.scheduledAt)).toLocaleString()
-                        : "-"}
-                    </td>
-                  </tr>
-                ))}
-                {!radLoading && radRequests.length === 0 && (
-                  <tr>
-                    <td colSpan={6} className="pv-empty">
-                      No radiology requests found.
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </section>
+          <div className="pv-search-bar radiology-search-row">
+            <div className="pv-search-wrap">
+              <WorkflowActionIcon type="search" className="pv-search-icon" />
+              <input
+                className="pv-search"
+                type="search"
+                value={radSearch}
+                onChange={(event) => setRadSearch(event.target.value)}
+                placeholder="Search imaging requests..."
+              />
+            </div>
+            <select
+              value={radStatusFilter}
+              onChange={(event) => setRadStatusFilter(event.target.value)}
+              className="form-input radiology-status-filter"
+            >
+              {["ALL", "QUEUED", "SCHEDULED", "IN_PROGRESS", "REPORTED", "CANCELLED"].map((status) => (
+                <option key={status} value={status}>
+                  {status}
+                </option>
+              ))}
+            </select>
+          </div>
 
-          <section className="pv-table-wrap" style={{ marginBottom: 14 }}>
+          <section className="pv-table-wrap radiology-table-wrap">
             <table className="pv-table">
               <thead>
                 <tr>
-                  <th>Critical Alert ID</th>
-                  <th>Request ID</th>
                   <th>Patient</th>
-                  <th>Severity</th>
-                  <th>Message</th>
-                  <th>Acknowledged</th>
+                  <th>Procedure</th>
+                  <th>Status</th>
+                  <th>Requested By</th>
+                  <th>Actions</th>
                 </tr>
               </thead>
               <tbody>
-                {radAlerts.slice(0, 10).map((row: any) => (
-                  <tr key={`rad-alert-${row?.alertId || row?.id}`}>
-                    <td className="pv-name">{String(row?.alertId || row?.id || "-")}</td>
-                    <td>{String(row?.requestId || "-")}</td>
-                    <td>{String(row?.patientName || row?.patientCode || "-")}</td>
-                    <td>
-                      <span className="pv-badge">{String(row?.severity || "-")}</span>
-                    </td>
-                    <td>{String(row?.message || "-")}</td>
-                    <td>{row?.acknowledged ? "YES" : "NO"}</td>
-                  </tr>
-                ))}
-                {!radLoading && radAlerts.length === 0 && (
+                {radLoading ? (
                   <tr>
-                    <td colSpan={6} className="pv-empty">
-                      No critical alerts logged.
+                    <td colSpan={5} className="pv-empty">
+                      Loading radiology requests...
                     </td>
                   </tr>
+                ) : filteredRadiologyRequests.length === 0 ? (
+                  <tr>
+                    <td colSpan={5} className="pv-empty">
+                      No imaging requests found.
+                    </td>
+                  </tr>
+                ) : (
+                  filteredRadiologyRequests.map((row: any) => {
+                    const patientName =
+                      row?.patientName ||
+                      `${row?.visit?.patient?.firstName || ""} ${row?.visit?.patient?.lastName || ""}`.trim() ||
+                      "Patient";
+                    const reportForm =
+                      formsForDisplay.find((moduleForm) => /report/i.test(moduleForm.title)) ||
+                      formsForDisplay[0];
+                    return (
+                      <tr key={`rad-order-${row?.id}`}>
+                        <td className="pv-name">{patientName}</td>
+                        <td>{String(row?.procedureName || row?.imagingType || row?.modality || "-")}</td>
+                        <td>
+                          <span className="pv-badge">
+                            {String(row?.normalizedStatus || row?.status || "QUEUED")}
+                          </span>
+                        </td>
+                        <td>{String(row?.requestedBy || row?.orderedBy || row?.doctorName || "-")}</td>
+                        <td>
+                          <button
+                            type="button"
+                            className="btn-primary"
+                            onClick={() =>
+                              reportForm &&
+                              openWorkflowFormWithPrefill(reportForm.id, getRadiologyRequestPrefill(row))
+                            }
+                          >
+                            Create Report
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })
                 )}
               </tbody>
             </table>
@@ -21868,467 +26320,184 @@ export function WorkflowModuleView({
 
       {isOtModule && (
         <>
-          <div className="pv-header" style={{ marginBottom: 10 }}>
+          <div className="pv-header">
             <div>
-              <p className="pv-subtitle">
-                Operation Theatre control center: booking, pre-op clearance, surgical safety,
-                intra-op records, anesthesia, post-op outcomes, and complication tracking.
-              </p>
+              <h2 className="pv-title">Operating Theatre</h2>
+              <p className="pv-subtitle">Surgical scheduling and theatre workflow</p>
             </div>
-            <button
-              type="button"
-              className="btn-primary"
-              onClick={() => void loadOtControlCenter()}
-              disabled={otLoading}
-            >
-              {otLoading ? "Refreshing..." : "Refresh OT"}
-            </button>
-          </div>
-
-          <div className="pv-grid" style={{ marginBottom: 12 }}>
-            <label className="pv-field">
-              <span>Status</span>
-              <select
-                value={otStatusFilter}
-                onChange={(event) => setOtStatusFilter(event.target.value)}
-              >
-                <option value="ALL">All</option>
-                <option value="REQUESTED">Requested</option>
-                <option value="PRE_OP_CLEARED">Pre-Op Cleared</option>
-                <option value="SCHEDULED">Scheduled</option>
-                <option value="IN_PROGRESS">In Progress</option>
-                <option value="POST_OP">Post-Op</option>
-                <option value="COMPLETED">Completed</option>
-                <option value="CANCELLED">Cancelled</option>
-              </select>
-            </label>
-            <label className="pv-field">
-              <span>Priority</span>
-              <select
-                value={otPriorityFilter}
-                onChange={(event) => setOtPriorityFilter(event.target.value)}
-              >
-                <option value="ALL">All</option>
-                <option value="ELECTIVE">Elective</option>
-                <option value="URGENT">Urgent</option>
-                <option value="EMERGENCY">Emergency</option>
-              </select>
-            </label>
-            <label className="pv-field" style={{ gridColumn: "span 2" }}>
-              <span>Search</span>
-              <input
-                type="search"
-                value={otSearch}
-                onChange={(event) => setOtSearch(event.target.value)}
-                placeholder="Booking ID, patient, procedure, OT room..."
-              />
-            </label>
+            <div className="module-actions">
+              {formsForDisplay.map((moduleForm) => (
+                <button
+                  key={moduleForm.id}
+                  type="button"
+                  onClick={() => openWorkflowFormWithPrefill(moduleForm.id)}
+                >
+                  <WorkflowActionIcon type={getOtFormIconType(moduleForm.title)} />
+                  {cleanWorkflowFormTitle(moduleForm.title)}
+                </button>
+              ))}
+            </div>
           </div>
 
           {otError && <div className="workflow-notice is-error">{otError}</div>}
 
-          <div className="ehr-summary-grid" style={{ marginBottom: 14 }}>
-            <article className="ehr-summary-card">
-              <span>Total Bookings</span>
-              <strong>{otSummary.totalBookings}</strong>
-            </article>
-            <article className="ehr-summary-card">
-              <span>Requested</span>
-              <strong>{otSummary.requested}</strong>
-            </article>
-            <article className="ehr-summary-card">
-              <span>Pre-Op Cleared</span>
-              <strong>{otSummary.preOpCleared}</strong>
-            </article>
-            <article className="ehr-summary-card">
-              <span>Scheduled</span>
-              <strong>{otSummary.scheduled}</strong>
-            </article>
-            <article className="ehr-summary-card">
-              <span>In Progress</span>
-              <strong>{otSummary.inProgress}</strong>
-            </article>
-            <article className="ehr-summary-card">
-              <span>Post-Op</span>
-              <strong>{otSummary.postOp}</strong>
-            </article>
-            <article className="ehr-summary-card">
-              <span>Completed</span>
-              <strong>{otSummary.completed}</strong>
-            </article>
-            <article className="ehr-summary-card">
-              <span>Today Cases</span>
-              <strong>{otSummary.todayCases}</strong>
-            </article>
-            <article className="ehr-summary-card">
-              <span>Emergency Cases</span>
-              <strong>{otSummary.emergencyCases}</strong>
-            </article>
-            <article className="ehr-summary-card">
-              <span>Delayed Cases</span>
-              <strong>{otSummary.delayedCases}</strong>
-            </article>
-            <article className="ehr-summary-card">
-              <span>Complications</span>
-              <strong>{otSummary.complicationsLogged}</strong>
-            </article>
-            <article className="ehr-summary-card">
-              <span>Checklist Entries</span>
-              <strong>{otSummary.checklistEntries}</strong>
-            </article>
+          <div className="pv-stats ot-stats-grid">
+            {otStatCards.map((stat) => (
+              <article
+                key={stat.label}
+                className="pv-stat-card"
+                style={{ borderLeftColor: stat.color }}
+              >
+                <p className="pv-stat-label">{stat.label}</p>
+                <p className="pv-stat-value">{otLoading ? "..." : stat.value}</p>
+              </article>
+            ))}
           </div>
 
-          <section className="pv-table-wrap" style={{ marginBottom: 14 }}>
+          <div className="pv-search-bar ot-search-row">
+            <div className="pv-search-wrap">
+              <WorkflowActionIcon type="search" className="pv-search-icon" />
+              <input
+                className="pv-search"
+                type="search"
+                value={otSearch}
+                onChange={(event) => setOtSearch(event.target.value)}
+                placeholder="Search theatre schedule"
+              />
+            </div>
+          </div>
+
+          <section className="pv-table-wrap ot-table-wrap">
             <table className="pv-table">
               <thead>
                 <tr>
-                  <th>Booking ID</th>
-                  <th>Patient</th>
-                  <th>Procedure</th>
-                  <th>Priority</th>
+                  <th>Case</th>
+                  <th>Surgeon</th>
+                  <th>Theatre</th>
                   <th>Status</th>
-                  <th>Scheduled</th>
-                  <th>OT Room</th>
-                  <th>Open Timeline</th>
                 </tr>
               </thead>
               <tbody>
-                {otBookings.slice(0, 12).map((row: any) => (
-                  <tr key={`ot-booking-${row?.id}`}>
-                    <td className="pv-name">{String(row?.id || "-").slice(0, 12)}</td>
-                    <td>
-                      {`${row?.patient?.firstName || ""} ${row?.patient?.lastName || ""}`.trim() ||
-                        row?.patient?.patientCode ||
-                        "-"}
-                    </td>
-                    <td>{String(row?.procedure || "-")}</td>
-                    <td>{String(row?.priority || "ELECTIVE")}</td>
-                    <td>
-                      <span className="pv-badge">
-                        {String(row?.normalizedStatus || row?.status || "-")}
-                      </span>
-                    </td>
-                    <td>
-                      {row?.scheduledDate
-                        ? new Date(String(row.scheduledDate)).toLocaleString()
-                        : "-"}
-                    </td>
-                    <td>{String(row?.otRoom || "-")}</td>
-                    <td>
-                      <button
-                        type="button"
-                        className="btn-secondary"
-                        onClick={() =>
-                          setSelectedOtBookingId((prev) =>
-                            prev === String(row?.id || "") ? "" : String(row?.id || ""),
-                          )
-                        }
-                      >
-                        {selectedOtBookingId === String(row?.id || "") ? "Hide" : "View"}
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-                {!otLoading && otBookings.length === 0 && (
+                {otLoading ? (
                   <tr>
-                    <td colSpan={8} className="pv-empty">
-                      No OT bookings found.
+                    <td colSpan={4} className="pv-empty">
+                      Loading theatre schedule...
                     </td>
                   </tr>
+                ) : filteredOtBookings.length === 0 ? (
+                  <tr>
+                    <td colSpan={4} className="pv-empty">
+                      No records found.
+                    </td>
+                  </tr>
+                ) : (
+                  filteredOtBookings.slice(0, 12).map((row: any) => (
+                    <tr key={`ot-booking-${row?.id}`}>
+                      <td className="pv-name">{String(row?.procedure || row?.surgeryType || "Surgical case")}</td>
+                      <td>{String(row?.surgeonName || row?.surgeon || "-")}</td>
+                      <td>{String(row?.otRoom || row?.theatre || "-")}</td>
+                      <td>
+                        <span className="pv-badge">
+                          {String(row?.normalizedStatus || row?.status || "Requested")}
+                        </span>
+                      </td>
+                    </tr>
+                  ))
                 )}
               </tbody>
             </table>
           </section>
-
-          {selectedOtBookingId && (
-            <section className="pv-table-wrap" style={{ marginBottom: 14 }}>
-              <table className="pv-table">
-                <thead>
-                  <tr>
-                    <th>Time</th>
-                    <th>Event</th>
-                    <th>Details</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {selectedOtTimelineRows.slice(0, 20).map((row: any) => (
-                    <tr key={`ot-timeline-${row?.id}`}>
-                      <td>{row?.createdAt ? new Date(String(row.createdAt)).toLocaleString() : "-"}</td>
-                      <td>
-                        <span className="pv-badge">{String(row?.type || "-")}</span>
-                      </td>
-                      <td>
-                        {String(
-                          row?.data?.notes ||
-                            row?.data?.message ||
-                            row?.data?.toStatus ||
-                            row?.data?.phase ||
-                            row?.data?.description ||
-                            "-",
-                        )}
-                      </td>
-                    </tr>
-                  ))}
-                  {selectedOtTimelineRows.length === 0 && (
-                    <tr>
-                      <td colSpan={3} className="pv-empty">
-                        No OT timeline entries yet.
-                      </td>
-                    </tr>
-                  )}
-                </tbody>
-              </table>
-            </section>
-          )}
         </>
       )}
 
       {isBloodBankModule && (
         <>
-          <div className="pv-header" style={{ marginBottom: 10 }}>
+          <div className="pv-header">
             <div>
+              <h2 className="pv-title">
+                <WorkflowActionIcon type="activity" />
+                Blood Bank
+              </h2>
               <p className="pv-subtitle">
-                Blood Bank control center: donor activity, blood/component inventory, compatibility-safe
-                issue flow, transfusion tracking, and reaction surveillance.
+                Donor registry and transfusion inventory
               </p>
             </div>
-            <button
-              type="button"
-              className="btn-primary"
-              onClick={() => void loadBloodBankControlCenter()}
-              disabled={bloodLoading}
-            >
-              {bloodLoading ? "Refreshing..." : "Refresh Blood Bank"}
-            </button>
+            <div className="module-actions">
+              {formsForDisplay.map((moduleForm) => (
+                <button
+                  key={moduleForm.id}
+                  type="button"
+                  onClick={() => openWorkflowFormWithPrefill(moduleForm.id)}
+                >
+                  <WorkflowActionIcon type={getBloodBankFormIconType(moduleForm.title)} />
+                  {cleanWorkflowFormTitle(moduleForm.title)}
+                </button>
+              ))}
+            </div>
           </div>
 
           {bloodError && <div className="workflow-notice is-error">{bloodError}</div>}
 
-          <div className="ehr-summary-grid" style={{ marginBottom: 14 }}>
-            <article className="ehr-summary-card">
-              <span>Donors</span>
-              <strong>{bloodSummary.donorCount}</strong>
-            </article>
-            <article className="ehr-summary-card">
-              <span>Blood Groups</span>
-              <strong>{bloodSummary.inventoryBloodGroups}</strong>
-            </article>
-            <article className="ehr-summary-card">
-              <span>Total Units</span>
-              <strong>{bloodSummary.totalUnitsAvailable}</strong>
-            </article>
-            <article className="ehr-summary-card">
-              <span>Total Requests</span>
-              <strong>{bloodSummary.totalRequests}</strong>
-            </article>
-            <article className="ehr-summary-card">
-              <span>STAT Requests</span>
-              <strong>{bloodSummary.statRequests}</strong>
-            </article>
-            <article className="ehr-summary-card">
-              <span>Issues Today</span>
-              <strong>{bloodSummary.issuesToday}</strong>
-            </article>
-            <article className="ehr-summary-card">
-              <span>Transfusions Today</span>
-              <strong>{bloodSummary.transfusionsToday}</strong>
-            </article>
-            <article className="ehr-summary-card">
-              <span>Reactions</span>
-              <strong>{bloodSummary.reactionCount}</strong>
-            </article>
-            <article className="ehr-summary-card">
-              <span>Near Expiry Units</span>
-              <strong>{bloodSummary.nearExpiryUnits}</strong>
-            </article>
-            <article className="ehr-summary-card">
-              <span>Discarded/Expired</span>
-              <strong>{bloodSummary.expiredOrDiscardedUnits}</strong>
-            </article>
-            <article className="ehr-summary-card">
-              <span>Inventory Movements</span>
-              <strong>{bloodSummary.movementCount}</strong>
-            </article>
+          <div className="pv-stats blood-bank-stats-grid">
+            {bloodStatCards.map((stat) => (
+              <article
+                key={stat.label}
+                className="pv-stat-card"
+                style={{ borderLeftColor: stat.color }}
+              >
+                <p className="pv-stat-label">{stat.label}</p>
+                <p className="pv-stat-value">{bloodLoading ? "..." : stat.value}</p>
+              </article>
+            ))}
           </div>
 
-          <section className="pv-table-wrap" style={{ marginBottom: 14 }}>
-            <table className="pv-table">
-              <thead>
-                <tr>
-                  <th>Blood Group</th>
-                  <th>Units Available</th>
-                  <th>Component Breakdown</th>
-                </tr>
-              </thead>
-              <tbody>
-                {bloodStock.slice(0, 12).map((row: any, index: number) => (
-                  <tr key={`blood-stock-${row?.bloodGroup || index}`}>
-                    <td className="pv-name">{String(row?.bloodGroup || "-")}</td>
-                    <td>{Number(row?.unitsAvailable || 0)}</td>
-                    <td>
-                      {Array.isArray(row?.componentBreakdown) && row.componentBreakdown.length > 0
-                        ? row.componentBreakdown
-                            .map(
-                              (entry: any) =>
-                                `${String(entry?.componentType || "-")}: ${Number(entry?.unitsAvailable || 0)}${
-                                  Number(entry?.nearExpiryUnits || 0) > 0
-                                    ? ` (near expiry ${Number(entry?.nearExpiryUnits || 0)})`
-                                    : ""
-                                }`,
-                            )
-                            .join(" | ")
-                        : "-"}
-                    </td>
-                  </tr>
-                ))}
-                {!bloodLoading && bloodStock.length === 0 && (
-                  <tr>
-                    <td colSpan={3} className="pv-empty">
-                      No blood inventory records found.
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </section>
+          <div className="pv-search-bar blood-bank-search-row">
+            <div className="pv-search-wrap">
+              <WorkflowActionIcon type="search" className="pv-search-icon" />
+              <input
+                className="pv-search"
+                type="search"
+                value={bloodSearch}
+                onChange={(event) => setBloodSearch(event.target.value)}
+                placeholder="Search blood products"
+              />
+            </div>
+          </div>
 
-          <section className="pv-table-wrap" style={{ marginBottom: 14 }}>
+          <section className="pv-table-wrap blood-bank-table-wrap">
             <table className="pv-table">
               <thead>
                 <tr>
-                  <th>Request ID</th>
-                  <th>Patient</th>
                   <th>Blood Group</th>
-                  <th>Component</th>
                   <th>Units</th>
-                  <th>Urgency</th>
+                  <th>Expiry</th>
                   <th>Status</th>
                 </tr>
               </thead>
               <tbody>
-                {bloodRequests.slice(0, 10).map((row: any, index: number) => (
-                  <tr key={`blood-request-${row?.requestId || row?.id || index}`}>
-                    <td className="pv-name">{String(row?.requestId || row?.id || "-")}</td>
-                    <td>{String(row?.patientId || "-")}</td>
-                    <td>{String(row?.bloodGroup || "-")}</td>
-                    <td>{String(row?.componentType || "-")}</td>
-                    <td>{Number(row?.unitsRequested || row?.units || 0)}</td>
-                    <td>{String(row?.urgency || "-")}</td>
-                    <td>
-                      <span className="pv-badge">{String(row?.status || "-")}</span>
-                    </td>
-                  </tr>
-                ))}
-                {!bloodLoading && bloodRequests.length === 0 && (
+                {bloodLoading ? (
                   <tr>
-                    <td colSpan={7} className="pv-empty">
-                      No blood requests found.
+                    <td colSpan={4} className="pv-empty">
+                      Loading blood inventory...
                     </td>
                   </tr>
-                )}
-              </tbody>
-            </table>
-          </section>
-
-          <section className="pv-table-wrap" style={{ marginBottom: 14 }}>
-            <table className="pv-table">
-              <thead>
-                <tr>
-                  <th>Issue ID</th>
-                  <th>Patient</th>
-                  <th>Blood Group</th>
-                  <th>Units</th>
-                  <th>Issued At</th>
-                  <th>Department</th>
-                </tr>
-              </thead>
-              <tbody>
-                {bloodIssues.slice(0, 10).map((row: any, index: number) => (
-                  <tr key={`blood-issue-${row?.id || index}`}>
-                    <td className="pv-name">{String(row?.id || "-").slice(0, 14)}</td>
-                    <td>{String(row?.patientId || "-")}</td>
-                    <td>{String(row?.bloodGroup || "-")}</td>
-                    <td>{Number(row?.unitsIssued || 0)}</td>
-                    <td>{row?.issuedAt ? new Date(row.issuedAt).toLocaleString() : "-"}</td>
-                    <td>{String(row?.metadata?.issuedToDepartment || "-")}</td>
-                  </tr>
-                ))}
-                {!bloodLoading && bloodIssues.length === 0 && (
+                ) : filteredBloodStock.length === 0 ? (
                   <tr>
-                    <td colSpan={6} className="pv-empty">
-                      No blood issue records found.
+                    <td colSpan={4} className="pv-empty">
+                      No records found.
                     </td>
                   </tr>
-                )}
-              </tbody>
-            </table>
-          </section>
-
-          <section className="pv-table-wrap" style={{ marginBottom: 14 }}>
-            <table className="pv-table">
-              <thead>
-                <tr>
-                  <th>Transfusion ID</th>
-                  <th>Patient</th>
-                  <th>Blood Group</th>
-                  <th>Component</th>
-                  <th>Started</th>
-                  <th>Reaction</th>
-                </tr>
-              </thead>
-              <tbody>
-                {bloodTransfusions.slice(0, 10).map((row: any, index: number) => (
-                  <tr key={`blood-transfusion-${row?.transfusionId || row?.id || index}`}>
-                    <td className="pv-name">{String(row?.transfusionId || row?.id || "-")}</td>
-                    <td>{String(row?.patientId || "-")}</td>
-                    <td>{String(row?.bloodGroup || "-")}</td>
-                    <td>{String(row?.componentType || "-")}</td>
-                    <td>{row?.startedAt ? new Date(row.startedAt).toLocaleString() : "-"}</td>
-                    <td>{row?.reactionObserved ? "YES" : "NO"}</td>
-                  </tr>
-                ))}
-                {!bloodLoading && bloodTransfusions.length === 0 && (
-                  <tr>
-                    <td colSpan={6} className="pv-empty">
-                      No transfusion records found.
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </section>
-
-          <section className="pv-table-wrap" style={{ marginBottom: 14 }}>
-            <table className="pv-table">
-              <thead>
-                <tr>
-                  <th>Reaction ID</th>
-                  <th>Transfusion ID</th>
-                  <th>Patient</th>
-                  <th>Severity</th>
-                  <th>Symptoms</th>
-                  <th>Reported At</th>
-                </tr>
-              </thead>
-              <tbody>
-                {bloodReactions.slice(0, 10).map((row: any, index: number) => (
-                  <tr key={`blood-reaction-${row?.reactionId || row?.id || index}`}>
-                    <td className="pv-name">{String(row?.reactionId || row?.id || "-")}</td>
-                    <td>{String(row?.transfusionId || "-")}</td>
-                    <td>{String(row?.patientId || "-")}</td>
-                    <td>
-                      <span className="pv-badge">{String(row?.severity || "-")}</span>
-                    </td>
-                    <td>{String(row?.symptoms || "-")}</td>
-                    <td>{row?.reportedAt ? new Date(row.reportedAt).toLocaleString() : "-"}</td>
-                  </tr>
-                ))}
-                {!bloodLoading && bloodReactions.length === 0 && (
-                  <tr>
-                    <td colSpan={6} className="pv-empty">
-                      No transfusion reactions logged.
-                    </td>
-                  </tr>
+                ) : (
+                  filteredBloodStock.slice(0, 12).map((row: any, index: number) => (
+                    <tr key={`blood-stock-${row?.group || index}`}>
+                      <td className="pv-name">{row.group}</td>
+                      <td>{row.units}</td>
+                      <td>{row.expiry}</td>
+                      <td>
+                        <span className="pv-badge">{row.status}</span>
+                      </td>
+                    </tr>
+                  ))
                 )}
               </tbody>
             </table>
@@ -22665,25 +26834,9 @@ export function WorkflowModuleView({
 
       {isAccountingModule && (
         <>
-          <div className="pv-header" style={{ marginBottom: 10 }}>
-            <div>
-              <p className="pv-subtitle">
-                Accounting & GL control center: chart of accounts, journal integrity, AP/AR aging,
-                bank flow, budget envelope, and financial statements.
-              </p>
-            </div>
-            <button
-              type="button"
-              className="btn-primary"
-              onClick={() => void loadAccountingControlCenter()}
-              disabled={accLoading}
-            >
-              {accLoading ? "Refreshing..." : "Refresh Accounting"}
-            </button>
-          </div>
-
-          <section className="pv-grid" style={{ marginBottom: 12 }}>
-            <label className="pv-field">
+          <section className="module-filter-panel accounting-filter-panel">
+            <div className="module-filter-grid">
+            <label className="module-filter-field">
               <span>Date From</span>
               <input
                 type="date"
@@ -22694,7 +26847,7 @@ export function WorkflowModuleView({
                 }}
               />
             </label>
-            <label className="pv-field">
+            <label className="module-filter-field">
               <span>Date To</span>
               <input
                 type="date"
@@ -22705,7 +26858,7 @@ export function WorkflowModuleView({
                 }}
               />
             </label>
-            <label className="pv-field">
+            <label className="module-filter-field">
               <span>Account Type</span>
               <select
                 value={accAccountTypeFilter}
@@ -22719,7 +26872,7 @@ export function WorkflowModuleView({
                 <option value="EXPENSE">EXPENSE</option>
               </select>
             </label>
-            <label className="pv-field">
+            <label className="module-filter-field">
               <span>Budget Status</span>
               <select
                 value={accBudgetStatusFilter}
@@ -22733,7 +26886,7 @@ export function WorkflowModuleView({
                 <option value="CANCELLED">CANCELLED</option>
               </select>
             </label>
-            <label className="pv-field">
+            <label className="module-filter-field is-wide">
               <span>Journal Module</span>
               <input
                 type="text"
@@ -22746,7 +26899,7 @@ export function WorkflowModuleView({
                 placeholder="BILLING, INSURANCE, PROCUREMENT..."
               />
             </label>
-            <label className="pv-field" style={{ gridColumn: "span 2" }}>
+            <label className="module-filter-field is-wide">
               <span>Search Accounts</span>
               <input
                 type="search"
@@ -22755,7 +26908,7 @@ export function WorkflowModuleView({
                 placeholder="Account code/name/cost center"
               />
             </label>
-            <label className="pv-field" style={{ gridColumn: "span 2" }}>
+            <label className="module-filter-field is-wide">
               <span>Search Journals</span>
               <input
                 type="search"
@@ -22764,73 +26917,117 @@ export function WorkflowModuleView({
                 placeholder="Journal number, reference ID, description"
               />
             </label>
+            </div>
           </section>
 
           {accError && <div className="workflow-notice is-error">{accError}</div>}
 
-          <div className="ehr-summary-grid" style={{ marginBottom: 14 }}>
-            <article className="ehr-summary-card">
-              <span>COA Accounts</span>
+          <div className="accounting-chart-grid">
+            <section className="accounting-chart-card">
+              <div>
+                <h3>Statement Snapshot</h3>
+                <p>Revenue, expense, and net profit comparison</p>
+              </div>
+              <div className="accounting-bar-list">
+                {[
+                  { label: "Revenue", value: accountingSummary.revenue, color: "#16a34a" },
+                  { label: "Expense", value: accountingSummary.expense, color: "#dc2626" },
+                  { label: "Net Profit", value: accountingSummary.netProfit, color: "#2563eb" },
+                ].map((item) => (
+                  <div className="accounting-bar-row" key={item.label}>
+                    <div className="accounting-bar-meta">
+                      <span>{item.label}</span>
+                      <strong>{formatKes(item.value)}</strong>
+                    </div>
+                    <div className="accounting-bar-track">
+                      <div
+                        className="accounting-bar-fill"
+                        style={{
+                          width: `${percentOf(item.value, accountingStatementMax)}%`,
+                          backgroundColor: item.color,
+                        }}
+                      />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </section>
+
+            <section className="accounting-chart-card accounting-pie-card">
+              <div>
+                <h3>Balance Sheet Mix</h3>
+                <p>Assets, liabilities, and equity distribution</p>
+              </div>
+              <div className="accounting-pie-wrap">
+                <div className="accounting-pie" style={{ background: accountingPieGradient }} />
+                <div className="accounting-pie-legend">
+                  <span><i style={{ backgroundColor: "#0284c7" }} /> Assets {accountingAssetSlice.toFixed(0)}%</span>
+                  <span><i style={{ backgroundColor: "#be123c" }} /> Liabilities {accountingLiabilitySlice.toFixed(0)}%</span>
+                  <span><i style={{ backgroundColor: "#7c3aed" }} /> Equity {accountingEquitySlice.toFixed(0)}%</span>
+                </div>
+              </div>
+            </section>
+          </div>
+
+          <div className="pv-stats accounting-stat-grid">
+            <article className="pv-stat-card" style={{ borderLeftColor: "#16a34a" }}>
+              <p className="pv-stat-label">COA Accounts</p>
               <strong>{accountingSummary.chartOfAccounts}</strong>
             </article>
-            <article className="ehr-summary-card">
-              <span>Journal Entries</span>
+            <article className="pv-stat-card" style={{ borderLeftColor: "#2563eb" }}>
+              <p className="pv-stat-label">Journal Entries</p>
               <strong>{accountingSummary.journalEntries}</strong>
             </article>
-            <article className="ehr-summary-card">
-              <span>Open Payables</span>
+            <article className="pv-stat-card" style={{ borderLeftColor: "#f59e0b" }}>
+              <p className="pv-stat-label">Open Payables</p>
               <strong>{formatKes(accountingSummary.openPayables)}</strong>
             </article>
-            <article className="ehr-summary-card">
-              <span>Open Receivables</span>
+            <article className="pv-stat-card" style={{ borderLeftColor: "#0d9488" }}>
+              <p className="pv-stat-label">Open Receivables</p>
               <strong>{formatKes(accountingSummary.openReceivables)}</strong>
             </article>
-            <article className="ehr-summary-card">
-              <span>Bank Accounts</span>
-              <strong>{accountingSummary.bankAccounts}</strong>
-            </article>
-            <article className="ehr-summary-card">
-              <span>Net Bank Flow</span>
+            <article className="pv-stat-card" style={{ borderLeftColor: "#0891b2" }}>
+              <p className="pv-stat-label">Net Bank Flow</p>
               <strong>{formatKes(accountingSummary.bankNetFlow)}</strong>
             </article>
-            <article className="ehr-summary-card">
-              <span>Budget Envelope</span>
+            <article className="pv-stat-card" style={{ borderLeftColor: "#475569" }}>
+              <p className="pv-stat-label">Budget Envelope</p>
               <strong>{formatKes(accountingSummary.budgetEnvelope)}</strong>
             </article>
-            <article className="ehr-summary-card">
-              <span>Trial Debit</span>
+            <article className="pv-stat-card" style={{ borderLeftColor: "#1d4ed8" }}>
+              <p className="pv-stat-label">Trial Debit</p>
               <strong>{formatKes(accountingSummary.trialDebit)}</strong>
             </article>
-            <article className="ehr-summary-card">
-              <span>Trial Credit</span>
+            <article className="pv-stat-card" style={{ borderLeftColor: "#4338ca" }}>
+              <p className="pv-stat-label">Trial Credit</p>
               <strong>{formatKes(accountingSummary.trialCredit)}</strong>
             </article>
-            <article className="ehr-summary-card">
-              <span>Revenue</span>
+            <article className="pv-stat-card" style={{ borderLeftColor: "#059669" }}>
+              <p className="pv-stat-label">Revenue</p>
               <strong>{formatKes(accountingSummary.revenue)}</strong>
             </article>
-            <article className="ehr-summary-card">
-              <span>Expense</span>
+            <article className="pv-stat-card" style={{ borderLeftColor: "#dc2626" }}>
+              <p className="pv-stat-label">Expense</p>
               <strong>{formatKes(accountingSummary.expense)}</strong>
             </article>
-            <article className="ehr-summary-card">
-              <span>Net Profit</span>
+            <article className="pv-stat-card" style={{ borderLeftColor: "#16a34a" }}>
+              <p className="pv-stat-label">Net Profit</p>
               <strong>{formatKes(accountingSummary.netProfit)}</strong>
             </article>
-            <article className="ehr-summary-card">
-              <span>Assets</span>
+            <article className="pv-stat-card" style={{ borderLeftColor: "#0284c7" }}>
+              <p className="pv-stat-label">Assets</p>
               <strong>{formatKes(accountingSummary.assets)}</strong>
             </article>
-            <article className="ehr-summary-card">
-              <span>Liabilities</span>
+            <article className="pv-stat-card" style={{ borderLeftColor: "#be123c" }}>
+              <p className="pv-stat-label">Liabilities</p>
               <strong>{formatKes(accountingSummary.liabilities)}</strong>
             </article>
-            <article className="ehr-summary-card">
-              <span>Equity</span>
+            <article className="pv-stat-card" style={{ borderLeftColor: "#7c3aed" }}>
+              <p className="pv-stat-label">Equity</p>
               <strong>{formatKes(accountingSummary.equity)}</strong>
             </article>
-            <article className="ehr-summary-card">
-              <span>Liabilities + Equity</span>
+            <article className="pv-stat-card" style={{ borderLeftColor: "#0f766e" }}>
+              <p className="pv-stat-label">Liabilities + Equity</p>
               <strong>{formatKes(accountingSummary.liabilitiesPlusEquity)}</strong>
             </article>
           </div>
@@ -22858,6 +27055,13 @@ export function WorkflowModuleView({
                     <td>{row?.isActive ? "ACTIVE" : "INACTIVE"}</td>
                   </tr>
                 ))}
+                {accLoading && accAccounts.length === 0 && (
+                  <tr>
+                    <td colSpan={6} className="pv-empty">
+                      Loading chart of accounts...
+                    </td>
+                  </tr>
+                )}
                 {!accLoading && accAccounts.length === 0 && (
                   <tr>
                     <td colSpan={6} className="pv-empty">
@@ -22868,238 +27072,373 @@ export function WorkflowModuleView({
               </tbody>
             </table>
           </section>
+        </>
+      )}
+
+      {isWorkforcePlanningModule && (
+        <>
+          <div className="pv-stats workforce-stat-grid">
+            <article className="pv-stat-card" style={{ borderLeftColor: "#dc2626" }}>
+              <p className="pv-stat-label">Projected Gap</p>
+              <strong>12</strong>
+            </article>
+            <article className="pv-stat-card" style={{ borderLeftColor: "#1e3a8a" }}>
+              <p className="pv-stat-label">Filled Roles</p>
+              <strong>210</strong>
+            </article>
+            <article className="pv-stat-card" style={{ borderLeftColor: "#0d9488" }}>
+              <p className="pv-stat-label">Overtime Hours</p>
+              <strong>320</strong>
+            </article>
+          </div>
+
+          <div className="workflow-top-search workforce-top-search">
+            <input
+              className="pv-search"
+              placeholder="Search departments"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+            />
+          </div>
 
           <section className="pv-table-wrap" style={{ marginBottom: 14 }}>
             <table className="pv-table">
               <thead>
                 <tr>
-                  <th>Journal</th>
-                  <th>Date</th>
-                  <th>Module</th>
-                  <th>Reference</th>
-                  <th>Debit</th>
-                  <th>Credit</th>
-                  <th>Status</th>
+                  <th>Department</th>
+                  <th>Required</th>
+                  <th>Current</th>
+                  <th>Gap</th>
                 </tr>
               </thead>
               <tbody>
-                {accJournals.slice(0, 20).map((row: any, index: number) => (
-                  <tr key={`acc-journal-${row?.journalId || row?.journalNumber || index}`}>
-                    <td className="pv-name">{String(row?.journalNumber || row?.journalId || "-")}</td>
-                    <td>{String(row?.journalDate || "").slice(0, 10) || "-"}</td>
-                    <td>{String(row?.referenceModule || "-")}</td>
-                    <td>{String(row?.referenceId || "-")}</td>
-                    <td>{formatKes(Number(row?.debitTotal || 0))}</td>
-                    <td>{formatKes(Number(row?.creditTotal || 0))}</td>
-                    <td>{String(row?.status || "-")}</td>
+                {workforceRows.map((row) => (
+                  <tr key={row.department}>
+                    <td className="pv-name">{row.department}</td>
+                    <td>{row.required}</td>
+                    <td>{row.current}</td>
+                    <td>{row.gap}</td>
                   </tr>
                 ))}
-                {!accLoading && accJournals.length === 0 && (
+                {workforceRows.length === 0 && (
                   <tr>
-                    <td colSpan={7} className="pv-empty">
-                      No journal rows found for selected filters.
+                    <td colSpan={4} className="pv-empty">
+                      No workforce planning rows found.
                     </td>
                   </tr>
                 )}
               </tbody>
             </table>
           </section>
+        </>
+      )}
 
-          <section className="pv-table-wrap" style={{ marginBottom: 14 }}>
-            <table className="pv-table">
+      {isIctModule && (
+        <>
+          <div className="pv-stats ict-stat-grid">
+            <article className="pv-stat-card" style={{ borderLeftColor: "#2563eb" }}>
+              <p className="pv-stat-label">Assets</p>
+              <strong>{Math.max(0, records.filter((record) => /asset/i.test(record.formId)).length)}</strong>
+            </article>
+            <article className="pv-stat-card" style={{ borderLeftColor: "#dc2626" }}>
+              <p className="pv-stat-label">Open Incidents</p>
+              <strong>{ictRows.filter((row) => /open|investigating|pending/i.test(row.status)).length}</strong>
+            </article>
+            <article className="pv-stat-card" style={{ borderLeftColor: "#f59e0b" }}>
+              <p className="pv-stat-label">Security Alerts</p>
+              <strong>{ictRows.filter((row) => /high|critical/i.test(row.severity)).length}</strong>
+            </article>
+            <article className="pv-stat-card" style={{ borderLeftColor: "#7c3aed" }}>
+              <p className="pv-stat-label">Backup Failures</p>
+              <strong>{records.filter((record) => /backup/i.test(record.formId) && /failed/i.test(JSON.stringify(record.data || {}))).length}</strong>
+            </article>
+          </div>
+
+          <div className="workflow-top-search ict-top-search">
+            <input
+              className="pv-search"
+              placeholder="Search ICT operations..."
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+            />
+          </div>
+
+          <div className="pv-table-meta ict-table-meta">
+            <strong className="pv-table-title">Security Events</strong>
+            <span className="pv-badge">{ictRows.length} records</span>
+          </div>
+
+          <section className="pv-table-wrap ict-table-wrap" style={{ marginBottom: 14 }}>
+            <table className="pv-table ict-table">
               <thead>
                 <tr>
-                  <th>Invoice</th>
-                  <th>Supplier</th>
+                  <th>Event</th>
+                  <th>Severity</th>
                   <th>Status</th>
-                  <th>Outstanding</th>
-                  <th>Due Date</th>
-                  <th>Days Overdue</th>
+                  <th>Owner</th>
+                  <th>Logged</th>
                 </tr>
               </thead>
               <tbody>
-                {accountingApRows.slice(0, 12).map((row: any, index: number) => (
-                  <tr key={`acc-ap-${row?.invoiceId || index}`}>
-                    <td className="pv-name">{String(row?.invoiceNumber || row?.invoiceId || "-")}</td>
-                    <td>{String(row?.supplierName || row?.supplierId || "-")}</td>
-                    <td>{String(row?.status || "-")}</td>
-                    <td>{formatKes(Number(row?.outstanding || 0))}</td>
-                    <td>{String(row?.dueDate || "").slice(0, 10) || "-"}</td>
-                    <td>{Number(row?.daysOverdue || 0)}</td>
+                {ictRows.map((row, index) => (
+                  <tr key={`${row.event}-${index}`}>
+                    <td className="pv-name">{row.event}</td>
+                    <td>{row.severity}</td>
+                    <td>{row.status}</td>
+                    <td>{row.owner}</td>
+                    <td>{row.logged}</td>
                   </tr>
                 ))}
-                {!accLoading && accountingApRows.length === 0 && (
-                  <tr>
-                    <td colSpan={6} className="pv-empty">
-                      No AP aging rows available.
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </section>
-
-          <section className="pv-table-wrap" style={{ marginBottom: 14 }}>
-            <table className="pv-table">
-              <thead>
-                <tr>
-                  <th>AR ID</th>
-                  <th>Payer</th>
-                  <th>Status</th>
-                  <th>Amount</th>
-                  <th>Due Date</th>
-                  <th>Patient/Bill</th>
-                </tr>
-              </thead>
-              <tbody>
-                {accountingArRows.slice(0, 12).map((row: any, index: number) => (
-                  <tr key={`acc-ar-${row?.arId || index}`}>
-                    <td className="pv-name">{String(row?.arId || "-")}</td>
-                    <td>{String(row?.payerName || row?.payerType || "-")}</td>
-                    <td>{String(row?.status || "-")}</td>
-                    <td>{formatKes(Number(row?.amount || 0))}</td>
-                    <td>{String(row?.dueDate || "").slice(0, 10) || "-"}</td>
-                    <td>{String(row?.patientId || row?.billId || "-")}</td>
-                  </tr>
-                ))}
-                {!accLoading && accountingArRows.length === 0 && (
-                  <tr>
-                    <td colSpan={6} className="pv-empty">
-                      No AR records available.
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </section>
-
-          <section className="pv-table-wrap" style={{ marginBottom: 14 }}>
-            <table className="pv-table">
-              <thead>
-                <tr>
-                  <th>Account</th>
-                  <th>Name</th>
-                  <th>Debit</th>
-                  <th>Credit</th>
-                  <th>Balance</th>
-                </tr>
-              </thead>
-              <tbody>
-                {accountingTrialRows.slice(0, 20).map((row: any, index: number) => (
-                  <tr key={`acc-trial-${row?.accountCode || index}`}>
-                    <td className="pv-name">{String(row?.accountCode || "-")}</td>
-                    <td>{String(row?.accountName || "-")}</td>
-                    <td>{formatKes(Number(row?.debit || 0))}</td>
-                    <td>{formatKes(Number(row?.credit || 0))}</td>
-                    <td>{formatKes(Number(row?.balance || 0))}</td>
-                  </tr>
-                ))}
-                {!accLoading && accountingTrialRows.length === 0 && (
+                {ictRows.length === 0 && (
                   <tr>
                     <td colSpan={5} className="pv-empty">
-                      No trial balance rows available.
+                      No ICT operation rows found.
                     </td>
                   </tr>
                 )}
               </tbody>
             </table>
           </section>
+        </>
+      )}
 
-          <section className="pv-table-wrap" style={{ marginBottom: 14 }}>
-            <table className="pv-table">
+      {isNursingAdminModule && (
+        <>
+          <div className="pv-stats matron-stat-grid">
+            <article className="pv-stat-card" style={{ borderLeftColor: "#16a34a" }}>
+              <p className="pv-stat-label">Active Nurses</p>
+              <strong>{Math.max(0, records.filter((record) => /roster|competency/i.test(record.formId)).length)}</strong>
+            </article>
+            <article className="pv-stat-card" style={{ borderLeftColor: "#2563eb" }}>
+              <p className="pv-stat-label">Shift Approvals</p>
+              <strong>{matronRows.filter((row) => /pending/i.test(row.status)).length}</strong>
+            </article>
+            <article className="pv-stat-card" style={{ borderLeftColor: "#dc2626" }}>
+              <p className="pv-stat-label">Open Incidents</p>
+              <strong>0</strong>
+            </article>
+            <article className="pv-stat-card" style={{ borderLeftColor: "#7c3aed" }}>
+              <p className="pv-stat-label">Burnout Risk</p>
+              <strong>{matronRows.filter((row) => /night|on-call/i.test(row.shift)).length}</strong>
+            </article>
+          </div>
+
+          <div className="workflow-top-search matron-top-search">
+            <input
+              className="pv-search"
+              placeholder="Search nursing administration..."
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+            />
+          </div>
+
+          <div className="pv-table-meta matron-table-meta">
+            <strong className="pv-table-title">Shift Assignments</strong>
+            <span className="pv-badge">{matronRows.length} records</span>
+          </div>
+
+          <section className="pv-table-wrap matron-table-wrap" style={{ marginBottom: 14 }}>
+            <table className="pv-table matron-table">
               <thead>
                 <tr>
-                  <th>Budget</th>
-                  <th>Year</th>
+                  <th>Nurse</th>
+                  <th>Ward</th>
+                  <th>Shift</th>
                   <th>Status</th>
-                  <th>Cost Center</th>
-                  <th>Amount</th>
-                  <th>Department</th>
-                </tr>
-              </thead>
-              <tbody>
-                {accBudgets.slice(0, 15).map((row: any, index: number) => (
-                  <tr key={`acc-budget-${row?.budgetId || index}`}>
-                    <td className="pv-name">{String(row?.budgetName || row?.budgetId || "-")}</td>
-                    <td>{String(row?.fiscalYear || "-")}</td>
-                    <td>{String(row?.status || "-")}</td>
-                    <td>{String(row?.costCenter || "-")}</td>
-                    <td>{formatKes(Number(row?.amount || 0))}</td>
-                    <td>{String(row?.departmentId || "-")}</td>
-                  </tr>
-                ))}
-                {!accLoading && accBudgets.length === 0 && (
-                  <tr>
-                    <td colSpan={6} className="pv-empty">
-                      No budgets found.
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </section>
-
-          <section className="pv-table-wrap" style={{ marginBottom: 14 }}>
-            <table className="pv-table">
-              <thead>
-                <tr>
-                  <th>Account Name</th>
-                  <th>Account Number</th>
-                  <th>Bank</th>
-                  <th>Currency</th>
-                  <th>Status</th>
-                  <th>Current Balance</th>
-                </tr>
-              </thead>
-              <tbody>
-                {accBankAccounts.slice(0, 12).map((row: any, index: number) => (
-                  <tr key={`acc-bank-account-${row?.id || row?.accountNumber || index}`}>
-                    <td className="pv-name">{String(row?.accountName || row?.id || "-")}</td>
-                    <td>{String(row?.accountNumber || "-")}</td>
-                    <td>{String(row?.bankName || "-")}</td>
-                    <td>{String(row?.currency || "KES")}</td>
-                    <td>{row?.isActive ? "ACTIVE" : "INACTIVE"}</td>
-                    <td>{formatKes(Number(row?.currentBalance || 0))}</td>
-                  </tr>
-                ))}
-                {!accLoading && accBankAccounts.length === 0 && (
-                  <tr>
-                    <td colSpan={6} className="pv-empty">
-                      No bank accounts found.
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </section>
-
-          <section className="pv-table-wrap" style={{ marginBottom: 14 }}>
-            <table className="pv-table">
-              <thead>
-                <tr>
                   <th>Date</th>
-                  <th>Type</th>
-                  <th>Account</th>
-                  <th>Amount</th>
-                  <th>Method</th>
-                  <th>Reference</th>
                 </tr>
               </thead>
               <tbody>
-                {accBankTransactions.slice(0, 15).map((row: any, index: number) => (
-                  <tr key={`acc-bank-txn-${row?.transactionId || index}`}>
-                    <td>{String(row?.transactionDate || row?.createdAt || "").replace("T", " ").slice(0, 16) || "-"}</td>
-                    <td>{String(row?.transactionType || "-")}</td>
-                    <td className="pv-name">{String(row?.bankAccountId || "-")}</td>
-                    <td>{formatKes(Number(row?.amount || 0))}</td>
-                    <td>{String(row?.method || "-")}</td>
-                    <td>{String(row?.referenceNo || "-")}</td>
+                {matronRows.map((row, index) => (
+                  <tr key={`${row.nurse}-${index}`}>
+                    <td className="pv-name">{row.nurse}</td>
+                    <td>{row.ward}</td>
+                    <td>{row.shift}</td>
+                    <td>{row.status}</td>
+                    <td>{row.date}</td>
                   </tr>
                 ))}
-                {!accLoading && accBankTransactions.length === 0 && (
+                {matronRows.length === 0 && (
                   <tr>
-                    <td colSpan={6} className="pv-empty">
-                      No bank transactions found.
+                    <td colSpan={5} className="pv-empty">
+                      No nursing administration rows found.
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </section>
+        </>
+      )}
+
+      {isMedicalDirectorModule && (
+        <>
+          <div className="pv-stats medical-director-stat-grid">
+            <article className="pv-stat-card" style={{ borderLeftColor: "#16a34a" }}>
+              <p className="pv-stat-label">Doctors</p>
+              <strong>{records.filter((record) => /doctor_profile|doctor_privilege/i.test(record.formId)).length}</strong>
+            </article>
+            <article className="pv-stat-card" style={{ borderLeftColor: "#2563eb" }}>
+              <p className="pv-stat-label">Protocols</p>
+              <strong>{records.filter((record) => /protocol/i.test(record.formId)).length}</strong>
+            </article>
+            <article className="pv-stat-card" style={{ borderLeftColor: "#dc2626" }}>
+              <p className="pv-stat-label">Open M&M</p>
+              <strong>{records.filter((record) => /mortality|mmr/i.test(record.formId)).length}</strong>
+            </article>
+            <article className="pv-stat-card" style={{ borderLeftColor: "#e11d48" }}>
+              <p className="pv-stat-label">Risk Alerts</p>
+              <strong>{records.filter((record) => /risk_alert|critical_case/i.test(record.formId)).length}</strong>
+            </article>
+          </div>
+
+          <div className="workflow-top-search medical-director-top-search">
+            <input
+              className="pv-search"
+              placeholder="Search medical director records..."
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+            />
+          </div>
+
+          <div className="pv-table-meta medical-director-table-meta">
+            <strong className="pv-table-title">Doctor Performance Scores</strong>
+            <span className="pv-badge">{medicalDirectorRows.length} records</span>
+          </div>
+
+          <section className="pv-table-wrap medical-director-table-wrap" style={{ marginBottom: 14 }}>
+            <table className="pv-table medical-director-table">
+              <thead>
+                <tr>
+                  <th>Doctor</th>
+                  <th>Score</th>
+                  <th>Risk</th>
+                  <th>Period</th>
+                </tr>
+              </thead>
+              <tbody>
+                {medicalDirectorRows.map((row, index) => (
+                  <tr key={`${row.doctor}-${index}`}>
+                    <td className="pv-name">{row.doctor}</td>
+                    <td>{row.score}</td>
+                    <td>{row.risk}</td>
+                    <td>{row.period}</td>
+                  </tr>
+                ))}
+                {medicalDirectorRows.length === 0 && (
+                  <tr>
+                    <td colSpan={4} className="pv-empty">
+                      No medical director rows found.
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </section>
+        </>
+      )}
+
+      {isRevenueCycleModule && (
+        <>
+          <div className="pv-stats revenue-cycle-stat-grid">
+            <article className="pv-stat-card" style={{ borderLeftColor: "#2563eb" }}>
+              <p className="pv-stat-label">Total Claims</p>
+              <strong>{revenueCycleSummary.totalClaims}</strong>
+            </article>
+            <article className="pv-stat-card" style={{ borderLeftColor: "#7c3aed" }}>
+              <p className="pv-stat-label">Denials</p>
+              <strong>{revenueCycleSummary.denials}</strong>
+            </article>
+            <article className="pv-stat-card" style={{ borderLeftColor: "#16a34a" }}>
+              <p className="pv-stat-label">Billed</p>
+              <strong>{formatKes(revenueCycleSummary.totalBilled)}</strong>
+            </article>
+            <article className="pv-stat-card" style={{ borderLeftColor: "#f59e0b" }}>
+              <p className="pv-stat-label">Outstanding</p>
+              <strong>{formatKes(revenueCycleSummary.totalOutstanding)}</strong>
+            </article>
+          </div>
+
+          <section className="revenue-cycle-chart-grid">
+            <article className="revenue-cycle-chart-card">
+              <div>
+                <h3>Claims Trend</h3>
+                <p>Recent submitted claims by day</p>
+              </div>
+              <div className="revenue-cycle-pie-wrap">
+                <div
+                  className="revenue-cycle-pie"
+                  style={{ background: `conic-gradient(${revenueCycleSummary.trendGradient})` }}
+                />
+                <div className="revenue-cycle-pie-legend">
+                  {revenueCycleSummary.trendLegend.map(({ label, value, color }) => (
+                    <span key={label}>
+                      <i style={{ background: color }} />
+                      {label}: {value}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            </article>
+            <article className="revenue-cycle-chart-card">
+              <div>
+                <h3>Claim Status Mix</h3>
+                <p>Open vs paid vs denied</p>
+              </div>
+              <div className="revenue-cycle-pie-wrap">
+                <div
+                  className="revenue-cycle-pie"
+                  style={{ background: `conic-gradient(${revenueCycleSummary.statusGradient})` }}
+                />
+                <div className="revenue-cycle-pie-legend">
+                  {revenueCycleSummary.statusLegend.map(({ label, value, color }) => (
+                    <span key={label}>
+                      <i style={{ background: color }} />
+                      {label}: {value}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            </article>
+          </section>
+
+          <div className="workflow-top-search revenue-cycle-top-search">
+            <input
+              className="pv-search"
+              placeholder="Search revenue cycle records..."
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+            />
+          </div>
+
+          <div className="pv-table-meta revenue-cycle-table-meta">
+            <strong className="pv-table-title">Recent Claims</strong>
+            <span className="pv-badge">{revenueCycleRows.length} records</span>
+          </div>
+
+          <section className="pv-table-wrap revenue-cycle-table-wrap" style={{ marginBottom: 14 }}>
+            <table className="pv-table revenue-cycle-table">
+              <thead>
+                <tr>
+                  <th>Claim</th>
+                  <th>Status</th>
+                  <th>Billed</th>
+                  <th>Outstanding</th>
+                </tr>
+              </thead>
+              <tbody>
+                {revenueCycleRows.map((row, index) => (
+                  <tr key={`${row.claim}-${index}`}>
+                    <td className="pv-name">{row.claim}</td>
+                    <td>{row.status}</td>
+                    <td>{formatKes(Number(row.billed || 0))}</td>
+                    <td>{formatKes(Number(row.outstanding || 0))}</td>
+                  </tr>
+                ))}
+                {revenueCycleRows.length === 0 && (
+                  <tr>
+                    <td colSpan={4} className="pv-empty">
+                      No revenue cycle rows found.
                     </td>
                   </tr>
                 )}
@@ -23111,25 +27450,9 @@ export function WorkflowModuleView({
 
       {isCostAccountingModule && (
         <>
-          <div className="pv-header" style={{ marginBottom: 10 }}>
-            <div>
-              <p className="pv-subtitle">
-                Cost Accounting control center: true cost visibility, service/department margin
-                tracking, and profitability optimization analytics.
-              </p>
-            </div>
-            <button
-              type="button"
-              className="btn-primary"
-              onClick={() => void loadCostAccountingControlCenter()}
-              disabled={costLoading}
-            >
-              {costLoading ? "Refreshing..." : "Refresh Cost Accounting"}
-            </button>
-          </div>
-
-          <section className="pv-grid" style={{ marginBottom: 12 }}>
-            <label className="pv-field">
+          <section className="module-filter-panel cost-accounting-filter-panel">
+            <div className="module-filter-grid">
+            <label className="module-filter-field">
               <span>Date From</span>
               <input
                 type="date"
@@ -23140,7 +27463,7 @@ export function WorkflowModuleView({
                 }}
               />
             </label>
-            <label className="pv-field">
+            <label className="module-filter-field">
               <span>Date To</span>
               <input
                 type="date"
@@ -23151,97 +27474,117 @@ export function WorkflowModuleView({
                 }}
               />
             </label>
+            <div className="module-filter-actions">
+              <button
+                type="button"
+                className="btn-cancel"
+                onClick={() => {
+                  setCostFromDate("");
+                  setCostToDate("");
+                }}
+              >
+                Clear Dates
+              </button>
+              <button
+                type="button"
+                className="btn-primary"
+                onClick={() => void loadCostAccountingControlCenter()}
+                disabled={costLoading}
+              >
+                {costLoading ? "Refreshing..." : "Refresh Data"}
+              </button>
+            </div>
+            </div>
           </section>
 
           {costError && <div className="workflow-notice is-error">{costError}</div>}
 
-          <div className="ehr-summary-grid" style={{ marginBottom: 14 }}>
-            <article className="ehr-summary-card">
-              <span>Total Revenue</span>
+          <div className="pv-stats cost-accounting-stat-grid">
+            <article className="pv-stat-card" style={{ borderLeftColor: "#16a34a" }}>
+              <p className="pv-stat-label">Total Revenue</p>
               <strong>{formatKes(costSummary.totalRevenue)}</strong>
             </article>
-            <article className="ehr-summary-card">
-              <span>Total Cost</span>
+            <article className="pv-stat-card" style={{ borderLeftColor: "#dc2626" }}>
+              <p className="pv-stat-label">Total Cost</p>
               <strong>{formatKes(costSummary.totalCost)}</strong>
             </article>
-            <article className="ehr-summary-card">
-              <span>Gross Margin</span>
+            <article className="pv-stat-card" style={{ borderLeftColor: "#2563eb" }}>
+              <p className="pv-stat-label">Gross Margin</p>
               <strong>{formatKes(costSummary.grossMarginAmount)}</strong>
             </article>
-            <article className="ehr-summary-card">
-              <span>Gross Margin %</span>
+            <article className="pv-stat-card" style={{ borderLeftColor: "#7c3aed" }}>
+              <p className="pv-stat-label">Gross Margin %</p>
               <strong>{Number(costSummary.grossMarginPercent || 0).toFixed(2)}%</strong>
             </article>
-            <article className="ehr-summary-card">
-              <span>Cost/Revenue Ratio</span>
+            <article className="pv-stat-card" style={{ borderLeftColor: "#f59e0b" }}>
+              <p className="pv-stat-label">Cost/Revenue Ratio</p>
               <strong>{Number(costSummary.costToRevenueRatio || 0).toFixed(2)}%</strong>
             </article>
-            <article className="ehr-summary-card">
-              <span>Break-even Revenue</span>
+            <article className="pv-stat-card" style={{ borderLeftColor: "#0d9488" }}>
+              <p className="pv-stat-label">Break-even Revenue</p>
               <strong>{formatKes(costSummary.breakEvenRevenue)}</strong>
             </article>
-            <article className="ehr-summary-card">
-              <span>Direct Cost</span>
+            <article className="pv-stat-card" style={{ borderLeftColor: "#14b8a6" }}>
+              <p className="pv-stat-label">Direct Cost</p>
               <strong>{formatKes(costSummary.directCost)}</strong>
             </article>
-            <article className="ehr-summary-card">
-              <span>Indirect Cost</span>
+            <article className="pv-stat-card" style={{ borderLeftColor: "#ea580c" }}>
+              <p className="pv-stat-label">Indirect Cost</p>
               <strong>{formatKes(costSummary.indirectCost)}</strong>
             </article>
-            <article className="ehr-summary-card">
-              <span>Capital Cost</span>
+            <article className="pv-stat-card" style={{ borderLeftColor: "#4f46e5" }}>
+              <p className="pv-stat-label">Capital Cost</p>
               <strong>{formatKes(costSummary.capitalCost)}</strong>
             </article>
-            <article className="ehr-summary-card">
-              <span>Overhead Cost</span>
+            <article className="pv-stat-card" style={{ borderLeftColor: "#be123c" }}>
+              <p className="pv-stat-label">Overhead Cost</p>
               <strong>{formatKes(costSummary.overheadCost)}</strong>
             </article>
-            <article className="ehr-summary-card">
-              <span>Total Cases</span>
+            <article className="pv-stat-card" style={{ borderLeftColor: "#0284c7" }}>
+              <p className="pv-stat-label">Total Cases</p>
               <strong>{costSummary.totalCases}</strong>
             </article>
-            <article className="ehr-summary-card">
-              <span>Departments</span>
+            <article className="pv-stat-card" style={{ borderLeftColor: "#0891b2" }}>
+              <p className="pv-stat-label">Departments</p>
               <strong>{costSummary.departmentCount}</strong>
             </article>
-            <article className="ehr-summary-card">
-              <span>Cost per Case</span>
+            <article className="pv-stat-card" style={{ borderLeftColor: "#1d4ed8" }}>
+              <p className="pv-stat-label">Cost per Case</p>
               <strong>{formatKes(costSummary.costPerCase)}</strong>
             </article>
-            <article className="ehr-summary-card">
-              <span>Revenue per Case</span>
+            <article className="pv-stat-card" style={{ borderLeftColor: "#059669" }}>
+              <p className="pv-stat-label">Revenue per Case</p>
               <strong>{formatKes(costSummary.revenuePerCase)}</strong>
             </article>
           </div>
 
-          <section className="reporting-visual-grid">
-            <article className="reporting-visual-card">
+          <section className="reporting-visual-grid cost-accounting-chart-grid">
+            <article className="reporting-visual-card cost-accounting-chart-card">
               <div className="reporting-table-header">
-                <h3>Department Margin (Top 8)</h3>
-                <p>By absolute margin amount in selected period.</p>
+                <h3>Margin Trend</h3>
+                <p>Department margin mix for the selected period.</p>
               </div>
-              <div className="reporting-bar-chart">
-                {costMarginChartRows.map((row: any) => {
-                  const percent = Math.max(2, Math.round((Number(row.value || 0) / costMarginChartMax) * 100));
-                  return (
-                    <div className="reporting-bar-row" key={`${row.label}-${row.rawValue}`}>
-                      <span className="reporting-bar-label">{row.label}</span>
-                      <div className="reporting-bar-track">
-                        <div className="reporting-bar-fill" style={{ width: `${percent}%` }} />
+              <div className="reporting-pie-wrap">
+                <div
+                  className="reporting-pie-chart"
+                  style={{ background: `conic-gradient(${costMarginPieGradient})` }}
+                />
+                <div className="reporting-pie-legend">
+                  {costMarginPieRows.map((row: any) => {
+                    const pct = ((Number(row.value || 0) / costMarginPieTotal) * 100).toFixed(1);
+                    return (
+                      <div className="reporting-pie-legend-item" key={`${row.label}-${row.color}`}>
+                        <span className="reporting-pie-dot" style={{ background: row.color }} />
+                        <strong>{row.label}</strong>
+                        <small>{pct}%</small>
                       </div>
-                      <span className="reporting-bar-value">{formatKes(Number(row.rawValue || 0))}</span>
-                    </div>
-                  );
-                })}
-                {!costLoading && costMarginChartRows.length === 0 && (
-                  <p className="pv-empty" style={{ margin: 0 }}>
-                    No margin data to visualize.
-                  </p>
-                )}
+                    );
+                  })}
+                </div>
               </div>
             </article>
 
-            <article className="reporting-visual-card">
+            <article className="reporting-visual-card cost-accounting-chart-card">
               <div className="reporting-table-header">
                 <h3>Cost Mix</h3>
                 <p>Direct, indirect, capital, and overhead composition.</p>
@@ -23265,9 +27608,41 @@ export function WorkflowModuleView({
                 </div>
               </div>
             </article>
+
+            <article className="reporting-visual-card cost-accounting-chart-card">
+              <div className="reporting-table-header">
+                <h3>Department Margin</h3>
+                <p>Top departments by absolute margin amount.</p>
+              </div>
+              <div className="reporting-bar-chart">
+                {costMarginChartRows.map((row: any) => {
+                  const percent = Math.max(2, Math.round((Number(row.value || 0) / costMarginChartMax) * 100));
+                  return (
+                    <div className="reporting-bar-row" key={`${row.label}-${row.rawValue}`}>
+                      <span className="reporting-bar-label">{row.label}</span>
+                      <div className="reporting-bar-track">
+                        <div className="reporting-bar-fill" style={{ width: `${percent}%` }} />
+                      </div>
+                      <span className="reporting-bar-value">{formatKes(Number(row.rawValue || 0))}</span>
+                    </div>
+                  );
+                })}
+                {!costLoading && costMarginChartRows.length === 0 && (
+                  <p className="pv-empty" style={{ margin: 0 }}>
+                    No margin data to visualize.
+                  </p>
+                )}
+              </div>
+            </article>
           </section>
 
-          <section className="pv-table-wrap" style={{ marginBottom: 14 }}>
+          <section className="pv-table-wrap cost-accounting-table-wrap" style={{ marginBottom: 14 }}>
+            <div className="revenue-cycle-table-meta">
+              <div>
+                <p className="pv-table-title">Department Profitability</p>
+                <span>{costDepartmentDisplayRows.length} departments</span>
+              </div>
+            </div>
             <table className="pv-table">
               <thead>
                 <tr>
@@ -23333,111 +27708,121 @@ export function WorkflowModuleView({
 
       {isStrategicPlanningModule && (
         <>
-          <div className="pv-header" style={{ marginBottom: 10 }}>
+          <section className="module-filter-panel executive-filter-panel">
             <div>
-              <p className="pv-subtitle">
-                Executive control tower: strategic KPIs, cross-facility ranking, risk oversight,
-                forecasting insights, and goal tracking.
-              </p>
+              <p className="module-filter-kicker">Executive Filters</p>
+              <h3>Leadership Date Range</h3>
+              <p>Focus KPIs, risk alerts, forecasts, and strategic tables by reporting period.</p>
             </div>
-            <button
-              type="button"
-              className="btn-primary"
-              onClick={() => void loadStrategicControlCenter()}
-              disabled={strategicLoading}
-            >
-              {strategicLoading ? "Refreshing..." : "Refresh Executive Dashboard"}
-            </button>
-          </div>
-
-          <section className="pv-grid" style={{ marginBottom: 12 }}>
-            <label className="pv-field">
-              <span>Date From</span>
-              <input
-                type="date"
-                value={strategicFromDate}
-                onChange={(event) => {
-                  setStrategicFromDate(event.target.value);
-                  event.currentTarget.blur();
-                }}
-              />
-            </label>
-            <label className="pv-field">
-              <span>Date To</span>
-              <input
-                type="date"
-                value={strategicToDate}
-                onChange={(event) => {
-                  setStrategicToDate(event.target.value);
-                  event.currentTarget.blur();
-                }}
-              />
-            </label>
+            <div className="module-filter-grid">
+              <label>
+                <span>Date From</span>
+                <input
+                  type="date"
+                  value={strategicFromDate}
+                  onChange={(event) => {
+                    setStrategicFromDate(event.target.value);
+                    event.currentTarget.blur();
+                  }}
+                />
+              </label>
+              <label>
+                <span>Date To</span>
+                <input
+                  type="date"
+                  value={strategicToDate}
+                  onChange={(event) => {
+                    setStrategicToDate(event.target.value);
+                    event.currentTarget.blur();
+                  }}
+                />
+              </label>
+              <div className="module-filter-actions">
+                <button
+                  type="button"
+                  className="btn-cancel"
+                  onClick={() => {
+                    setStrategicFromDate("");
+                    setStrategicToDate("");
+                  }}
+                >
+                  Clear Dates
+                </button>
+                <button
+                  type="button"
+                  className="btn-primary"
+                  onClick={() => void loadStrategicControlCenter()}
+                  disabled={strategicLoading}
+                >
+                  {strategicLoading ? "Refreshing..." : "Refresh Dashboard"}
+                </button>
+              </div>
+            </div>
           </section>
 
           {strategicError && <div className="workflow-notice is-error">{strategicError}</div>}
 
-          <div className="ehr-summary-grid" style={{ marginBottom: 14 }}>
-            <article className="ehr-summary-card">
-              <span>Total Revenue</span>
+          <div className="pv-stats executive-stat-grid">
+            <article className="pv-stat-card" style={{ borderLeftColor: "#16a34a" }}>
+              <p className="pv-stat-label">Revenue</p>
               <strong>{formatKes(strategicSummary.revenue)}</strong>
             </article>
-            <article className="ehr-summary-card">
-              <span>Gross Margin %</span>
+            <article className="pv-stat-card" style={{ borderLeftColor: "#2563eb" }}>
+              <p className="pv-stat-label">Gross Margin</p>
               <strong>{strategicSummary.grossMarginPercent.toFixed(2)}%</strong>
             </article>
-            <article className="ehr-summary-card">
-              <span>Bed Occupancy</span>
+            <article className="pv-stat-card" style={{ borderLeftColor: "#0d9488" }}>
+              <p className="pv-stat-label">Occupancy</p>
               <strong>{strategicSummary.occupancyRate.toFixed(2)}%</strong>
             </article>
-            <article className="ehr-summary-card">
-              <span>Mortality Rate</span>
+            <article className="pv-stat-card" style={{ borderLeftColor: "#dc2626" }}>
+              <p className="pv-stat-label">Mortality Rate</p>
               <strong>{strategicSummary.mortalityRate.toFixed(2)}%</strong>
             </article>
-            <article className="ehr-summary-card">
-              <span>Staff Cost Ratio</span>
+            <article className="pv-stat-card" style={{ borderLeftColor: "#7c3aed" }}>
+              <p className="pv-stat-label">Staff Cost Ratio</p>
               <strong>{strategicSummary.staffCostRatio.toFixed(2)}%</strong>
             </article>
-            <article className="ehr-summary-card">
-              <span>Claim Denial Rate</span>
+            <article className="pv-stat-card" style={{ borderLeftColor: "#f59e0b" }}>
+              <p className="pv-stat-label">Denial Rate</p>
               <strong>{strategicSummary.claimDenialRate.toFixed(2)}%</strong>
             </article>
-            <article className="ehr-summary-card">
-              <span>Outstanding AR</span>
+            <article className="pv-stat-card" style={{ borderLeftColor: "#1d4ed8" }}>
+              <p className="pv-stat-label">Outstanding AR</p>
               <strong>{formatKes(strategicSummary.outstanding)}</strong>
             </article>
-            <article className="ehr-summary-card">
-              <span>Days in AR</span>
+            <article className="pv-stat-card" style={{ borderLeftColor: "#0891b2" }}>
+              <p className="pv-stat-label">Days in AR</p>
               <strong>{strategicSummary.daysInAr.toFixed(1)}</strong>
             </article>
-            <article className="ehr-summary-card">
-              <span>Active Inpatients</span>
+            <article className="pv-stat-card" style={{ borderLeftColor: "#14b8a6" }}>
+              <p className="pv-stat-label">Active Inpatients</p>
               <strong>{strategicSummary.activeInpatients}</strong>
             </article>
-            <article className="ehr-summary-card">
-              <span>Readmission Rate</span>
+            <article className="pv-stat-card" style={{ borderLeftColor: "#ea580c" }}>
+              <p className="pv-stat-label">Readmission Rate</p>
               <strong>{strategicSummary.readmissionRate.toFixed(2)}%</strong>
             </article>
-            <article className="ehr-summary-card">
-              <span>OT Utilization (proxy)</span>
+            <article className="pv-stat-card" style={{ borderLeftColor: "#4f46e5" }}>
+              <p className="pv-stat-label">OT Utilisation</p>
               <strong>{strategicSummary.otUtilizationRate.toFixed(0)}</strong>
             </article>
-            <article className="ehr-summary-card">
-              <span>Burnout Risk Score</span>
+            <article className="pv-stat-card" style={{ borderLeftColor: "#be123c" }}>
+              <p className="pv-stat-label">Burnout Risk</p>
               <strong>{strategicSummary.burnoutRiskScore.toFixed(2)}</strong>
             </article>
-            <article className="ehr-summary-card">
-              <span>Open Risk Alerts</span>
+            <article className="pv-stat-card" style={{ borderLeftColor: "#9333ea" }}>
+              <p className="pv-stat-label">Open Risks</p>
               <strong>{strategicSummary.openRiskCount}</strong>
             </article>
-            <article className="ehr-summary-card">
-              <span>Goals At Risk</span>
+            <article className="pv-stat-card" style={{ borderLeftColor: "#475569" }}>
+              <p className="pv-stat-label">Goals At Risk</p>
               <strong>{strategicSummary.goalsAtRisk}</strong>
             </article>
           </div>
 
-          <section className="reporting-visual-grid">
-            <article className="reporting-visual-card">
+          <section className="reporting-visual-grid executive-chart-grid">
+            <article className="reporting-visual-card executive-chart-card">
               <div className="reporting-table-header">
                 <h3>Facility Performance Ranking</h3>
                 <p>Top comparative metrics for strategic review.</p>
@@ -23468,7 +27853,7 @@ export function WorkflowModuleView({
               </div>
             </article>
 
-            <article className="reporting-visual-card">
+            <article className="reporting-visual-card executive-chart-card">
               <div className="reporting-table-header">
                 <h3>Risk Severity Mix</h3>
                 <p>Current strategic risk distribution.</p>
@@ -23494,8 +27879,17 @@ export function WorkflowModuleView({
             </article>
           </section>
 
-          <section className="pv-table-wrap" style={{ marginBottom: 14 }}>
-            <table className="pv-table">
+          <section className="executive-command-grid">
+            <article className="executive-command-card">
+            <div className="executive-card-head">
+              <div>
+                <h3>Strategic Goals</h3>
+                <p>Board-level objectives and execution status.</p>
+              </div>
+              <span>{strategicGoals.length} goals</span>
+            </div>
+            <div className="pv-table-wrap executive-table-wrap">
+              <table className="pv-table">
               <thead>
                 <tr>
                   <th>Goal</th>
@@ -23531,11 +27925,20 @@ export function WorkflowModuleView({
                   </tr>
                 )}
               </tbody>
-            </table>
-          </section>
+              </table>
+            </div>
+            </article>
 
-          <section className="pv-table-wrap" style={{ marginBottom: 14 }}>
-            <table className="pv-table">
+            <article className="executive-command-card">
+            <div className="executive-card-head">
+              <div>
+                <h3>Risk Alerts</h3>
+                <p>Open strategic, financial, clinical, and operational risks.</p>
+              </div>
+              <span>{strategicRisks.length} alerts</span>
+            </div>
+            <div className="pv-table-wrap executive-table-wrap">
+              <table className="pv-table">
               <thead>
                 <tr>
                   <th>Detected</th>
@@ -23569,11 +27972,20 @@ export function WorkflowModuleView({
                   </tr>
                 )}
               </tbody>
-            </table>
-          </section>
+              </table>
+            </div>
+            </article>
 
-          <section className="pv-table-wrap" style={{ marginBottom: 14 }}>
-            <table className="pv-table">
+            <article className="executive-command-card">
+            <div className="executive-card-head">
+              <div>
+                <h3>Forecasting Models</h3>
+                <p>Predictive signals for revenue, demand, occupancy, and clinical risk.</p>
+              </div>
+              <span>{strategicForecasts.length} models</span>
+            </div>
+            <div className="pv-table-wrap executive-table-wrap">
+              <table className="pv-table">
               <thead>
                 <tr>
                   <th>Forecast Date</th>
@@ -23605,11 +28017,20 @@ export function WorkflowModuleView({
                   </tr>
                 )}
               </tbody>
-            </table>
-          </section>
+              </table>
+            </div>
+            </article>
 
-          <section className="pv-table-wrap" style={{ marginBottom: 14 }}>
-            <table className="pv-table">
+            <article className="executive-command-card">
+            <div className="executive-card-head">
+              <div>
+                <h3>Scenario Simulations</h3>
+                <p>Leadership what-if scenarios and projected financial impact.</p>
+              </div>
+              <span>{strategicScenarios.length} scenarios</span>
+            </div>
+            <div className="pv-table-wrap executive-table-wrap">
+              <table className="pv-table">
               <thead>
                 <tr>
                   <th>Created</th>
@@ -23643,268 +28064,109 @@ export function WorkflowModuleView({
                   </tr>
                 )}
               </tbody>
-            </table>
-          </section>
-
-          <section className="pv-table-wrap" style={{ marginBottom: 14 }}>
-            <table className="pv-table">
-              <thead>
-                <tr>
-                  <th>Created</th>
-                  <th>Type</th>
-                  <th>Title</th>
-                  <th>Priority</th>
-                  <th>Status</th>
-                  <th>Message</th>
-                </tr>
-              </thead>
-              <tbody>
-                {strategicExecutiveNotes.slice(0, 12).map((row: any, index: number) => (
-                  <tr key={`strategic-note-${row?.id || index}`}>
-                    <td>{String(row?.createdAt || "").replace("T", " ").slice(0, 16) || "-"}</td>
-                    <td>{String(row?.noteType || "-")}</td>
-                    <td className="pv-name">{String(row?.title || "-")}</td>
-                    <td>{String(row?.priority || "-")}</td>
-                    <td>
-                      <span className="pv-badge">{String(row?.status || "-")}</span>
-                    </td>
-                    <td>{String(row?.message || "-")}</td>
-                  </tr>
-                ))}
-                {!strategicLoading && strategicExecutiveNotes.length === 0 && (
-                  <tr>
-                    <td colSpan={6} className="pv-empty">
-                      No executive notes found.
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
+              </table>
+            </div>
+            </article>
           </section>
         </>
       )}
 
       {isOrchestrationModule && (
         <>
-          <div className="pv-header" style={{ marginBottom: 10 }}>
+          <div className="pv-header orchestration-web-header" style={{ marginBottom: 10 }}>
             <div>
+              <div className="pv-title">Orchestration & Automation</div>
               <p className="pv-subtitle">
-                Integration backbone control center: data ownership enforcement, event outbox
-                visibility, and cross-module reaction processing.
+                Event-driven workflow automation with audit-ready orchestration logs.
               </p>
             </div>
-            <div className="ai-header-actions">
+            <div className="orchestration-action-bar">
+              {formsForDisplay.map((moduleForm) => {
+                const mode = getOrchestrationFormModeClass(moduleForm.title);
+                return (
+                  <button
+                    key={moduleForm.id}
+                    type="button"
+                    className={`orchestration-action-btn ${mode}`}
+                    onClick={() => openWorkflowForm(moduleForm.id)}
+                  >
+                    <WorkflowActionIcon type={getOrchestrationFormIconType(moduleForm.title)} />
+                    {cleanWorkflowFormTitle(moduleForm.title)}
+                  </button>
+                );
+              })}
               <button
                 type="button"
-                className="btn-primary"
-                onClick={() => void processOrchestrationQueue()}
-                disabled={orchestrationProcessing}
-              >
-                {orchestrationProcessing ? "Processing..." : "Process Pending"}
-              </button>
-              <button
-                type="button"
-                className="btn-primary"
+                className="orchestration-action-btn orchestration-refresh-btn"
                 onClick={() => void loadOrchestrationControlCenter()}
                 disabled={orchestrationLoading}
               >
+                <WorkflowActionIcon type="refresh" />
                 {orchestrationLoading ? "Refreshing..." : "Refresh Orchestration"}
               </button>
             </div>
           </div>
 
-          <section className="pv-grid" style={{ marginBottom: 12 }}>
-            <label className="pv-field">
-              <span>Facility ID</span>
-              <input
-                type="text"
-                value={orchestrationFacilityFilter}
-                onChange={(event) => setOrchestrationFacilityFilter(event.target.value)}
-                placeholder="Optional for scoped user"
-              />
-            </label>
-            <label className="pv-field">
-              <span>Event Type</span>
-              <input
-                type="text"
-                value={orchestrationEventTypeFilter}
-                onChange={(event) => setOrchestrationEventTypeFilter(event.target.value)}
-                placeholder="CONSULTATION_COMPLETED"
-              />
-            </label>
-            <label className="pv-field">
-              <span>Status</span>
-              <select
-                value={orchestrationStatusFilter}
-                onChange={(event) => setOrchestrationStatusFilter(event.target.value)}
-              >
-                <option value="ALL">ALL</option>
-                <option value="NEW">NEW</option>
-                <option value="FAILED">FAILED</option>
-                <option value="PROCESSED">PROCESSED</option>
-                <option value="IGNORED">IGNORED</option>
-              </select>
-            </label>
-            <label className="pv-field">
-              <span>Limit</span>
-              <input
-                type="number"
-                min={1}
-                max={5000}
-                value={orchestrationLimit}
-                onChange={(event) => setOrchestrationLimit(event.target.value)}
-              />
-            </label>
-          </section>
-
           {orchestrationError && <div className="workflow-notice is-error">{orchestrationError}</div>}
-          {orchestrationProcessResult && (
-            <div className="workflow-notice is-success" style={{ marginBottom: 10 }}>
-              Processed: {Number(orchestrationProcessResult?.processed || 0)} | Failed:{" "}
-              {Number(orchestrationProcessResult?.failed || 0)} | Total:{" "}
-              {Number(orchestrationProcessResult?.total || 0)}
-            </div>
-          )}
 
-          <div className="ehr-summary-grid" style={{ marginBottom: 14 }}>
-            <article className="ehr-summary-card">
-              <span>Total Events</span>
-              <strong>{orchestrationSummary.total}</strong>
-            </article>
-            <article className="ehr-summary-card">
-              <span>New</span>
-              <strong>{orchestrationSummary.newCount}</strong>
-            </article>
-            <article className="ehr-summary-card">
-              <span>Failed</span>
-              <strong>{orchestrationSummary.failedCount}</strong>
-            </article>
-            <article className="ehr-summary-card">
-              <span>Processed</span>
-              <strong>{orchestrationSummary.processedCount}</strong>
-            </article>
-            <article className="ehr-summary-card">
-              <span>Ignored</span>
-              <strong>{orchestrationSummary.ignoredCount}</strong>
-            </article>
-            <article className="ehr-summary-card">
-              <span>Event Types</span>
-              <strong>{orchestrationSummary.uniqueEventTypes}</strong>
-            </article>
-            <article className="ehr-summary-card">
-              <span>Ownership Rules</span>
-              <strong>{orchestrationSummary.ownershipRulesCount}</strong>
-            </article>
+          <div className="pv-stats orchestration-web-stats" style={{ marginBottom: 14 }}>
+            {[
+              ["Ownership Rules", orchestrationSummary.ownershipRulesCount, "#16a34a"],
+              ["Automation Active", "Yes", "#2563eb"],
+              ["Latency", "< 2s", "#7c3aed"],
+              ["Event Streams", "Live", "#0891b2"],
+            ].map(([label, value, color]) => (
+              <article className="pv-stat-card" style={{ borderLeftColor: String(color) }} key={String(label)}>
+                <p className="pv-stat-label">{label}</p>
+                <p className="pv-stat-value">{value}</p>
+              </article>
+            ))}
           </div>
 
-          <section className="reporting-visual-grid">
-            <article className="reporting-visual-card">
-              <div className="reporting-table-header">
-                <h3>Top Event Types</h3>
-                <p>Highest-volume orchestration events in current filter scope.</p>
+          <section style={{ marginBottom: 14 }}>
+            <div className="pv-table-meta">
+              <div>
+                <div className="pv-title" style={{ fontSize: "0.9rem" }}>
+                  Recent Orchestration Events
+                </div>
               </div>
-              <div className="reporting-bar-chart">
-                {orchestrationSummary.topEventTypes.map((row: any) => {
-                  const percent = Math.max(
-                    2,
-                    Math.round((Number(row.value || 0) / orchestrationTopEventMax) * 100),
-                  );
-                  return (
-                    <div className="reporting-bar-row" key={`${row.label}-${row.value}`}>
-                      <span className="reporting-bar-label">{String(row.label || "-")}</span>
-                      <div className="reporting-bar-track">
-                        <div className="reporting-bar-fill alt" style={{ width: `${percent}%` }} />
-                      </div>
-                      <span className="reporting-bar-value">{Number(row.value || 0)}</span>
-                    </div>
-                  );
-                })}
-                {!orchestrationLoading && orchestrationSummary.topEventTypes.length === 0 && (
-                  <p className="pv-empty" style={{ margin: 0 }}>
-                    No event type data available.
-                  </p>
-                )}
-              </div>
-            </article>
-
-            <article className="reporting-visual-card">
-              <div className="reporting-table-header">
-                <h3>Ownership Rules</h3>
-                <p>Entity ownership matrix enforced by orchestration validation.</p>
-              </div>
-              <div className="pv-table-wrap">
-                <table className="pv-table">
-                  <thead>
-                    <tr>
-                      <th>Entity Type</th>
-                      <th>Owner Module</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {Object.entries(orchestrationOwnershipRules || {})
-                      .slice(0, 12)
-                      .map(([entityType, owner]) => (
-                        <tr key={`orch-owner-${entityType}`}>
-                          <td className="pv-name">{entityType}</td>
-                          <td>{String(owner || "-")}</td>
-                        </tr>
-                      ))}
-                    {!orchestrationLoading &&
-                      Object.keys(orchestrationOwnershipRules || {}).length === 0 && (
-                        <tr>
-                          <td colSpan={2} className="pv-empty">
-                            No ownership rules available.
-                          </td>
-                        </tr>
-                      )}
-                  </tbody>
-                </table>
-              </div>
-            </article>
-          </section>
-
-          <section className="pv-table-wrap" style={{ marginBottom: 14 }}>
-            <table className="pv-table">
-              <thead>
-                <tr>
-                  <th>Occurred At</th>
-                  <th>Event Type</th>
-                  <th>Status</th>
-                  <th>Source Module</th>
-                  <th>Data Owner</th>
-                  <th>Entity</th>
-                  <th>Patient</th>
-                  <th>Visit</th>
-                </tr>
-              </thead>
-              <tbody>
-                {orchestrationEvents.slice(0, 50).map((row: any, index: number) => (
-                  <tr key={`orchestration-event-${row?.id || index}`}>
-                    <td>
-                      {String(row?.occurredAt || row?.createdAt || "")
-                        .replace("T", " ")
-                        .slice(0, 16) || "-"}
-                    </td>
-                    <td className="pv-name">{String(row?.eventType || "-")}</td>
-                    <td>
-                      <span className="pv-badge">{String(row?.status || "-")}</span>
-                    </td>
-                    <td>{String(row?.sourceModule || "-")}</td>
-                    <td>{String(row?.dataOwner || "-")}</td>
-                    <td>{`${String(row?.entityType || "-")} / ${String(row?.entityId || "-")}`}</td>
-                    <td>{String(row?.payload?.patientId || row?.patientId || "-")}</td>
-                    <td>{String(row?.payload?.visitId || row?.visitId || "-")}</td>
-                  </tr>
-                ))}
-                {!orchestrationLoading && orchestrationEvents.length === 0 && (
+              <span className="pv-badge">{orchestrationEvents.length} records</span>
+            </div>
+            <div className="pv-table-wrap">
+              <table className="pv-table">
+                <thead>
                   <tr>
-                    <td colSpan={8} className="pv-empty">
-                      No orchestration events found.
-                    </td>
+                    <th>Event</th>
+                    <th>Module</th>
+                    <th>Status</th>
+                    <th>When</th>
                   </tr>
-                )}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {orchestrationEvents.slice(0, 50).map((row: any, index: number) => (
+                    <tr key={`orchestration-event-${row?.id || index}`}>
+                      <td className="pv-name">{String(row?.eventType || row?.eventName || "-")}</td>
+                      <td>{String(row?.sourceModule || "-")}</td>
+                      <td>
+                        <span className="pv-badge">{String(row?.status || "-")}</span>
+                      </td>
+                      <td>
+                        {String(row?.occurredAt || row?.createdAt || "")
+                          .replace("T", " ")
+                          .slice(0, 16) || "-"}
+                      </td>
+                    </tr>
+                  ))}
+                  {!orchestrationLoading && orchestrationEvents.length === 0 && (
+                    <tr>
+                      <td colSpan={4} className="pv-empty">
+                        No orchestration events found.
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
           </section>
         </>
       )}
@@ -24747,141 +29009,113 @@ export function WorkflowModuleView({
 
       {isPharmacyModule && (
         <>
-          <div className="pv-header" style={{ marginBottom: 10 }}>
+          <div className="pv-header">
             <div>
-              <p className="pv-subtitle">
-                Clinical pharmacy control center: prescription queue, safety review, dispensing,
-                stock risk, and compliance visibility.
-              </p>
+              <h2 className="pv-title">Pharmacy Dispensing</h2>
+              <p className="pv-subtitle">Prescription queue, medication reconciliation, and fulfillment</p>
             </div>
-            <button
-              type="button"
-              className="btn-primary"
-              onClick={() => void loadPharmacyControlCenter()}
-              disabled={rxLoading}
-            >
-              {rxLoading ? "Refreshing..." : "Refresh Pharmacy"}
-            </button>
+            <div className="module-actions">
+              {formsForDisplay.map((moduleForm) => (
+                <button
+                  key={moduleForm.id}
+                  type="button"
+                  onClick={() => openWorkflowFormWithPrefill(moduleForm.id)}
+                >
+                  <WorkflowActionIcon type={getPharmacyFormIconType(moduleForm.title)} />
+                  {cleanWorkflowFormTitle(moduleForm.title)}
+                </button>
+              ))}
+            </div>
           </div>
 
           {rxError && <div className="workflow-notice is-error">{rxError}</div>}
 
-          <div className="ehr-summary-grid" style={{ marginBottom: 14 }}>
-            <article className="ehr-summary-card">
-              <span>Catalog Items</span>
-              <strong>{pharmacySummary.catalogItems}</strong>
-            </article>
-            <article className="ehr-summary-card">
-              <span>Prescriptions</span>
-              <strong>{pharmacySummary.totalPrescriptions}</strong>
-            </article>
-            <article className="ehr-summary-card">
-              <span>Pending</span>
-              <strong>{pharmacySummary.pendingPrescriptions}</strong>
-            </article>
-            <article className="ehr-summary-card">
-              <span>In Review</span>
-              <strong>{pharmacySummary.inReview}</strong>
-            </article>
-            <article className="ehr-summary-card">
-              <span>Dispensed Today</span>
-              <strong>{pharmacySummary.dispensedToday}</strong>
-            </article>
-            <article className="ehr-summary-card">
-              <span>Qty Dispensed Today</span>
-              <strong>{pharmacySummary.quantityDispensedToday}</strong>
-            </article>
-            <article className="ehr-summary-card">
-              <span>Revenue Today</span>
-              <strong>{formatKes(pharmacySummary.revenueToday)}</strong>
-            </article>
-            <article className="ehr-summary-card">
-              <span>Low Stock</span>
-              <strong>{pharmacySummary.lowStock}</strong>
-            </article>
-            <article className="ehr-summary-card">
-              <span>Near Expiry</span>
-              <strong>{pharmacySummary.nearExpiry}</strong>
-            </article>
-            <article className="ehr-summary-card">
-              <span>Controlled Dispenses</span>
-              <strong>{pharmacySummary.controlledDispensesToday}</strong>
-            </article>
+          <div className="pv-stats pharmacy-stats-grid">
+            {pharmacyStatCards.map((stat) => (
+              <article
+                key={stat.label}
+                className="pv-stat-card"
+                style={{ borderLeftColor: stat.color }}
+              >
+                <p className="pv-stat-label">{stat.label}</p>
+                <p className="pv-stat-value">{rxLoading ? "..." : stat.value}</p>
+              </article>
+            ))}
           </div>
 
-          <section className="pv-table-wrap" style={{ marginBottom: 14 }}>
-            <table className="pv-table">
-              <thead>
-                <tr>
-                  <th>Prescription ID</th>
-                  <th>Patient</th>
-                  <th>Medication</th>
-                  <th>Status</th>
-                  <th>Requested</th>
-                  <th>Dispensed</th>
-                </tr>
-              </thead>
-              <tbody>
-                {rxPrescriptions.slice(0, 12).map((row: any) => (
-                  <tr key={`rx-row-${row?.id}`}>
-                    <td className="pv-name">{String(row?.id || "-").slice(0, 12)}</td>
-                    <td>
-                      {`${row?.patient?.firstName || ""} ${row?.patient?.lastName || ""}`.trim() ||
-                        "-"}
-                    </td>
-                    <td>{String(row?.medication || "-")}</td>
-                    <td>
-                      <span className="pv-badge">
-                        {String(row?.normalizedStatus || row?.status || "-")}
-                      </span>
-                    </td>
-                    <td>{Number(row?.requestedQuantity || 0)}</td>
-                    <td>{Number(row?.dispensedQuantity || 0)}</td>
-                  </tr>
-                ))}
-                {!rxLoading && rxPrescriptions.length === 0 && (
-                  <tr>
-                    <td colSpan={6} className="pv-empty">
-                      No pharmacy prescriptions found.
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </section>
+          <div className="pv-search-bar pharmacy-search-row">
+            <div className="pv-search-wrap">
+              <WorkflowActionIcon type="search" className="pv-search-icon" />
+              <input
+                className="pv-search"
+                type="search"
+                value={rxSearch}
+                onChange={(event) => setRxSearch(event.target.value)}
+                placeholder="Search prescriptions"
+              />
+            </div>
+          </div>
 
-          <section className="pv-table-wrap" style={{ marginBottom: 14 }}>
+          <section className="pv-table-wrap pharmacy-table-wrap">
             <table className="pv-table">
               <thead>
                 <tr>
-                  <th>Dispense ID</th>
-                  <th>Medicine</th>
-                  <th>Batch</th>
-                  <th>Quantity</th>
-                  <th>Pharmacist</th>
-                  <th>Dispensed At</th>
+                  <th>Patient</th>
+                  <th>Drug</th>
+                  <th>Qty</th>
+                  <th>Status</th>
+                  {!isPosModule && <th>Actions</th>}
                 </tr>
               </thead>
               <tbody>
-                {rxDispenses.slice(0, 10).map((row: any) => (
-                  <tr key={`rx-dispense-${row?.id}`}>
-                    <td className="pv-name">{String(row?.id || "-").slice(0, 12)}</td>
-                    <td>{String(row?.medicine?.name || "-")}</td>
-                    <td>{String(row?.medicine?.batchNumber || "-")}</td>
-                    <td>{Number(row?.quantity || 0)}</td>
-                    <td>
-                      {`${row?.pharmacist?.firstName || ""} ${row?.pharmacist?.lastName || ""}`.trim() ||
-                        "-"}
-                    </td>
-                    <td>{row?.dispensedAt ? new Date(row.dispensedAt).toLocaleString() : "-"}</td>
-                  </tr>
-                ))}
-                {!rxLoading && rxDispenses.length === 0 && (
+                {rxLoading ? (
                   <tr>
-                    <td colSpan={6} className="pv-empty">
-                      No dispensing records found.
+                    <td colSpan={isPosModule ? 4 : 5} className="pv-empty">
+                      Loading prescriptions...
                     </td>
                   </tr>
+                ) : filteredPharmacyPrescriptions.length === 0 ? (
+                  <tr>
+                    <td colSpan={isPosModule ? 4 : 5} className="pv-empty">
+                      No pending prescriptions in Pharmacy.
+                    </td>
+                  </tr>
+                ) : (
+                  filteredPharmacyPrescriptions.map((row: any) => {
+                    const patientName =
+                      row?.patientName ||
+                      `${row?.patient?.firstName || ""} ${row?.patient?.lastName || ""}`.trim() ||
+                      "Patient";
+                    const dispenseForm =
+                      formsForDisplay.find((moduleForm) => /dispens|billing/i.test(moduleForm.title)) ||
+                      formsForDisplay[0];
+                    return (
+                      <tr key={`rx-row-${row?.id}`}>
+                        <td className="pv-name">{patientName}</td>
+                        <td>{String(row?.medication || row?.medicineName || "-")}</td>
+                        <td>{Number(row?.requestedQuantity || row?.quantity || row?.dispensedQuantity || 0)}</td>
+                        <td>
+                          <span className="pv-badge">
+                            {String(row?.normalizedStatus || row?.status || "Pending")}
+                          </span>
+                        </td>
+                        {!isPosModule && (
+                          <td>
+                            <button
+                              type="button"
+                              className="btn-primary"
+                              onClick={() =>
+                                dispenseForm &&
+                                openWorkflowFormWithPrefill(dispenseForm.id, getPharmacyPrescriptionPrefill(row))
+                              }
+                            >
+                              Dispense
+                            </button>
+                          </td>
+                        )}
+                      </tr>
+                    );
+                  })
                 )}
               </tbody>
             </table>
@@ -25041,7 +29275,7 @@ export function WorkflowModuleView({
         </>
       )}
 
-      {!isAppointmentModule && !disablePatientSearch && (
+      {!isWardModule && !isAppointmentModule && !isOpdFlowModule && !isLaboratoryModule && !isRadiologyModule && !isPharmacyModule && !isOtModule && !isMaternityModule && !isAccountingModule && !isCostAccountingModule && !isWorkforcePlanningModule && !isIcuModule && !isNicuModule && !isPhysioModule && !isNutritionModule && !isDentalModule && !isInfectionControlModule && !isCommunityHealthModule && !isConsentModule && !isReferralManagementModule && !isDocumentManagementModule && !isMessagingModule && !isBiomedicalModule && !isHomeCareModule && !isClinicalResearchModule && !isCdssModule && !isIctModule && !isNursingModule && !isNursingAdminModule && !isMedicalDirectorModule && !isRevenueCycleModule && !isOrchestrationModule && !disablePatientSearch && (
         <div className="workflow-top-search">
           <input
             className="pv-search"
@@ -25060,284 +29294,322 @@ export function WorkflowModuleView({
 
       {isWardModule && (
         <>
-          <div className="pv-header" style={{ marginBottom: 10 }}>
+          <div className="patients-view bed-ward-view">
+          <div className="pv-header">
             <div>
-              <p className="pv-subtitle">Manage wards and bed allocations.</p>
+              <div className="pv-title">
+                <WorkflowActionIcon type="admission" />
+                Bed & Ward Control
+              </div>
+              <div className="pv-subtitle">Live occupancy, housekeeping readiness, and ward bed map</div>
             </div>
-            <button
-              className="btn-primary"
-              type="button"
-              onClick={() => setShowCreateWard((v) => !v)}
-            >
-              {showCreateWard ? "Close" : "Create New Ward"}
-            </button>
+            <div className="module-actions">
+              <button
+                type="button"
+                className={wardViewMode === "map" ? "is-active" : ""}
+                onClick={() => setWardViewMode("map")}
+              >
+                <WorkflowActionIcon type="activity" /> View Map
+              </button>
+              <button
+                type="button"
+                className={wardViewMode === "table" ? "is-active" : ""}
+                onClick={() => setWardViewMode("table")}
+              >
+                <WorkflowActionIcon type="form" /> Table View
+              </button>
+              <button
+                type="button"
+                className={activeFormId === "ward_configuration" && isFormPopupOpen ? "is-active" : ""}
+                onClick={() => openWorkflowForm("ward_configuration")}
+              >
+                <WorkflowActionIcon type="settings" /> Ward Configuration
+              </button>
+              <button
+                type="button"
+                onClick={openBedStatusUpdateFromButton}
+              >
+                <WorkflowActionIcon type="refresh" /> Bed Status Update
+              </button>
+            </div>
           </div>
 
-          {showCreateWard && (
-            <div className="workflow-form-wrap" style={{ marginBottom: 14 }}>
-              <form className="workflow-form" onSubmit={handleCreateWard}>
-                <div className="workflow-form-header">
-                  <h3>Create New Ward</h3>
-                  <p>Add available ward and allocate number of beds.</p>
+          <div className="pv-stats">
+            <div className="pv-stat-card" style={{ borderLeftColor: "#1e3a8a" }}>
+              <p className="pv-stat-label">Beds Total</p>
+              <p className="pv-stat-value">{wardStats.total}</p>
+            </div>
+            <div className="pv-stat-card" style={{ borderLeftColor: "#dc2626" }}>
+              <p className="pv-stat-label">Occupied</p>
+              <p className="pv-stat-value">{wardStats.occupied}</p>
+            </div>
+            <div className="pv-stat-card" style={{ borderLeftColor: "#0d9488" }}>
+              <p className="pv-stat-label">Ready</p>
+              <p className="pv-stat-value">{wardStats.ready}</p>
+            </div>
+            <div className="pv-stat-card" style={{ borderLeftColor: "#7c3aed" }}>
+              <p className="pv-stat-label">Wards</p>
+              <p className="pv-stat-value">{wardStats.wards}</p>
+            </div>
+          </div>
+
+          <div className="pv-search-bar">
+            <div className="pv-search-wrap">
+              <WorkflowActionIcon type="search" />
+              <input
+                className="pv-search"
+                placeholder="Search wards"
+                value={wardSearch}
+                onChange={(event) => setWardSearch(event.target.value)}
+              />
+            </div>
+          </div>
+
+          {wardViewMode === "map" ? (
+            <section className="bed-map-board">
+              <div className="bed-map-toolbar">
+                <div className="bed-map-legend">
+                  <span><i className="bed-dot empty" /> Empty bed</span>
+                  <span><i className="bed-dot occupied" /> Occupied bed</span>
+                  <span><i className="bed-dot cleaning" /> Cleaning / maintenance</span>
                 </div>
-                <div className="workflow-form-grid">
-                  <label className="workflow-field">
-                    <span>Ward Name *</span>
-                    <input
-                      className="form-input"
-                      value={newWardName}
-                      onChange={(e) => setNewWardName(e.target.value)}
-                      placeholder="General Ward A"
-                      required
-                    />
-                  </label>
-                  <label className="workflow-field">
-                    <span>Ward Type *</span>
-                    <select
-                      className="form-input"
-                      value={newWardType}
-                      onChange={(e) => setNewWardType(e.target.value as "MEN" | "WOMEN" | "BOTH")}
+                <div className="bed-map-filters" aria-label="Filter bed map">
+                  {[
+                    ["all", "All beds"],
+                    ["empty", "Empty"],
+                    ["occupied", "Occupied"],
+                  ].map(([key, label]) => (
+                    <button
+                      key={key}
+                      type="button"
+                      className={wardBedFilter === key ? "active" : ""}
+                      onClick={() => setWardBedFilter(key as typeof wardBedFilter)}
                     >
-                      <option value="MEN">Men</option>
-                      <option value="WOMEN">Women</option>
-                      <option value="BOTH">Both</option>
-                    </select>
-                  </label>
-                  <label className="workflow-field">
-                    <span>Number of Beds *</span>
-                    <input
-                      className="form-input"
-                      type="number"
-                      min={1}
-                      value={newWardBeds}
-                      onChange={(e) => setNewWardBeds(e.target.value)}
-                      required
-                    />
-                  </label>
+                      {label}
+                    </button>
+                  ))}
                 </div>
-                <div className="modal-footer" style={{ marginTop: 12 }}>
-                  <button className="btn-primary" type="submit" disabled={wardSaving}>
-                    {wardSaving ? "Creating..." : "Create Ward"}
-                  </button>
-                </div>
-              </form>
-            </div>
-          )}
-
-          <section className="ward-map-card">
-            <div className="ward-map-card-head">
-              <div>
-                <h3>
-                  View Map <span className="ward-map-count">{wards.length}</span>
-                </h3>
-                <p>Select a ward to view all beds, occupancy, and bed positions.</p>
-                <input
-                  className="ward-map-search"
-                  type="text"
-                  placeholder="Search ward..."
-                  value={wardSearch}
-                  onChange={(e) => setWardSearch(e.target.value)}
-                />
-                {!((wardSearch.trim() || search.trim()).length > 0) && wards.length > 4 && (
-                  <p className="ward-map-hint">
-                    Showing 4 wards. Search to find other wards.
-                  </p>
-                )}
               </div>
-              <div className="ward-map-mode-switch">
-                <button
-                  type="button"
-                  className={`btn-cancel ${wardMapMode === "compact" ? "is-active" : ""}`}
-                  onClick={() => setWardMapMode("compact")}
-                >
-                  Compact
-                </button>
-                <button
-                  type="button"
-                  className={`btn-cancel ${wardMapMode === "detailed" ? "is-active" : ""}`}
-                  onClick={() => setWardMapMode("detailed")}
-                >
-                  Detailed
-                </button>
-              </div>
-            </div>
 
-            <div className="ward-map-ward-list">
-              {visibleWardsForMap.map((ward) => {
-                const stats = getWardOccupancy(ward);
-                const active = selectedWardMap?.id === ward.id;
-                return (
-                  <button
-                    key={`card-${ward.id}`}
-                    type="button"
-                    className={`ward-map-ward-item ${active ? "is-active" : ""}`}
-                    onClick={() => toggleWardMap(ward)}
-                  >
-                    <div className="ward-map-ward-item-title">
-                      <strong>{ward.name}</strong>
-                      <span>{String(ward.type || "BOTH").toUpperCase()}</span>
-                    </div>
-                    <div className="ward-map-ward-item-meta">
-                      <span>Total: {stats.total}</span>
-                      <span>Occupied: {stats.occupied}</span>
-                      <span>Vacant: {stats.vacant}</span>
-                    </div>
-                  </button>
-                );
-              })}
-              {!wardLoading && visibleWardsForMap.length === 0 && (
-                <div className="pv-empty">
-                  {wards.length === 0
-                    ? "No wards created yet."
-                    : "No ward matches your search."}
-                </div>
-              )}
-            </div>
-
-            {selectedWardMap ? (
-              <>
-                {(() => {
-                  const occupiedBeds = selectedWardBeds.filter(
-                    (bed: any) => String(bed.status || "").toUpperCase() === "OCCUPIED",
-                  ).length;
-                  const vacantBeds = selectedWardBeds.length - occupiedBeds;
+              <div className="bed-map-wards">
+                {visibleWardsForMap.map((ward) => {
+                  const beds = getWardBedsForMap(ward)
+                    .slice()
+                    .sort((a: any, b: any) =>
+                      String(a.bedNumber || "").localeCompare(String(b.bedNumber || ""), undefined, {
+                        numeric: true,
+                        sensitivity: "base",
+                      }),
+                    );
+                  const visibleBeds = filterWardBedsForMap(beds);
+                  const wardKey = String(ward?.id || ward?.name || "");
+                  const collapsed = Boolean(collapsedWardMap[wardKey]);
                   return (
-                    <div className="ward-map-summary">
-                      <span className="pv-badge badge-female">Occupied: {occupiedBeds}</span>
-                      <span className="pv-badge badge-male">Vacant: {vacantBeds}</span>
-                      <span className="pv-badge">Total: {selectedWardBeds.length}</span>
-                    </div>
-                  );
-                })()}
-                <div
-                  className="ward-map-grid"
-                  style={{
-                    gridTemplateColumns: `repeat(${selectedWardColumns}, minmax(110px, 1fr))`,
-                  }}
-                >
-                  {selectedWardBeds.map((bed: any, index: number) => {
-                    const isOccupied =
-                      String(bed.status || "").toUpperCase() === "OCCUPIED";
-                    const occupant = getBedOccupantMeta(bed);
-                    const tooltipText =
-                      wardMapMode === "detailed" && isOccupied
-                        ? `Code: ${occupant.patientCode || "-"} | Admission: ${
-                            occupant.admissionDate || "-"
-                          } ${occupant.admissionTime || "--:--"}`
-                        : "";
-                    return (
-                      <article
-                        key={bed.id || bed.bedNumber}
-                        className={`ward-bed-card ${isOccupied ? "is-occupied" : "is-vacant"} ${
-                          tooltipText ? "has-tooltip" : ""
-                        }`}
-                        data-tooltip={tooltipText}
-                        title={tooltipText || undefined}
+                    <article key={wardKey} className="bed-map-ward">
+                      <button
+                        type="button"
+                        className="bed-map-ward-head"
+                        onClick={() => toggleWardCollapse(ward)}
+                        aria-expanded={!collapsed}
                       >
-                        <div className="ward-bed-head">
-                          <strong>{bed.bedNumber || "Bed"}</strong>
-                          <span className="ward-bed-position">
-                            {getBedPositionLabel(index, selectedWardColumns)}
-                          </span>
+                        <div>
+                          <h3>{ward.name}</h3>
+                          <p>{ward.type || ward.wardType || "General ward"}</p>
                         </div>
-                        <span>{isOccupied ? "Occupied" : "Vacant"}</span>
-                        {wardMapMode === "detailed" && (
-                          <div className="ward-bed-occupant-row">
-                            <small className="ward-bed-occupant">
-                              {isOccupied
-                                ? `Patient: ${occupant.name || "Unknown"}`
-                                : "Patient: -"}
-                            </small>
-                            {isOccupied && occupant.patientCode ? (
+                        <div className="bed-map-ward-actions">
+                          <span>{beds.filter((bed: any) => isWardBedOccupied(bed)).length}/{beds.length || ward.totalBeds || ward.capacity || 0} occupied</span>
+                          <WorkflowActionIcon type={collapsed ? "transfer" : "form"} />
+                        </div>
+                      </button>
+                      {!collapsed ? (
+                        <div className="bed-map-grid">
+                          {visibleBeds.length === 0 ? (
+                            <div className="bed-map-empty">No beds match this filter.</div>
+                          ) : visibleBeds.map((bed: any) => {
+                            const occupied = isWardBedOccupied(bed);
+                            const status = getWardBedStatusLabel(bed);
+                            const cleaning = isWardBedCleaning(bed);
+                            const occupant = getBedOccupantMeta(bed);
+                            const days = getWardBedDaysOccupied(bed);
+                            return (
                               <button
                                 type="button"
-                                className="ward-bed-copy-btn"
-                                onClick={(event) => {
-                                  event.stopPropagation();
-                                  void copyPatientCode(occupant.patientCode);
-                                }}
-                                title={`Copy code ${occupant.patientCode}`}
+                                key={bed.id || bed.bedNumber}
+                                className={`bed-tile ${occupied ? "occupied" : cleaning ? "cleaning" : "empty"}`}
+                                onClick={() => openWardBedEditor(ward, bed)}
                               >
-                                Copy Code
+                                <div className="bed-tile-top">
+                                  <strong><WorkflowActionIcon type="admission" /> {bed.bedNumber || "Bed"}</strong>
+                                  <span>{status}</span>
+                                </div>
+                                {occupied ? (
+                                  <div className="bed-occupant">
+                                    <b>{occupant.firstName || occupant.name || "Patient"}</b>
+                                    <small>{days} day{days === 1 ? "" : "s"} occupied</small>
+                                  </div>
+                                ) : (
+                                  <div className="bed-occupant muted">
+                                    <b>Empty</b>
+                                    <small>Ready for allocation</small>
+                                  </div>
+                                )}
                               </button>
-                            ) : null}
-                          </div>
-                        )}
-                      </article>
-                    );
-                  })}
-                </div>
-              </>
-            ) : (
-              <div className="pv-empty" style={{ marginTop: 10 }}>
-                Select a ward from above to view its bed map.
+                            );
+                          })}
+                        </div>
+                      ) : null}
+                    </article>
+                  );
+                })}
+                {!wardLoading && visibleWardsForMap.length === 0 && (
+                  <div className="bed-map-empty">
+                    {wards.length === 0 ? "No wards created yet." : "No ward matches your search."}
+                  </div>
+                )}
               </div>
-            )}
-          </section>
-
+            </section>
+          ) : (
           <div className="pv-table-wrap" style={{ marginBottom: 14 }}>
             <table className="pv-table">
               <thead>
                 <tr>
                   <th>Ward</th>
-                  <th>Type</th>
-                  <th>Capacity</th>
                   <th>Occupied</th>
+                  <th>Available</th>
                   <th>Status</th>
-                  <th>Actions</th>
                 </tr>
               </thead>
               <tbody>
-                {wards.map((ward) => {
-                  const occupied = Number(
-                    (ward.beds || []).filter(
-                      (bed: any) => String(bed.status || "").toUpperCase() === "OCCUPIED",
-                    ).length,
-                  );
-                  const capacity = Number(ward.capacity || (ward.beds || []).length || 0);
+                {wardLoading ? (
+                  <tr>
+                    <td colSpan={4} className="pv-empty">
+                      Loading ward data...
+                    </td>
+                  </tr>
+                ) : visibleWardsForMap.length === 0 ? (
+                  <tr>
+                    <td colSpan={4} className="pv-empty">
+                      No wards found.
+                    </td>
+                  </tr>
+                ) : visibleWardsForMap.map((ward) => {
+                  const occupancy = getWardOccupancy(ward);
                   return (
-                    <tr key={ward.id} className="ward-row-clickable" onClick={() => toggleWardMap(ward)}>
+                    <tr key={ward.id || ward.name}>
                       <td className="pv-name">{ward.name}</td>
-                      <td>{String(ward.type || "BOTH").toUpperCase()}</td>
-                      <td>{capacity}</td>
-                      <td>{occupied}</td>
+                      <td>{occupancy.occupied}</td>
+                      <td>{occupancy.vacant}</td>
                       <td>
-                        <span
-                          className={`pv-badge ${occupied >= capacity ? "badge-female" : "badge-male"}`}
-                        >
-                          {occupied >= capacity ? "Full" : "Available"}
+                        <span className="pv-badge">
+                          {occupancy.vacant > 0 ? "Available" : "Full"}
                         </span>
-                      </td>
-                      <td>
-                        <button
-                          type="button"
-                          className="btn-cancel"
-                          onClick={(event) => {
-                            event.stopPropagation();
-                            toggleWardMap(ward);
-                          }}
-                        >
-                          View Map
-                        </button>
                       </td>
                     </tr>
                   );
                 })}
-                {!wardLoading && wards.length === 0 && (
-                  <tr>
-                    <td colSpan={6} className="pv-empty">
-                      No wards created yet.
-                    </td>
-                  </tr>
-                )}
               </tbody>
             </table>
           </div>
+          )}
 
+          {editingWardBed && (
+            <div className="modal-overlay" onClick={() => !bedStatusSaving && setEditingWardBed(null)}>
+              <div
+                className="modal-box workflow-form-modal ward-bed-edit-modal"
+                onClick={(event) => event.stopPropagation()}
+              >
+                <div className="modal-header">
+                  <div className="ipd-form-title-wrap">
+                    <span className="ipd-form-icon">
+                      <WorkflowActionIcon type="admission" />
+                    </span>
+                    <div>
+                      <span className="ipd-form-kicker">{editingWardBed.ward?.name || "Bed & Ward"}</span>
+                      <h3>Bed Status Update</h3>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    className="modal-close"
+                    onClick={() => setEditingWardBed(null)}
+                    disabled={bedStatusSaving}
+                  >
+                    x
+                  </button>
+                </div>
+                <form className="workflow-form" onSubmit={handleWardBedStatusSave}>
+                  <div className="workflow-form-header">
+                    <h3>{editingWardBed.bed?.bedNumber || "Selected Bed"}</h3>
+                    <p>Update bed availability, housekeeping notes, and expected readiness.</p>
+                  </div>
+                  <div className="workflow-form-grid">
+                    <label className="workflow-field">
+                      <span>Bed number *</span>
+                      <input
+                        className="form-input"
+                        value={editingWardBed.bed?.bedNumber || ""}
+                        readOnly
+                      />
+                    </label>
+                    <label className="workflow-field">
+                      <span>Status *</span>
+                      <select
+                        className="form-input"
+                        value={bedStatusValue}
+                        onChange={(event) => setBedStatusValue(event.target.value)}
+                        required
+                      >
+                        <option value="Available">Available</option>
+                        <option value="Occupied">Occupied</option>
+                        <option value="Cleaning">Cleaning</option>
+                        <option value="Maintenance">Maintenance</option>
+                        <option value="Reserved">Reserved</option>
+                        <option value="Closed">Closed</option>
+                      </select>
+                    </label>
+                    <label className="workflow-field">
+                      <span>Estimated ready time</span>
+                      <input
+                        className="form-input"
+                        type="time"
+                        value={bedReadyTime}
+                        onChange={(event) => setBedReadyTime(event.target.value)}
+                      />
+                    </label>
+                    <label className="workflow-field workflow-field-full">
+                      <span>Housekeeping notes</span>
+                      <textarea
+                        className="form-input"
+                        rows={4}
+                        value={bedHousekeepingNotes}
+                        onChange={(event) => setBedHousekeepingNotes(event.target.value)}
+                        placeholder="Special cleaning, repair, linen, or isolation notes"
+                      />
+                    </label>
+                  </div>
+                  <div className="modal-footer" style={{ marginTop: 12 }}>
+                    <button
+                      type="button"
+                      className="btn-cancel"
+                      onClick={() => setEditingWardBed(null)}
+                      disabled={bedStatusSaving}
+                    >
+                      Cancel
+                    </button>
+                    <button className="btn-primary workflow-submit-button" type="submit" disabled={bedStatusSaving}>
+                      {bedStatusSaving ? "Saving..." : "Update Bed"}
+                    </button>
+                  </div>
+                </form>
+              </div>
+            </div>
+          )}
+
+          </div>
         </>
       )}
 
-      {!isAppointmentModule && !isInpatientModule && !disablePatientSearch && !!search.trim() && (
+      {!isWardModule && !isAppointmentModule && !isInpatientModule && !isOpdFlowModule && !isLaboratoryModule && !isRadiologyModule && !isPharmacyModule && !isOtModule && !isMaternityModule && !isNicuModule && !isPhysioModule && !isNutritionModule && !isDentalModule && !isInfectionControlModule && !isCommunityHealthModule && !isConsentModule && !isReferralManagementModule && !isDocumentManagementModule && !isMessagingModule && !isBiomedicalModule && !isHomeCareModule && !isClinicalResearchModule && !isCdssModule && !isCostAccountingModule && !isNursingModule && !isRevenueCycleModule && !disablePatientSearch && !!search.trim() && (
         <div className="workflow-search-results">
           {searchResults.map((patient) => {
             const checkedIn = Boolean(patientCheckinMap[patient.id]);
@@ -25380,7 +29652,7 @@ export function WorkflowModuleView({
         </div>
       )}
 
-      {!isAppointmentModule && !isInpatientModule && !disablePatientSearch && !!search.trim() && selectedPatient && (
+      {!isWardModule && !isAppointmentModule && !isInpatientModule && !isOpdFlowModule && !isLaboratoryModule && !isRadiologyModule && !isPharmacyModule && !isOtModule && !isMaternityModule && !isNicuModule && !isPhysioModule && !isNutritionModule && !isDentalModule && !isInfectionControlModule && !isCommunityHealthModule && !isConsentModule && !isReferralManagementModule && !isDocumentManagementModule && !isMessagingModule && !isBiomedicalModule && !isHomeCareModule && !isClinicalResearchModule && !isCdssModule && !isCostAccountingModule && !isNursingModule && !isRevenueCycleModule && !disablePatientSearch && !!search.trim() && selectedPatient && (
         <div className="workflow-patient-preview">
           <h3>Patient Details</h3>
           <div className="workflow-queue-badge">Current Queue: {getPatientQueueLabel(selectedPatient)}</div>
@@ -25434,7 +29706,7 @@ export function WorkflowModuleView({
         </div>
       )}
 
-      {!isWardModule && !isInpatientModule && !isAppointmentModule && (
+      {!isWardModule && !isInpatientModule && !isAppointmentModule && !isOpdFlowModule && !isLaboratoryModule && !isRadiologyModule && !isPharmacyModule && !isOtModule && !isMaternityModule && !isAccountingModule && !isCostAccountingModule && !isStrategicPlanningModule && !isOrchestrationModule && !isWorkforcePlanningModule && !isIcuModule && !isNicuModule && !isPhysioModule && !isNutritionModule && !isDentalModule && !isInfectionControlModule && !isCommunityHealthModule && !isConsentModule && !isReferralManagementModule && !isDocumentManagementModule && !isMessagingModule && !isBiomedicalModule && !isHomeCareModule && !isClinicalResearchModule && !isCdssModule && !isIctModule && !isNursingModule && !isNursingAdminModule && !isMedicalDirectorModule && !isRevenueCycleModule && (
         <div className="workflow-stage-grid">
           {module.stages.map((stage) => {
             const count = stageCounts.find((s) => s.stageId === stage.id)?.count || 0;
@@ -25453,7 +29725,7 @@ export function WorkflowModuleView({
         </div>
       )}
 
-      {!isInpatientModule && !isAppointmentModule && formsForDisplay.length > 0 && (
+      {!isWardModule && !isInpatientModule && !isAppointmentModule && !isOpdFlowModule && !isLaboratoryModule && !isRadiologyModule && !isPharmacyModule && !isOtModule && !isMaternityModule && !isAccountingModule && !isCostAccountingModule && !isStrategicPlanningModule && !isOrchestrationModule && !isWorkforcePlanningModule && !isIcuModule && !isNicuModule && !isPhysioModule && !isNutritionModule && !isDentalModule && !isInfectionControlModule && !isCommunityHealthModule && !isConsentModule && !isReferralManagementModule && !isDocumentManagementModule && !isMessagingModule && !isBiomedicalModule && !isHomeCareModule && !isClinicalResearchModule && !isCdssModule && !isIctModule && !isNursingModule && !isNursingAdminModule && !isMedicalDirectorModule && !isRevenueCycleModule && formsForDisplay.length > 0 && (
         <div className="workflow-form-tabs">
           {formsForDisplay.map((moduleForm) => (
             <button
@@ -25474,8 +29746,8 @@ export function WorkflowModuleView({
         </div>
       )}
 
-      <div className={`workflow-layout ${disablePatientSearch || isInpatientModule || isAppointmentModule ? "is-single" : ""}`}>
-        {!isAppointmentModule && !isInpatientModule && !disablePatientSearch && (
+      <div className={`workflow-layout ${disablePatientSearch || isWardModule || isInpatientModule || isAppointmentModule || isOpdFlowModule || isLaboratoryModule || isRadiologyModule || isPharmacyModule || isOtModule || isMaternityModule || isAccountingModule || isCostAccountingModule || isStrategicPlanningModule || isOrchestrationModule || isWorkforcePlanningModule || isIcuModule || isNicuModule || isPhysioModule || isNutritionModule || isDentalModule || isInfectionControlModule || isCommunityHealthModule || isConsentModule || isReferralManagementModule || isDocumentManagementModule || isMessagingModule || isBiomedicalModule || isHomeCareModule || isClinicalResearchModule || isCdssModule || isIctModule || isNursingModule || isNursingAdminModule || isMedicalDirectorModule || isRevenueCycleModule ? "is-single" : ""}`}>
+        {!isWardModule && !isAppointmentModule && !isInpatientModule && !isOpdFlowModule && !isLaboratoryModule && !isRadiologyModule && !isPharmacyModule && !isOtModule && !isMaternityModule && !isAccountingModule && !isCostAccountingModule && !isStrategicPlanningModule && !isOrchestrationModule && !isWorkforcePlanningModule && !isIcuModule && !isNicuModule && !isPhysioModule && !isNutritionModule && !isDentalModule && !isInfectionControlModule && !isCommunityHealthModule && !isConsentModule && !isReferralManagementModule && !isDocumentManagementModule && !isMessagingModule && !isBiomedicalModule && !isHomeCareModule && !isClinicalResearchModule && !isCdssModule && !isIctModule && !isNursingModule && !isNursingAdminModule && !isMedicalDirectorModule && !isRevenueCycleModule && !disablePatientSearch && (
           <div className="workflow-patients">
             <div className="workflow-panel-title">
               {module.id === 1 ? "Recent Registered (Latest 5)" : "Patients"}
@@ -25518,6 +29790,11 @@ export function WorkflowModuleView({
                       <WorkflowActionIcon type="form" />
                     </span>
                   )}
+                  {isWardModule && (
+                    <span className="ipd-form-icon">
+                      <WorkflowActionIcon type={getWardFormIconType(activeForm?.title || "")} />
+                    </span>
+                  )}
                   {isInpatientModule && (
                     <span className="ipd-form-icon">
                       <WorkflowActionIcon type={getWorkflowFormIconType(activeForm?.title || "")} />
@@ -25528,14 +29805,207 @@ export function WorkflowModuleView({
                       <WorkflowActionIcon type={getAppointmentFormIconType(activeForm?.title || "")} />
                     </span>
                   )}
+                  {isOpdFlowModule && (
+                    <span className="ipd-form-icon">
+                      <WorkflowActionIcon type={getOpdFormIconType(activeForm?.title || "")} />
+                    </span>
+                  )}
+                  {isLaboratoryModule && (
+                    <span className="ipd-form-icon">
+                      <WorkflowActionIcon type={getLaboratoryFormIconType(activeForm?.title || "")} />
+                    </span>
+                  )}
+                  {isRadiologyModule && (
+                    <span className="ipd-form-icon">
+                      <WorkflowActionIcon type={getRadiologyFormIconType(activeForm?.title || "")} />
+                    </span>
+                  )}
+                  {isPharmacyModule && (
+                    <span className="ipd-form-icon">
+                      <WorkflowActionIcon type={getPharmacyFormIconType(activeForm?.title || "")} />
+                    </span>
+                  )}
+                  {isOtModule && (
+                    <span className="ipd-form-icon">
+                      <WorkflowActionIcon type={getOtFormIconType(activeForm?.title || "")} />
+                    </span>
+                  )}
+                  {isBloodBankModule && (
+                    <span className="ipd-form-icon">
+                      <WorkflowActionIcon type={getBloodBankFormIconType(activeForm?.title || "")} />
+                    </span>
+                  )}
+                  {isMaternityModule && (
+                    <span className="ipd-form-icon">
+                      <WorkflowActionIcon type={getMaternityFormIconType(activeForm?.title || "")} />
+                    </span>
+                  )}
+                  {isAccountingModule && (
+                    <span className="ipd-form-icon">
+                      <WorkflowActionIcon type={getAccountingFormIconType(activeForm?.title || "")} />
+                    </span>
+                  )}
+                  {isWorkforcePlanningModule && (
+                    <span className="ipd-form-icon">
+                      <WorkflowActionIcon type="form" />
+                    </span>
+                  )}
+                  {isIcuModule && (
+                    <span className="ipd-form-icon">
+                      <WorkflowActionIcon type={getIcuFormIconType(activeForm?.title || "")} />
+                    </span>
+                  )}
+                  {isNicuModule && (
+                    <span className="ipd-form-icon">
+                      <WorkflowActionIcon type={getNicuFormIconType(activeForm?.title || "")} />
+                    </span>
+                  )}
+                  {isPhysioModule && (
+                    <span className="ipd-form-icon">
+                      <WorkflowActionIcon type={getPhysioFormIconType(activeForm?.title || "")} />
+                    </span>
+                  )}
+                  {isNutritionModule && (
+                    <span className="ipd-form-icon">
+                      <WorkflowActionIcon type={getNutritionFormIconType(activeForm?.title || "")} />
+                    </span>
+                  )}
+                  {isDentalModule && (
+                    <span className="ipd-form-icon">
+                      <WorkflowActionIcon type={activeFormTitle.toLowerCase().includes("treatment") ? "activity" : "form"} />
+                    </span>
+                  )}
+                  {isInfectionControlModule && (
+                    <span className="ipd-form-icon">
+                      <WorkflowActionIcon type={getInfectionFormIconType(activeForm?.title || "")} />
+                    </span>
+                  )}
+                  {isCommunityHealthModule && (
+                    <span className="ipd-form-icon">
+                      <WorkflowActionIcon type={getCommunityFormIconType(activeForm?.title || "")} />
+                    </span>
+                  )}
+                  {isConsentModule && (
+                    <span className="ipd-form-icon">
+                      <WorkflowActionIcon type={getConsentFormIconType(activeForm?.title || "")} />
+                    </span>
+                  )}
+                  {isReferralManagementModule && (
+                    <span className="ipd-form-icon">
+                      <WorkflowActionIcon type={getReferralFormIconType(activeForm?.title || "")} />
+                    </span>
+                  )}
+                  {isDocumentManagementModule && (
+                    <span className="ipd-form-icon">
+                      <WorkflowActionIcon type={getDocumentFormIconType(activeForm?.title || "")} />
+                    </span>
+                  )}
+                  {isMessagingModule && (
+                    <span className="ipd-form-icon">
+                      <WorkflowActionIcon type={getMessagingFormIconType(activeForm?.title || "")} />
+                    </span>
+                  )}
+                  {isBiomedicalModule && (
+                    <span className="ipd-form-icon">
+                      <WorkflowActionIcon type={getBiomedicalFormIconType(activeForm?.title || "")} />
+                    </span>
+                  )}
+                  {isHomeCareModule && (
+                    <span className="ipd-form-icon">
+                      <WorkflowActionIcon type={getHomeCareFormIconType(activeForm?.title || "")} />
+                    </span>
+                  )}
+                  {isClinicalResearchModule && (
+                    <span className="ipd-form-icon">
+                      <WorkflowActionIcon type={getClinicalResearchFormIconType(activeForm?.title || "")} />
+                    </span>
+                  )}
+                  {isCdssModule && (
+                    <span className="ipd-form-icon">
+                      <WorkflowActionIcon type={getCdssFormIconType(activeForm?.title || "")} />
+                    </span>
+                  )}
+                  {isIctModule && (
+                    <span className="ipd-form-icon">
+                      <WorkflowActionIcon type={getIctFormIconType(activeForm?.title || "")} />
+                    </span>
+                  )}
+                  {isNursingModule && (
+                    <span className="ipd-form-icon">
+                      <WorkflowActionIcon type="activity" />
+                    </span>
+                  )}
+                  {isNursingAdminModule && (
+                    <span className="ipd-form-icon">
+                      <WorkflowActionIcon type={getMatronFormIconType(activeForm?.title || "")} />
+                    </span>
+                  )}
+                  {isMedicalDirectorModule && (
+                    <span className="ipd-form-icon">
+                      <WorkflowActionIcon type={getMedicalDirectorFormIconType(activeForm?.title || "")} />
+                    </span>
+                  )}
+                  {isRevenueCycleModule && (
+                    <span className="ipd-form-icon">
+                      <WorkflowActionIcon type={getRevenueCycleFormIconType(activeForm?.title || "")} />
+                    </span>
+                  )}
+                  {isCostAccountingModule && (
+                    <span className="ipd-form-icon">
+                      <WorkflowActionIcon type={getCostAccountingFormIconType(activeForm?.title || "")} />
+                    </span>
+                  )}
+                  {isStrategicPlanningModule && (
+                    <span className="ipd-form-icon">
+                      <WorkflowActionIcon type={getExecutiveFormIconType(activeForm?.title || "")} />
+                    </span>
+                  )}
+                  {isOrchestrationModule && (
+                    <span className="ipd-form-icon">
+                      <WorkflowActionIcon type={getOrchestrationFormIconType(activeForm?.title || "")} />
+                    </span>
+                  )}
                   <div>
                     {isRegistrationModule && <span className="ipd-form-kicker">Patient Registry</span>}
+                    {isWardModule && <span className="ipd-form-kicker">Bed & Ward Control</span>}
                     {isInpatientModule && <span className="ipd-form-kicker">Inpatient Management</span>}
                     {isAppointmentModule && <span className="ipd-form-kicker">Appointments & Schedules</span>}
-                    <h3>{cleanWorkflowFormTitle(activeForm?.title || "Module Form")}</h3>
+                    {isOpdFlowModule && <span className="ipd-form-kicker">Outpatient Management</span>}
+                    {isLaboratoryModule && <span className="ipd-form-kicker">Lab Services Terminal</span>}
+                    {isRadiologyModule && <span className="ipd-form-kicker">Radiology Imaging Desk</span>}
+                    {isPharmacyModule && <span className="ipd-form-kicker">Pharmacy Dispensing</span>}
+                    {isOtModule && <span className="ipd-form-kicker">Operating Theatre</span>}
+                    {isBloodBankModule && <span className="ipd-form-kicker">Blood Bank</span>}
+                    {isMaternityModule && <span className="ipd-form-kicker">Maternity</span>}
+                    {isAccountingModule && <span className="ipd-form-kicker">Financial Accounting</span>}
+                    {isWorkforcePlanningModule && <span className="ipd-form-kicker">Workforce Planning</span>}
+                    {isIcuModule && <span className="ipd-form-kicker">ICU</span>}
+                    {isNicuModule && <span className="ipd-form-kicker">Neonatal ICU (NICU)</span>}
+                    {isPhysioModule && <span className="ipd-form-kicker">Physiotherapy & Rehabilitation</span>}
+                    {isNutritionModule && <span className="ipd-form-kicker">Nutrition & Dietetics</span>}
+                    {isDentalModule && <span className="ipd-form-kicker">Dental</span>}
+                    {isInfectionControlModule && <span className="ipd-form-kicker">Infection Control & CSSD</span>}
+                    {isCommunityHealthModule && <span className="ipd-form-kicker">Community Health & CHW</span>}
+                    {isConsentModule && <span className="ipd-form-kicker">Consent Management</span>}
+                    {isReferralManagementModule && <span className="ipd-form-kicker">Referral Management</span>}
+                    {isDocumentManagementModule && <span className="ipd-form-kicker">Document Management</span>}
+                    {isMessagingModule && <span className="ipd-form-kicker">SMS & WhatsApp Messaging</span>}
+                    {isBiomedicalModule && <span className="ipd-form-kicker">Biomedical Equipment</span>}
+                    {isHomeCareModule && <span className="ipd-form-kicker">Home Care</span>}
+                    {isClinicalResearchModule && <span className="ipd-form-kicker">Clinical Research</span>}
+                    {isCdssModule && <span className="ipd-form-kicker">Clinical Decision Support</span>}
+                    {isIctModule && <span className="ipd-form-kicker">ICT & Security Operations</span>}
+                    {isNursingModule && <span className="ipd-form-kicker">Nursing Station</span>}
+                    {isNursingAdminModule && <span className="ipd-form-kicker">Nursing Administration (Matron)</span>}
+                    {isMedicalDirectorModule && <span className="ipd-form-kicker">Medical Director Dashboard</span>}
+                    {isRevenueCycleModule && <span className="ipd-form-kicker">Revenue Cycle</span>}
+                    {isCostAccountingModule && <span className="ipd-form-kicker">Cost Accounting</span>}
+                    {isStrategicPlanningModule && <span className="ipd-form-kicker">Executive Dashboard</span>}
+                    {isOrchestrationModule && <span className="ipd-form-kicker">Orchestration & Automation</span>}
+                    <h3>{isPhysioModule || isNutritionModule || isDentalModule || isInfectionControlModule ? activeForm?.title || "Module Form" : cleanWorkflowFormTitle(activeForm?.title || "Module Form")}</h3>
                   </div>
                 </div>
-                {(isRegistrationModule || isInpatientModule || isAppointmentModule) && (
+                {(isRegistrationModule || isWardModule || isInpatientModule || isAppointmentModule || isOpdFlowModule || isLaboratoryModule || isRadiologyModule || isPharmacyModule || isOtModule || isBloodBankModule || isMaternityModule || isAccountingModule || isCostAccountingModule || isStrategicPlanningModule || isOrchestrationModule || isWorkforcePlanningModule || isIcuModule || isNicuModule || isPhysioModule || isNutritionModule || isDentalModule || isInfectionControlModule || isCommunityHealthModule || isConsentModule || isReferralManagementModule || isDocumentManagementModule || isMessagingModule || isBiomedicalModule || isHomeCareModule || isClinicalResearchModule || isCdssModule || isIctModule || isNursingModule || isNursingAdminModule || isMedicalDirectorModule || isRevenueCycleModule) && (
                   <div className="ipd-form-meta">
                     <span>{activeForm?.fields.length || 0} fields</span>
                     <span>{activeFormRequiredCount} required</span>
@@ -25551,7 +30021,7 @@ export function WorkflowModuleView({
               </div>
           <form className="workflow-form" onSubmit={saveRecord}>
             <div className="workflow-form-header">
-              <h3>{cleanWorkflowFormTitle(activeForm?.title || "Module Form")}</h3>
+              <h3>{isPhysioModule || isNutritionModule || isDentalModule || isInfectionControlModule ? activeForm?.title || "Module Form" : cleanWorkflowFormTitle(activeForm?.title || "Module Form")}</h3>
               <p>
                 {selectedPatient
                   ? `Patient: ${selectedPatient.name}`
@@ -25561,6 +30031,70 @@ export function WorkflowModuleView({
                     ? "Session-based telemedicine workflow"
                   : isAppointmentModule
                     ? "Capture appointment scheduling details"
+                  : isOpdFlowModule
+                    ? "Capture outpatient workflow details"
+                  : isLaboratoryModule
+                    ? "Capture sample collection, result entry, and lab verification details"
+                  : isRadiologyModule
+                    ? "Capture imaging requests, scheduling, PACS metadata, findings, and report details"
+                  : isPharmacyModule
+                    ? "Capture prescription review, medication reconciliation, dispensing, and billing details"
+                  : isOtModule
+                    ? "Capture surgical booking, theatre workflow, safety checklist, and operative details"
+                  : isBloodBankModule
+                    ? "Capture donor registration, blood requests, compatibility checks, issues, transfusions, and wastage details"
+                  : isMaternityModule
+                    ? "Capture maternity workflow details"
+                  : isAccountingModule
+                    ? "Capture accounting workflow details"
+                  : isWorkforcePlanningModule
+                    ? "Capture workforce planning details"
+                  : isIcuModule
+                    ? "Capture ICU workflow details"
+                  : isPhysioModule
+                    ? "Capture rehabilitation assessments, treatment plans, therapy sessions, and functional outcome notes"
+                  : isNutritionModule
+                    ? "Capture nutritional screening, dietetic assessment, clinical nutrition orders, and care plan reviews"
+                  : isDentalModule
+                    ? "Capture tooth charting, dental examination, treatment records, and procedure notes"
+                  : isInfectionControlModule
+                    ? "Capture HAI surveillance, CSSD sterilisation cycles, and hand hygiene audit details"
+                  : isCommunityHealthModule
+                    ? "Capture CHW registry, household registration, home visits, referrals, and outreach follow-up"
+                  : isConsentModule
+                    ? "Capture informed consent, refusal decisions, signatures, witnesses, versioning, and audit evidence"
+                  : isReferralManagementModule
+                    ? "Capture outgoing referrals, receiving facility details, transfer urgency, and feedback loops"
+                  : isDocumentManagementModule
+                    ? "Upload, classify, index, and track document retention and access controls"
+                  : isMessagingModule
+                    ? "Create patient campaigns, templates, reminders, and delivery records"
+                  : isBiomedicalModule
+                    ? "Register medical devices, track calibration, and maintain service accountability"
+                  : isHomeCareModule
+                    ? "Schedule home visits, record visit notes, equipment dispatch, and escalation plans"
+                  : isClinicalResearchModule
+                    ? "Capture research protocols, patient enrolment, adverse events, and governance documentation"
+                  : isCdssModule
+                    ? "Configure clinical safety rules and record reviewed CDSS alert overrides"
+                  : isIctModule
+                    ? "Capture ICT and security operations details"
+                  : isNursingModule
+                    ? "Capture nursing station observations and bedside workflow details"
+                  : isNursingAdminModule
+                    ? "Capture nursing administration and matron governance details"
+                  : isMedicalDirectorModule
+                    ? "Capture medical director governance and clinical safety details"
+                  : isRevenueCycleModule
+                    ? "Capture revenue cycle and claims control details"
+                  : isCostAccountingModule
+                    ? "Capture cost accounting and department profitability details"
+                  : isStrategicPlanningModule
+                    ? "Capture executive dashboard and strategic planning details"
+                  : isOrchestrationModule
+                    ? "Capture orchestration event, processing, and automation details"
+                  : isWardModule
+                    ? "Capture ward configuration and bed status details"
                   : isInpatientModule
                     ? "Capture inpatient workflow details"
                   : isRegistrationModule
@@ -25616,12 +30150,16 @@ export function WorkflowModuleView({
                   key={field.key}
                   className={`workflow-field ${isWideField ? "workflow-field-full" : ""}`}
                 >
-                  <span>
+                  <span className="workflow-field-title">
                     {field.label}
                     {field.required ? " *" : ""}
-                    {field.note ? ` (${field.note})` : ""}
-                    {inheritedReadOnly ? " (Auto-filled from previous module)" : ""}
                   </span>
+                  {field.note && <small className="workflow-field-note">{field.note}</small>}
+                  {inheritedReadOnly && (
+                    <small className="workflow-field-note">
+                      Auto-filled from previous module
+                    </small>
+                  )}
 
                   {field.key === "nurse_name" ? (
                     <>
@@ -25890,46 +30428,6 @@ export function WorkflowModuleView({
             </div>
           </form>
 
-          <div className="pv-table-wrap" style={{ marginTop: 14 }}>
-            <table className="pv-table">
-              <thead>
-                <tr>
-                  <th>Patient</th>
-                  <th>Form / Stage</th>
-                  <th>Updated</th>
-                  <th>Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {patientRecords.map((record) => {
-                  const patient = patients.find((p) => p.id === record.patientId);
-                  const stage = module.stages.find((s) => s.id === record.stageId);
-                  const moduleForm = formsForDisplay.find((f) => f.id === record.formId);
-                  return (
-                    <tr key={record.id}>
-                      <td>{patient?.name || "Unknown"}</td>
-                      <td>
-                        {moduleForm?.title || "Form"} / {stage?.label || record.stageId}
-                      </td>
-                      <td>{new Date(record.updatedAt).toLocaleString()}</td>
-                      <td>
-                        <button className="pv-del" onClick={() => loadRecord(record)}>
-                          Edit
-                        </button>
-                      </td>
-                    </tr>
-                  );
-                })}
-                {patientRecords.length === 0 && (
-                  <tr>
-                    <td colSpan={4} className="pv-empty">
-                      No records for this form yet.
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
             </div>
           </div>
         )}

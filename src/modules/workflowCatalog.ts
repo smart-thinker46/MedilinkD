@@ -8,12 +8,14 @@ export type FieldType =
   | "number"
   | "date"
   | "time"
+  | "datetime"
   | "datetime-local"
   | "textarea"
   | "select"
   | "email"
   | "tel"
   | "file"
+  | "password"
   | "checkbox";
 
 export interface WorkflowField {
@@ -3051,27 +3053,96 @@ const modules: WorkflowModule[] = [
     stages: stageSet(["Initiation", "View", "Add Entry", "Share", "Update", "Completion"]),
     forms: [
       {
-        id: "ehr_view_filter",
-        title: "Patient EHR View Form",
-        purpose: "Load timeline/history for patient.",
+        id: "ehr_clinical_encounter",
+        title: "Clinical Encounter Form",
+        purpose: "Capture clinical encounter details.",
         fields: [
           ...patientSearchFields,
-          { key: "view_section", label: "Section", type: "select", options: ["Timeline", "Vitals", "Diagnosis", "Prescriptions", "Lab", "Radiology", "Surgery", "Notes"] },
+          { key: "chief_complaint", label: "Chief Complaint", type: "text", required: true, note: "Reason for visit in patient's own words" },
+          { key: "history_of_presenting_illness", label: "History of Presenting Illness", type: "textarea", required: true, note: "Onset, duration, severity, progression, and associated symptoms" },
+          { key: "past_medical_history", label: "Past Medical History", type: "textarea" },
+          { key: "past_surgical_history", label: "Past Surgical History", type: "textarea" },
+          { key: "family_history", label: "Family History", type: "textarea" },
+          { key: "social_history", label: "Social History", type: "textarea" },
+          { key: "review_of_systems", label: "Review of Systems", type: "textarea" },
+          { key: "physical_examination", label: "Physical Examination", type: "textarea", required: true },
+          { key: "assessment_impression", label: "Assessment / Impression", type: "textarea", required: true },
+          { key: "plan", label: "Plan", type: "textarea", required: true },
         ],
       },
       {
-        id: "ehr_visit_entry",
-        title: "Add/Edit Visit Entry Form",
-        purpose: "Create or update clinical visit entries.",
+        id: "ehr_diagnosis_entry",
+        title: "Diagnosis Entry Form",
+        purpose: "Capture diagnosis entry details.",
         fields: [
-          { key: "visit_datetime", label: "Visit Date/Time", type: "datetime-local", required: true },
+          ...patientSearchFields,
+          { key: "icd_10_code", label: "ICD-10 Code", type: "text", required: true, note: "Searchable ICD-10 code and description" },
+          { key: "diagnosis_type", label: "Diagnosis Type", type: "select", required: true, options: ["Principal", "Secondary", "Complication", "Comorbidity"] },
+          { key: "status", label: "Status", type: "select", required: true, options: ["Provisional", "Confirmed", "Differential", "Ruled out"] },
+          { key: "onset_date", label: "Onset Date", type: "date" },
+          { key: "is_chronic", label: "Is Chronic", type: "checkbox", note: "Add to patient's problem list if chronic" },
+          { key: "notes", label: "Notes", type: "textarea" },
+        ],
+      },
+      {
+        id: "ehr_vital_signs",
+        title: "Vital Signs Form",
+        purpose: "Capture vital signs details.",
+        fields: [
+          ...patientSearchFields,
           ...vitalsFields,
-          { key: "chief_complaint", label: "Chief Complaint", type: "textarea" },
-          { key: "examination_findings", label: "Examination Findings", type: "textarea" },
-          { key: "diagnosis", label: "Diagnosis", type: "textarea", required: true },
-          { key: "treatment_plan", label: "Treatment Plan", type: "textarea" },
-          { key: "prescription", label: "Prescription", type: "textarea" },
-          { key: "test_requests", label: "Test Requests", type: "textarea" },
+          { key: "pain_score_0_10", label: "Pain Score (0-10)", type: "number" },
+          { key: "blood_glucose_mmol_l", label: "Blood Glucose (mmol/L)", type: "number" },
+          { key: "urine_output_ml", label: "Urine Output (mL)", type: "number" },
+        ],
+      },
+      {
+        id: "ehr_progress_note",
+        title: "Progress Note Form",
+        purpose: "Capture SOAP progress note details.",
+        fields: [
+          ...patientSearchFields,
+          { key: "note_date_time", label: "Note Date/Time", type: "datetime-local", required: true, note: "Auto-filled with current timestamp if configured by facility" },
+          { key: "soap_subjective", label: "SOAP - Subjective", type: "textarea", required: true },
+          { key: "soap_objective", label: "SOAP - Objective", type: "textarea", required: true },
+          { key: "soap_assessment", label: "SOAP - Assessment", type: "textarea", required: true },
+          { key: "soap_plan", label: "SOAP - Plan", type: "textarea", required: true },
+        ],
+      },
+      {
+        id: "ehr_clinical_order",
+        title: "Clinical Order Form",
+        purpose: "Capture clinical orders and route them to the correct downstream module.",
+        fields: [
+          ...patientSearchFields,
+          {
+            key: "order_type",
+            label: "Order Type",
+            type: "select",
+            required: true,
+            options: ["Lab", "Radiology", "Referral", "Diet", "Procedure", "Nursing", "Physiotherapy"],
+            note: "Select the receiving department for this clinical order",
+          },
+          {
+            key: "priority",
+            label: "Priority",
+            type: "select",
+            required: true,
+            options: ["Routine", "Urgent", "STAT"],
+          },
+          {
+            key: "clinical_indication",
+            label: "Clinical Indication",
+            type: "textarea",
+            required: true,
+            note: "Reason for the order",
+          },
+          {
+            key: "special_instructions",
+            label: "Special Instructions",
+            type: "textarea",
+            note: "Additional instructions for the receiving department",
+          },
         ],
       },
     ],
@@ -3173,55 +3244,65 @@ const modules: WorkflowModule[] = [
     stages: stageSet(["Order", "Sample Collection", "In Process", "Result Entry", "Verification", "Release"]),
     forms: [
       {
-        id: "lab_sample_collection",
-        title: "Sample Collection Form",
-        purpose: "Capture sample collection and barcode/chain-of-custody details.",
+        id: "lab_test_request",
+        title: "Lab Order Form",
+        purpose: "Capture lab order details.",
         fields: [
-          ...patientSearchFields,
+          { key: "patient", label: "Patient", type: "text", required: true, note: "Auto-filled from encounter" },
+          { key: "ordering_doctor", label: "Ordering doctor", type: "text", required: true, note: "Auto-filled from encounter" },
+          { key: "tests_requested", label: "Tests requested", type: "text", required: true, note: "Multi-select from test catalogue with category and sample type" },
+          { key: "priority", label: "Priority", type: "select", required: true, note: "Routine | Urgent | STAT", options: ["Routine", "Urgent", "STAT"] },
+          { key: "clinical_indication", label: "Clinical indication", type: "text", required: true, note: "Why these tests are being ordered" },
+          { key: "special_instructions", label: "Special instructions", type: "text", note: "e.g. Fasting, timed specimen, specific time" },
+        ],
+      },
+      {
+        id: "lab_sample_collection",
+        title: "Specimen Collection Form",
+        purpose: "Capture specimen collection details.",
+        fields: [
+          { key: "patient", label: "Patient", type: "text", required: true, note: "Auto-filled from lab order" },
           { key: "request_id", label: "Lab Request ID", type: "text", required: true },
-          { key: "sample_id", label: "Sample ID / Barcode", type: "text" },
-          { key: "sample_type", label: "Sample Type", type: "text" },
-          { key: "sample_condition", label: "Sample Condition", type: "text" },
-          { key: "storage_location", label: "Storage Location", type: "text" },
-          { key: "collection_time", label: "Collection Time", type: "datetime-local" },
-          { key: "collected_by", label: "Collected By", type: "text" },
-          { key: "notes", label: "Collection Notes", type: "textarea" },
+          { key: "test_s_ordered", label: "Test(s) ordered", type: "text", required: true, note: "List of ordered tests" },
+          { key: "specimen_type", label: "Specimen type", type: "select", required: true, note: "Auto-filled based on test - blood, urine, swab", options: ["Blood", "Urine", "Swab", "Stool", "Sputum", "CSF", "Tissue", "Other"] },
+          { key: "tube_type", label: "Tube type", type: "select", required: true, note: "Colour-coded tube e.g. EDTA purple, SST gold", options: ["EDTA Purple", "SST Gold", "Plain Red", "Citrate Blue", "Fluoride Grey", "Heparin Green", "Sterile Container", "Swab Tube"] },
+          { key: "volume_collected_ml", label: "Volume collected (mL)", type: "number", required: true, note: "Actual volume collected" },
+          { key: "collection_time", label: "Collection time", type: "datetime-local", required: true, note: "Exact time of collection" },
+          { key: "collected_by", label: "Collected by", type: "text", required: true, note: "Auto-filled - logged in phlebotomist" },
+          { key: "specimen_condition", label: "Specimen condition", type: "select", required: true, note: "Adequate | Haemolysed | Clotted | Insufficient | Wrong tube", options: ["Adequate", "Haemolysed", "Clotted", "Insufficient", "Wrong tube"] },
+          { key: "print_barcode_label", label: "Print barcode label", type: "select", required: true, note: "Auto-generates barcode label for tube", options: ["Print now", "Print later", "Already printed"] },
         ],
       },
       {
         id: "lab_result_entry",
         title: "Result Entry Form",
-        purpose: "Enter measured values and flags before verification.",
+        purpose: "Capture result entry details.",
         fields: [
-          ...patientSearchFields,
           { key: "request_id", label: "Lab Request ID", type: "text", required: true },
-          { key: "measured_value", label: "Measured Value", type: "text", required: true },
-          { key: "unit", label: "Unit", type: "text" },
-          { key: "reference_range", label: "Reference Range", type: "text" },
-          {
-            key: "result_flag",
-            label: "Result Flag",
-            type: "select",
-            options: ["NORMAL", "HIGH", "LOW", "CRITICAL"],
-          },
-          { key: "raw_result", label: "Raw Result / Machine Output", type: "textarea" },
-          { key: "interpretation_notes", label: "Interpretation Notes", type: "textarea" },
-          { key: "technician_notes", label: "Technician Notes", type: "textarea" },
-          { key: "critical_result", label: "Critical Result", type: "checkbox" },
-          { key: "result_scan", label: "Upload Scan", type: "file" },
+          { key: "specimen_barcode", label: "Specimen barcode", type: "text", required: true, note: "Scan or type specimen barcode" },
+          { key: "analyte_name", label: "Analyte name", type: "text", required: true, note: "Auto-filled from test definition" },
+          { key: "result_value", label: "Result value", type: "text", required: true, note: "Numeric or text result" },
+          { key: "result_unit", label: "Result unit", type: "text", required: true, note: "Auto-filled from test definition" },
+          { key: "reference_range", label: "Reference range", type: "text", required: true, note: "Auto-calculated from patient age and gender" },
+          { key: "interpretation", label: "Interpretation", type: "select", required: true, note: "Auto-flagged: Normal | Low | High | Critical - editable", options: ["Normal", "Low", "High", "Critical"] },
+          { key: "analyser_id", label: "Analyser ID", type: "select", note: "Instrument that produced the result", options: ["Manual Entry", "Haematology Analyser", "Biochemistry Analyser", "Microbiology Bench", "External Reference Lab"] },
+          { key: "technician_notes", label: "Technician notes", type: "textarea", note: "Comments on result quality or methodology" },
+          { key: "critical_value_alert", label: "Critical value alert", type: "select", required: true, note: "Auto-triggers alert if critical threshold crossed", options: ["No alert", "Notify ordering doctor", "Escalate critical alert"] },
         ],
       },
       {
-        id: "lab_result_verification",
-        title: "Result Verification & Release Form",
-        purpose: "Validate results, apply verification notes, and optionally release.",
+        id: "lab_quality_control",
+        title: "Quality Control Form",
+        purpose: "Capture quality control details.",
         fields: [
-          ...patientSearchFields,
-          { key: "request_id", label: "Lab Request ID", type: "text", required: true },
-          { key: "result_id", label: "Result ID (optional)", type: "text" },
-          { key: "verification_notes", label: "Verification Notes", type: "textarea" },
-          { key: "release_now", label: "Release Immediately", type: "checkbox" },
-          { key: "release_notes", label: "Release Notes", type: "textarea" },
+          { key: "instrument", label: "Instrument", type: "select", required: true, note: "Analyser being quality controlled", options: ["Haematology Analyser", "Biochemistry Analyser", "Microbiology Incubator", "Centrifuge", "Microscope", "Manual Bench"] },
+          { key: "test_analyte", label: "Test / analyte", type: "select", required: true, note: "Test being QC'd", options: ["Full Blood Count", "Malaria Parasites", "Glucose", "Creatinine", "ALT/AST", "Urinalysis", "Culture & Sensitivity"] },
+          { key: "qc_level", label: "QC level", type: "select", required: true, note: "Level 1 (low) | Level 2 (normal) | Level 3 (high)", options: ["Level 1 (low)", "Level 2 (normal)", "Level 3 (high)"] },
+          { key: "expected_value", label: "Expected value", type: "text", required: true, note: "Target value from QC lot insert" },
+          { key: "measured_value", label: "Measured value", type: "number", required: true, note: "Result obtained on QC material" },
+          { key: "westgard_rule_violated", label: "Westgard rule violated", type: "select", required: true, note: "Auto-checked against Westgard rules", options: ["None", "1-2s", "1-3s", "2-2s", "R-4s", "4-1s", "10x"] },
+          { key: "qc_result", label: "QC result", type: "select", required: true, note: "Pass | Fail - auto-determined", options: ["Pass", "Fail", "Repeat required"] },
+          { key: "action_taken", label: "Action taken", type: "textarea", note: "Required if QC fails - recalibration, repeat, engineer call" },
         ],
       },
     ],
@@ -3984,38 +4065,91 @@ const modules: WorkflowModule[] = [
     stages: stageSet(["Initiation", "Stock", "PO", "Goods Receipt", "Completion"]),
     forms: [
       {
-        id: "item_entry",
-        title: "Item Entry Form",
-        purpose: "Create stock item profile.",
+        id: "stock_item_registration",
+        title: "Stock Item Registration Form",
+        purpose: "Create stock item profile with supplier and stock control details.",
         fields: [
           { key: "item_name", label: "Item Name", type: "text", required: true },
-          { key: "category", label: "Category", type: "text" },
-          { key: "unit", label: "Unit", type: "text" },
-          { key: "price", label: "Price", type: "number" },
-          { key: "supplier", label: "Supplier", type: "text" },
-          { key: "stock_quantity", label: "Stock Quantity", type: "number" },
+          { key: "category", label: "Category", type: "select", options: ["Consumables", "Drug", "Equipment", "Linen", "Food", "Stationery"], required: true },
+          { key: "unit", label: "Unit", type: "text", required: true },
+          { key: "stock_quantity", label: "Stock Quantity", type: "number", required: true },
+          { key: "reorder_level", label: "Reorder Level", type: "number" },
+          { key: "unit_cost_kes", label: "Unit Cost (KES)", type: "number" },
+          { key: "selling_price_kes", label: "Selling Price (KES)", type: "number" },
+          { key: "storage_location", label: "Storage Location", type: "text" },
+          { key: "vendor_supplier", label: "Vendor / Supplier", type: "text", required: true, note: "Record the vendor or supplier who supplied this item to the hospital" },
+          { key: "supplier_delivery_reference", label: "Supplier Delivery Reference", type: "text", note: "Invoice, delivery note, or purchase order reference from the supplier" },
           { key: "expiry_date", label: "Expiry Date", type: "date" },
+          { key: "is_controlled", label: "Is Controlled", type: "checkbox", note: "Tick for narcotics and restricted items" },
+        ],
+      },
+      {
+        id: "vendor_supplier_registration",
+        title: "Vendor / Supplier Registration Form",
+        purpose: "Create and maintain supplier records used by inventory, procurement, and stock receiving.",
+        fields: [
+          { key: "supplier_name", label: "Vendor / Supplier Name", type: "text", required: true },
+          { key: "supplier_type", label: "Supplier Type", type: "select", options: ["Drug supplier", "Consumables supplier", "Equipment vendor", "Food supplier", "Linen supplier", "Stationery supplier", "General vendor"], required: true },
+          { key: "contact_person", label: "Contact Person", type: "text", required: true },
+          { key: "phone_number", label: "Phone Number", type: "tel", required: true },
+          { key: "email", label: "Email", type: "email" },
+          { key: "physical_address", label: "Physical Address", type: "text" },
+          { key: "kra_pin", label: "KRA PIN", type: "text" },
+          { key: "payment_terms", label: "Payment Terms", type: "select", options: ["Cash on delivery", "7 days", "14 days", "30 days", "60 days", "Contract terms"] },
+          { key: "status", label: "Status", type: "select", options: ["Active", "Pending approval", "Suspended", "Blacklisted"], required: true },
+          { key: "notes", label: "Notes", type: "textarea" },
+        ],
+      },
+      {
+        id: "purchase_requisition",
+        title: "Purchase Requisition Form",
+        purpose: "Capture department stock requests before purchase order creation.",
+        fields: [
+          { key: "department", label: "Department", type: "select", required: true },
+          { key: "urgency", label: "Urgency", type: "select", options: ["Routine", "Urgent", "Critical"], required: true },
+          { key: "required_by_date", label: "Required By Date", type: "date" },
+          { key: "items_requested", label: "Items Requested", type: "textarea", required: true },
+          { key: "justification", label: "Justification", type: "textarea", required: true },
         ],
       },
       {
         id: "purchase_order",
         title: "Purchase Order Form",
-        purpose: "Generate procurement order.",
+        purpose: "Generate supplier purchase order.",
         fields: [
-          { key: "supplier", label: "Supplier", type: "text", required: true },
-          { key: "items", label: "Items List", type: "textarea", required: true },
-          { key: "total_cost", label: "Total Cost", type: "number" },
-          { key: "delivery_date", label: "Delivery Date", type: "date" },
+          { key: "supplier", label: "Supplier", type: "select", required: true },
+          { key: "items", label: "Items", type: "textarea", required: true },
+          { key: "expected_delivery_date", label: "Expected Delivery Date", type: "date", required: true },
+          { key: "delivery_instructions", label: "Delivery Instructions", type: "text" },
+          { key: "total_value_kes", label: "Total Value (KES)", type: "number", required: true },
         ],
       },
       {
-        id: "goods_receipt",
-        title: "Goods Receipt Form",
-        purpose: "Receive and quality-check supplies.",
+        id: "goods_received_note",
+        title: "Goods Received Note (GRN)",
+        purpose: "Receive and quality-check delivered stock against a purchase order.",
         fields: [
-          { key: "po_number", label: "PO Number", type: "text", required: true },
-          { key: "received_quantity", label: "Received Quantity", type: "number", required: true },
-          { key: "quality_check", label: "Quality Check", type: "select", options: ["pass", "fail"] },
+          { key: "purchase_order", label: "Purchase Order", type: "select", required: true },
+          { key: "supplier", label: "Supplier", type: "select", options: ["KEMSA", "MedSource Kenya", "Surgipharm", "Laborex Kenya", "Mission for Essential Drugs and Supplies", "Other"], required: true, note: "Select the supplier/vendor delivering the received products" },
+          { key: "supplier_delivery_note_number", label: "Supplier Delivery Note Number", type: "text" },
+          { key: "delivery_date", label: "Delivery Date", type: "date", required: true },
+          { key: "items_received", label: "Items Received", type: "textarea", required: true },
+          { key: "items_rejected", label: "Items Rejected", type: "textarea" },
+          { key: "received_by", label: "Received By", type: "text", required: true },
+        ],
+      },
+      {
+        id: "stock_count",
+        title: "Stock Count Form",
+        purpose: "Capture stock count and variance details.",
+        fields: [
+          { key: "count_type", label: "Count Type", type: "select", options: ["Full", "Cycle count", "Spot check"], required: true },
+          { key: "location", label: "Location", type: "select", required: true },
+          { key: "item", label: "Item", type: "select", required: true },
+          { key: "batch_number", label: "Batch Number", type: "text" },
+          { key: "system_quantity", label: "System Quantity", type: "number", required: true },
+          { key: "physical_quantity", label: "Physical Quantity", type: "number", required: true },
+          { key: "variance_reason", label: "Variance Reason", type: "text" },
         ],
       },
     ],
@@ -4028,7 +4162,7 @@ const modules: WorkflowModule[] = [
     forms: [
       {
         id: "staff_registration",
-        title: "Staff Registration Form",
+        title: "Employee Registration Form",
         purpose: "Create staff/employee profile.",
         fields: [
           { key: "full_name", label: "Full Name", type: "text", required: true },
@@ -4043,11 +4177,11 @@ const modules: WorkflowModule[] = [
       },
       {
         id: "leave_request",
-        title: "Leave Request Form",
+        title: "Leave Application Form",
         purpose: "Submit and track leave.",
         fields: [
           { key: "staff", label: "Staff", type: "text", required: true },
-          { key: "leave_type", label: "Leave Type", type: "select", options: ["annual", "sick", "maternity"], required: true },
+          { key: "leave_type", label: "Leave Type", type: "select", options: ["Annual", "Sick", "Maternity", "Paternity", "Compassionate", "Study", "Unpaid"], required: true },
           { key: "from_date", label: "From Date", type: "date", required: true },
           { key: "to_date", label: "To Date", type: "date", required: true },
           { key: "reason", label: "Reason", type: "textarea" },
@@ -4063,66 +4197,159 @@ const modules: WorkflowModule[] = [
           { key: "manual_adjustments", label: "Manual Adjustments", type: "textarea" },
         ],
       },
+      {
+        id: "performance_review",
+        title: "Performance Review Form",
+        purpose: "Capture employee KPI review and development planning.",
+        fields: [
+          { key: "employee", label: "Employee", type: "select", required: true },
+          { key: "review_period", label: "Review Period", type: "select", options: ["H1", "H2", "Annual"], required: true },
+          { key: "kpi_scores", label: "KPI Scores", type: "textarea", required: true },
+          { key: "overall_rating", label: "Overall Rating", type: "select", options: ["Outstanding", "Exceeds expectations", "Meets", "Below", "Unsatisfactory"], required: true },
+          { key: "strengths", label: "Strengths", type: "textarea", required: true },
+          { key: "areas_for_improvement", label: "Areas for Improvement", type: "textarea", required: true },
+          { key: "development_plan", label: "Development Plan", type: "textarea", required: true },
+          { key: "employee_comments", label: "Employee Comments", type: "textarea" },
+        ],
+      },
+      {
+        id: "disciplinary",
+        title: "Disciplinary Form",
+        purpose: "Capture disciplinary incident, hearing, outcome, and sanction.",
+        fields: [
+          { key: "employee", label: "Employee", type: "select", required: true },
+          { key: "incident_date", label: "Incident Date", type: "date", required: true },
+          { key: "category", label: "Category", type: "select", options: ["Misconduct", "Gross misconduct", "Absenteeism", "Negligence", "Substance abuse"], required: true },
+          { key: "description", label: "Description", type: "textarea", required: true },
+          { key: "witnesses", label: "Witnesses", type: "text" },
+          { key: "hearing_date", label: "Hearing Date", type: "date" },
+          { key: "hearing_outcome", label: "Hearing Outcome", type: "textarea" },
+          { key: "sanction", label: "Sanction", type: "select", options: ["Verbal warning", "Written warning", "Final warning", "Suspension", "Dismissal"] },
+        ],
+      },
     ],
   },
   {
     id: 17,
     name: "Doctor Management",
     premium: true,
-    stages: stageSet(["Initiation", "Profile", "Schedule", "Performance", "Completion"]),
+    stages: stageSet(["Initiation", "Profile", "Schedule", "Credential Review", "Completion"]),
     forms: [
       {
         id: "doctor_profile",
         title: "Doctor Profile Form",
-        purpose: "Manage physician profile and credentials.",
+        purpose: "Capture doctor profile details.",
         fields: [
-          { key: "doctor_name", label: "Doctor Name", type: "text", required: true },
-          { key: "specialization", label: "Specialization", type: "text" },
-          { key: "license_upload", label: "License Upload", type: "file" },
-          { key: "availability_calendar", label: "Availability Calendar", type: "textarea" },
+          { key: "staff_member", label: "Staff member", type: "text", required: true, note: "Linked from HR staff record" },
+          { key: "specialisation", label: "Specialisation", type: "text", required: true, note: "Primary and secondary specialties" },
+          { key: "kmpdb_licence_number", label: "KMPDB licence number", type: "text", required: true, note: "Kenya Medical Practitioners Board registration" },
+          { key: "licence_expiry_date", label: "Licence expiry date", type: "date", required: true, note: "Sends alert 90 and 30 days before expiry" },
+          { key: "sub_specialties", label: "Sub-specialties", type: "text", note: "Additional sub-specialty qualifications" },
+          { key: "consultation_types", label: "Consultation types", type: "text", required: true, note: "OPD | Inpatient | Emergency | Telemedicine | Procedure" },
+          {
+            key: "department_assignment",
+            label: "Department assignment",
+            type: "select",
+            required: true,
+            note: "Primary department",
+            options: ["Internal Medicine", "Radiology", "Surgery", "Paediatrics", "Emergency", "Obstetrics", "Anaesthesia"],
+          },
+          { key: "on_call_eligible", label: "On-call eligible", type: "checkbox", required: true, note: "Tick if doctor does on-call duties" },
         ],
       },
       {
-        id: "performance_review",
-        title: "Performance Review Form",
-        purpose: "Track doctor quality KPIs.",
+        id: "on_call_schedule",
+        title: "On-Call Schedule Form",
+        purpose: "Capture on-call schedule details.",
         fields: [
-          { key: "doctor_id", label: "Doctor ID", type: "text", required: true },
-          { key: "period", label: "Review Period", type: "text" },
-          { key: "metrics", label: "Metrics", type: "textarea" },
-          { key: "comments", label: "Comments", type: "textarea" },
+          { key: "doctor", label: "Doctor", type: "select", required: true, note: "Doctor being scheduled", options: ["Dr. Kamau", "Dr. Wanjiku", "Dr. Mutua", "Dr. Achieng"] },
+          {
+            key: "department",
+            label: "Department",
+            type: "select",
+            required: true,
+            note: "Specialty on-call",
+            options: ["Internal Medicine", "Radiology", "Surgery", "Paediatrics", "Emergency", "Obstetrics", "Anaesthesia"],
+          },
+          { key: "call_date", label: "Call date", type: "date", required: true, note: "Date of on-call duty" },
+          { key: "call_type", label: "Call type", type: "select", required: true, note: "Primary | Backup | Consultant", options: ["Primary", "Backup", "Consultant"] },
+          { key: "start_time", label: "Start time", type: "time", required: true, note: "On-call start time" },
+          { key: "end_time", label: "End time", type: "time", required: true, note: "On-call end time" },
+          { key: "contact_phone", label: "Contact phone", type: "tel", required: true, note: "Phone number to call during this period" },
         ],
       },
     ],
   },
   {
     id: 18,
-    name: "Facility Maintenance",
+    name: "Facility Management",
     premium: true,
-    stages: stageSet(["Initiation", "Asset", "Request", "Assign", "Completion"]),
+    stages: stageSet(["Initiation", "Asset", "Maintenance", "Service Record", "Completion"]),
     forms: [
       {
         id: "asset_registration",
         title: "Asset Registration Form",
-        purpose: "Register facility assets and maintenance schedules.",
+        purpose: "Capture asset registration details.",
         fields: [
-          { key: "asset_name", label: "Asset Name", type: "text", required: true },
-          { key: "asset_type", label: "Asset Type", type: "text" },
-          { key: "serial_number", label: "Serial Number", type: "text" },
-          { key: "purchase_date", label: "Purchase Date", type: "date" },
-          { key: "cost", label: "Cost", type: "number" },
-          { key: "maintenance_schedule", label: "Maintenance Schedule", type: "text" },
+          { key: "asset_name", label: "Asset name", type: "text", required: true, note: "Equipment or furniture name" },
+          {
+            key: "asset_category",
+            label: "Asset category",
+            type: "select",
+            required: true,
+            note: "Biomedical | Furniture | IT | Vehicle | Linen | Other",
+            options: ["Biomedical", "Furniture", "IT", "Vehicle", "Linen", "Other"],
+          },
+          { key: "manufacturer", label: "Manufacturer", type: "text", note: "Manufacturer name" },
+          { key: "model", label: "Model", type: "text", note: "Model number or name" },
+          { key: "serial_number", label: "Serial number", type: "text", note: "Manufacturer serial number" },
+          { key: "year_purchased", label: "Year purchased", type: "number", required: true, note: "Year of purchase" },
+          { key: "purchase_cost_kes", label: "Purchase cost (KES)", type: "number", required: true, note: "Purchase price" },
+          {
+            key: "department_location",
+            label: "Department location",
+            type: "select",
+            required: true,
+            note: "Department where asset is located",
+            options: ["ICU", "Theatre", "Radiology", "Laboratory", "Ward", "Pharmacy", "Administration", "Maintenance"],
+          },
+          { key: "room", label: "Room", type: "text", note: "Specific room or bay" },
+          { key: "warranty_expiry", label: "Warranty expiry", type: "date", note: "Warranty expiry date" },
+          { key: "service_interval_months", label: "Service interval (months)", type: "number", required: true, note: "Frequency of preventive maintenance" },
         ],
       },
       {
         id: "maintenance_request",
         title: "Maintenance Request Form",
-        purpose: "Raise facility maintenance tickets.",
+        purpose: "Capture maintenance request details.",
         fields: [
-          { key: "asset_id", label: "Asset ID", type: "text", required: true },
-          { key: "issue_description", label: "Issue Description", type: "textarea", required: true },
-          { key: "priority", label: "Priority", type: "select", options: ["low", "medium", "high"], required: true },
-          { key: "requested_by", label: "Requested By", type: "text" },
+          { key: "asset", label: "Asset", type: "select", note: "Asset needing maintenance - or describe if not in system", options: ["Ventilator VX-3", "Generator G-12", "X-Ray Gen 3", "Ward B Lifter"] },
+          { key: "issue_description", label: "Issue description", type: "textarea", required: true, note: "Detailed description of the problem" },
+          { key: "priority", label: "Priority", type: "select", options: ["Low", "Medium", "High", "Critical"], required: true, note: "Low | Medium | High | Critical" },
+          { key: "requested_by", label: "Requested by", type: "text", required: true, note: "Auto-filled - logged in staff member" },
+          { key: "department", label: "Department", type: "text", required: true, note: "Auto-filled from user profile" },
+        ],
+      },
+      {
+        id: "maintenance_record",
+        title: "Maintenance Record Form",
+        purpose: "Capture maintenance record details.",
+        fields: [
+          { key: "asset", label: "Asset", type: "text", required: true, note: "Asset serviced" },
+          {
+            key: "maintenance_type",
+            label: "Maintenance type",
+            type: "select",
+            required: true,
+            note: "Preventive | Corrective | Calibration | Inspection",
+            options: ["Preventive", "Corrective", "Calibration", "Inspection"],
+          },
+          { key: "work_performed", label: "Work performed", type: "textarea", required: true, note: "Detailed description of work done" },
+          { key: "parts_replaced", label: "Parts replaced", type: "text", note: "Parts or consumables replaced with cost" },
+          { key: "service_provider", label: "Service provider", type: "text", required: true, note: "Internal team or external company" },
+          { key: "downtime_hours", label: "Downtime (hours)", type: "number", note: "How long asset was out of service" },
+          { key: "cost_kes", label: "Cost (KES)", type: "number", note: "Total maintenance cost" },
+          { key: "next_service_date", label: "Next service date", type: "date", required: true, note: "Next scheduled maintenance" },
         ],
       },
     ],
@@ -5136,7 +5363,7 @@ const modules: WorkflowModule[] = [
       },
     ],
   },
-  { id: 35, name: "Pharmacy POS", premium: true, stages: stageSet(["Initiation", "Cart", "Payment", "Receipt", "Completion"]), forms: [{ id: "sale_transaction", title: "Sale Transaction Form", purpose: "Capture POS sale and payment.", fields: [...patientSearchFields, { key: "items", label: "Items", type: "textarea", required: true }, { key: "total", label: "Total", type: "number", required: true }, { key: "payment_method", label: "Payment Method", type: "select", options: ["M-Pesa", "Cash", "Card"], required: true }, { key: "receipt_url", label: "Receipt URL", type: "text" }] }] },
+  { id: 35, name: "Pharmacy POS", premium: true, stages: stageSet(["Initiation", "Cart", "Payment", "Receipt", "Completion"]), forms: [{ id: "retail_sale", title: "Retail Sale Form", purpose: "Capture retail sale details.", fields: [{ key: "customer_type", label: "Customer type", type: "select", options: ["Patient", "Visitor", "Staff", "Walk-in"], required: true, note: "Patient | Visitor | Staff | Walk-in" }, { key: "patient_mrn", label: "Patient MRN", type: "text", note: "If selling to registered patient" }, { key: "drug_item", label: "Drug / item", type: "text", required: true, note: "Search from formulary or OTC list" }, { key: "quantity", label: "Quantity", type: "number", required: true, note: "Number of units to sell" }, { key: "unit_price", label: "Unit price", type: "text", required: true, note: "Auto-filled from formulary selling price" }, { key: "payment_method", label: "Payment method", type: "select", options: ["Cash", "MPESA", "Card", "Staff deduction"], required: true, note: "Cash | MPESA | Card | Staff deduction" }, { key: "mpesa_reference", label: "MPESA reference", type: "text", note: "M-Pesa transaction code if MPESA payment" }, { key: "print_receipt", label: "Print receipt", type: "checkbox", required: true, note: "Auto-selected - generates receipt on confirm" }] }] },
 ];
 
 const CORE_PATIENT_FLOW_LOOP =
@@ -5404,12 +5631,213 @@ const withGeneratedForms = (module: WorkflowModule): WorkflowModule => {
   return generatedForms ? { ...module, forms: generatedForms } : module;
 };
 
-const existingModuleIds = new Set(modules.map((module) => module.id));
+const canonicalModuleByName = (name: string): Partial<WorkflowModule> | null => {
+  const normalized = name.trim().toLowerCase();
+  const matches = (pattern: RegExp) => pattern.test(normalized);
+
+  if (matches(/^in-?patient$/i)) return { id: 2, name: "Inpatient" };
+  if (matches(/out-?patient/)) return { id: 36, name: "Outpatient" };
+  if (matches(/maternity/)) return { id: 37, name: "Maternity" };
+  if (matches(/\bicu\b/)) return { id: 38, name: "ICU" };
+  if (matches(/financial accounting/)) return { id: 39, name: "Financial Accounting" };
+  if (matches(/workforce planning/)) return { id: 40, name: "Workforce Planning" };
+  if (matches(/\bict\b|information & communication/)) return { id: 41, name: "ICT & Security Operations" };
+  if (matches(/nursing administration|matron/)) return { id: 42, name: "Nursing Administration (Matron)" };
+  if (matches(/head doctor|medical director/)) return { id: 43, name: "Medical Director Dashboard" };
+  if (matches(/revenue cycle/)) return { id: 44, name: "Revenue Cycle" };
+  if (matches(/cost accounting/)) return { id: 45, name: "Cost Accounting" };
+  if (matches(/strategic planning|executive dashboard/)) return { id: 46, name: "Executive Dashboard" };
+  if (matches(/orchestration/)) return { id: 47, name: "Orchestration & Automation" };
+  if (matches(/bed\s*\/?\s*ward/)) return { id: 5, name: "Bed & Ward" };
+  if (matches(/\behr\b|medical records/)) return { id: 6, name: "EMR & Clinical Notes" };
+  if (matches(/nursing management/)) return { id: 7, name: "Nursing" };
+  if (matches(/radiology/)) return { id: 9, name: "Radiology" };
+  if (matches(/operation theatre|operating theatre/)) return { id: 11, name: "Operating Theatre" };
+  if (matches(/billing/)) return { id: 13, name: "Billing" };
+  if (matches(/insurance/)) return { id: 14, name: "Insurance" };
+  if (matches(/inventory/)) return { id: 15, name: "Inventory" };
+  if (matches(/reporting/)) return { id: 19, name: "Reporting" };
+  if (matches(/user management|user & security/)) return { id: 20, name: "User & Security" };
+  if (matches(/blockchain/)) return { id: 22, name: "Blockchain Audit" };
+  if (matches(/external/)) return { id: 34, name: "External Integrations" };
+  if (matches(/ambulance/)) return { id: 26, name: "Ambulance" };
+  if (matches(/pharmacy pos/)) return { id: 35, name: "Pharmacy POS" };
+  if (matches(/\bnicu\b|neonatal icu/)) return { id: 51, name: "NICU" };
+  if (matches(/mortuary/)) return { id: 27, name: "Mortuary" };
+  if (matches(/clinical decision support|\bcdss\b/)) return { id: 48, name: "Clinical Decision Support" };
+  if (matches(/ai analytics/)) return { id: 23, name: "AI Analytics" };
+  if (matches(/helpdesk/)) return { id: 29, name: "Helpdesk" };
+  if (matches(/^canteen/)) return { id: 30, name: "Canteen" };
+  if (matches(/physiotherapy|rehabilitation/)) return { id: 49, name: "Physiotherapy & Rehabilitation" };
+  if (matches(/nutrition|dietetics/)) return { id: 50, name: "Nutrition & Dietetics" };
+  if (matches(/^dental$/)) return { id: 52, name: "Dental" };
+  if (matches(/infection control|cssd/)) return { id: 53, name: "Infection Control & CSSD" };
+  if (matches(/community health|\bchw\b/)) return { id: 56, name: "Community Health & CHW" };
+  if (matches(/consent management/)) return { id: 54, name: "Consent Management" };
+  if (matches(/inter-facility referral|referral management/)) return { id: 55, name: "Referral Management" };
+  if (matches(/document management/)) return { id: 57, name: "Document Management" };
+  if (matches(/sms & whatsapp|messaging|notifications/)) return { id: 58, name: "SMS & WhatsApp Messaging" };
+  if (matches(/biomedical equipment/)) return { id: 61, name: "Biomedical Equipment" };
+  if (matches(/^migration$/)) return { id: 64, name: "Migration" };
+  if (matches(/quality assurance/)) return { id: 33, name: "Quality Assurance" };
+  if (matches(/paediatrics|pediatrics/)) return { id: 59, name: "Paediatrics" };
+  if (matches(/home care/)) return { id: 60, name: "Home Care" };
+  if (matches(/clinical research/)) return { id: 32, name: "Clinical Research" };
+
+  return null;
+};
+
+const withDesktopModuleParity = (module: WorkflowModule): WorkflowModule => {
+  const canonical = canonicalModuleByName(module.name);
+  return {
+    ...module,
+    ...(canonical || {}),
+    premium: canonical ? true : module.premium,
+  };
+};
+
+const supplementalWorkflowModules: WorkflowModule[] = [
+  {
+    id: 62,
+    name: "Governance & Safety Controls",
+    premium: true,
+    stages: stageSet([
+      "Control Register",
+      "Risk Review",
+      "Evidence Capture",
+      "Clinical Governance Sign-off",
+    ]),
+    forms: [
+      {
+        id: "platform_control_review",
+        title: "Platform Control Review Form",
+        purpose: "Review DR, MPI, escalation, content, interoperability, localisation, and accessibility controls.",
+        fields: [
+          { key: "control_domain", label: "Control Domain", type: "select", required: true, options: ["Disaster Recovery", "Clinical Content", "Offline Sync", "Interoperability", "MPI", "Escalation", "Testing", "Accessibility"] },
+          { key: "control_title", label: "Control Title", type: "text", required: true },
+          { key: "status", label: "Status", type: "select", required: true, options: ["PLANNED", "IN_PROGRESS", "ACTIVE", "TESTED", "NEEDS_REVIEW"] },
+          { key: "owner_role", label: "Owner Role", type: "text", required: true },
+          { key: "review_cadence", label: "Review Cadence", type: "select", options: ["Weekly", "Monthly", "Quarterly", "Biannual"] },
+          { key: "evidence_note", label: "Evidence Note", type: "textarea", required: true },
+          { key: "next_review_at", label: "Next Review Date", type: "date" },
+        ],
+      },
+      {
+        id: "clinical_safety_signoff",
+        title: "Clinical Safety Sign-off Form",
+        purpose: "Record clinical governance review for pathways, order sets, content versions, and patient-safety controls.",
+        fields: [
+          { key: "safety_area", label: "Safety Area", type: "select", required: true, options: ["CDSS Rule", "Clinical Pathway", "Drug Database", "Order Set", "Downtime Procedure", "Critical Alert"] },
+          { key: "version", label: "Version", type: "text", required: true },
+          { key: "reviewer", label: "Clinical Reviewer", type: "text", required: true },
+          { key: "decision", label: "Decision", type: "select", required: true, options: ["Approved", "Approved with Conditions", "Rejected", "Needs Revision"] },
+          { key: "risk_level", label: "Risk Level", type: "select", options: ["LOW", "MEDIUM", "HIGH", "CRITICAL"] },
+          { key: "review_notes", label: "Review Notes", type: "textarea", required: true },
+        ],
+      },
+    ],
+  },
+  {
+    id: 63,
+    name: "Operations & Vendor Support",
+    premium: true,
+    stages: stageSet([
+      "Subscription Monitoring",
+      "Vendor Support",
+      "Offline Reconciliation",
+      "Legal Readiness",
+    ]),
+    forms: [
+      {
+        id: "vendor_support_ticket",
+        title: "Vendor Support Ticket Form",
+        purpose: "Create Medilink support tickets with priority, category, SLA ownership, and escalation tracking.",
+        fields: [
+          { key: "priority", label: "Priority", type: "select", required: true, options: ["P1 Patient Safety/System Down", "P2 Major Feature Unavailable", "P3 Minor Issue", "P4 Question"] },
+          { key: "category", label: "Category", type: "select", required: true, options: ["Software Bug", "Integration", "License", "Billing", "Training", "Data Migration", "Vendor Support"] },
+          { key: "subject", label: "Subject", type: "text", required: true },
+          { key: "description", label: "Description", type: "textarea", required: true },
+          { key: "affected_module", label: "Affected Module", type: "text" },
+          { key: "requested_by", label: "Requested By", type: "text", required: true },
+        ],
+      },
+      {
+        id: "offline_sync_batch",
+        title: "Offline Sync Batch Form",
+        purpose: "Open a downtime/offline reconciliation batch where every clinical action is preserved by timestamp.",
+        fields: [
+          { key: "module_code", label: "Module", type: "text", required: true },
+          { key: "client_id", label: "Client Device ID", type: "text", required: true },
+          { key: "downtime_started_at", label: "Downtime Started", type: "datetime-local", required: true },
+          { key: "downtime_ended_at", label: "Downtime Ended", type: "datetime-local" },
+          { key: "conflict_policy", label: "Conflict Policy", type: "select", required: true, options: ["Preserve all records", "Flag for clinical review", "Hold sync until review"] },
+          { key: "notes", label: "Reconciliation Notes", type: "textarea" },
+        ],
+      },
+      {
+        id: "subscription_safety_review",
+        title: "Subscription Safety Review Form",
+        purpose: "Review overdue subscription controls without disrupting active clinical care.",
+        fields: [
+          { key: "tenant_name", label: "Tenant", type: "text", required: true },
+          { key: "subscription_status", label: "Subscription Status", type: "select", required: true, options: ["Active", "Grace Period", "Overdue", "Restricted", "Suspended"] },
+          { key: "clinical_access_policy", label: "Clinical Access Policy", type: "select", required: true, options: ["Full access", "Restrict new registrations", "Read-only admin", "Emergency-only"] },
+          { key: "finance_contacted", label: "Finance Contacted", type: "checkbox" },
+          { key: "next_action_date", label: "Next Action Date", type: "date" },
+          { key: "notes", label: "Notes", type: "textarea" },
+        ],
+      },
+    ],
+  },
+];
+
+const baseWorkflowModules = modules
+  .map(withPatternMeta)
+  .map(withGeneratedForms)
+  .map(withDesktopModuleParity);
+
+const usedModuleIds = new Set([
+  ...baseWorkflowModules.map((module) => module.id),
+  ...supplementalWorkflowModules.map((module) => module.id),
+]);
+const usedModuleNames = new Set([
+  ...baseWorkflowModules.map((module) => module.name.trim().toLowerCase()),
+  ...supplementalWorkflowModules.map((module) => module.name.trim().toLowerCase()),
+]);
+
+const generatedWorkflowModules = GENERATED_WORKFLOW_MODULES
+  .map(withDesktopModuleParity)
+  .filter((module) => {
+    const normalizedName = module.name.trim().toLowerCase();
+    if (usedModuleIds.has(module.id) || usedModuleNames.has(normalizedName)) {
+      return false;
+    }
+    usedModuleIds.add(module.id);
+    usedModuleNames.add(normalizedName);
+    return true;
+  });
+
+const canonicalModuleOrder = [
+  1, 4, 28, 36, 2, 25, 26, 5, 37, 38, 51, 11, 27, 55,
+  6, 48, 7, 42, 8, 9, 10, 35, 12, 32, 33, 49, 50, 52, 53, 59,
+  13, 14, 44, 39, 45, 15, 16, 40, 17, 18, 61,
+  19, 46, 23, 21, 24, 22, 20, 41, 34, 47, 54, 57, 58, 62, 64,
+  29, 63, 30, 31, 43, 56, 60,
+];
+
+const canonicalModuleRank = new Map(
+  canonicalModuleOrder.map((moduleId, index) => [moduleId, index]),
+);
 
 export const WORKFLOW_MODULES: WorkflowModule[] = [
-  ...modules.map(withPatternMeta).map(withGeneratedForms),
-  ...GENERATED_WORKFLOW_MODULES.filter((module) => !existingModuleIds.has(module.id)),
-];
+  ...baseWorkflowModules,
+  ...generatedWorkflowModules,
+  ...supplementalWorkflowModules,
+].sort(
+  (a, b) =>
+    (canonicalModuleRank.get(a.id) ?? 999) - (canonicalModuleRank.get(b.id) ?? 999) ||
+    a.name.localeCompare(b.name),
+);
 
 export const WORKFLOW_MODULE_BY_ID = WORKFLOW_MODULES.reduce<Record<number, WorkflowModule>>((acc, mod) => {
   acc[mod.id] = mod;

@@ -1,9 +1,14 @@
-import React, { useState, useEffect, useRef, useCallback } from "react";
+import React, { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import "./App.css";
 import { useAppStore, type Patient } from "./store/appStore";
 import { DesktopUpdater } from "./components/DesktopUpdater";
 import { MigrationCenterView } from "./components/MigrationCenterView";
-import { WORKFLOW_MODULE_BY_ID, WORKFLOW_MODULES } from "./modules/workflowCatalog";
+import {
+  WORKFLOW_MODULE_BY_ID,
+  WORKFLOW_MODULES,
+  type WorkflowField,
+  type WorkflowForm,
+} from "./modules/workflowCatalog";
 import {
   MEDILINK_AI_GREETING,
   MEDILINK_AI_SYSTEM_PROMPT,
@@ -22,6 +27,7 @@ import {
   deleteTenantUser,
   fetchSubscriptionPricing,
   fetchSecurityRbacCatalog,
+  fetchSecurityPermissionsCatalog,
   fetchSecurityMyAccess,
   fetchSuperAdminAnnouncements,
   fetchSuperAdminAuditStream,
@@ -33,6 +39,15 @@ import {
   fetchSuperAdminSupportRequests,
   fetchBillingBills,
   fetchBillingBillById,
+  fetchBillingDashboard,
+  fetchBillingRevenueReport,
+  fetchBillingArReport,
+  fetchBillingDiscounts,
+  fetchBillingRefunds,
+  fetchInsuranceDashboard,
+  fetchInsuranceClaims,
+  fetchInsurancePreAuthorizations,
+  fetchLaboratoryRequests,
   generateMedilinkAiReply,
   initiateMpesaStkPush,
   activateLicense,
@@ -53,6 +68,7 @@ import {
   resetTenantUserPassword,
   SESSION_STORAGE_KEY,
   setStoredFacilityCode,
+  submitModuleRecord,
   type SubscriptionPricing,
   type SuperAdminAnnouncement,
   type SuperAdminAuditEvent,
@@ -137,6 +153,28 @@ const iconByModuleId: Record<number, string> = {
   40: "hr",
   41: "laptop",
   42: "syringe",
+  43: "doctor",
+  44: "billing",
+  45: "chart",
+  46: "chart",
+  47: "gears",
+  48: "brain",
+  49: "stethoscope",
+  50: "briefcase",
+  51: "baby",
+  52: "stethoscope",
+  53: "shield2",
+  54: "ehr",
+  55: "stethoscope",
+  56: "users",
+  57: "ehr",
+  58: "chat",
+  59: "baby",
+  60: "home",
+  61: "briefcase",
+  62: "shield2",
+  63: "support",
+  64: "upload",
 };
 
 const MODULES = WORKFLOW_MODULES.map((mod) => ({
@@ -257,7 +295,13 @@ function normalizeModuleIds(moduleIds: unknown): number[] {
 function resolveRoleKeyForUi(normalizedRole: string): RoleKey {
   const key = String(normalizedRole || "").trim().toLowerCase();
   if (key === "super_admin") return "super_admin";
-  if (key === "hospital_admin") return "hospital_admin";
+  if (
+    key === "hospital_admin" ||
+    key === "admin" ||
+    key === "administrator" ||
+    key === "facility_admin" ||
+    key === "tenant_admin"
+  ) return "hospital_admin";
   if (
     [
       "ceo",
@@ -300,6 +344,25 @@ function resolveRoleKeyForUi(normalizedRole: string): RoleKey {
   return "staff";
 }
 
+function isAdminLikeRole(role: unknown) {
+  const key = String(role || "").trim().toLowerCase().replace(/[\s-]+/g, "_");
+  return [
+    "super_admin",
+    "hospital_admin",
+    "admin",
+    "administrator",
+    "facility_admin",
+    "tenant_admin",
+  ].includes(key);
+}
+
+function getAdminAllowedModules(role: unknown) {
+  const resolved = resolveRoleKeyForUi(String(role || ""));
+  return resolved === "super_admin"
+    ? ROLE_ALLOWED_MODULES.super_admin
+    : ROLE_ALLOWED_MODULES.hospital_admin;
+}
+
 /* ── SVG Icon helper ── */
 function Icon({ type, size = 28 }: { type?: string; size?: number }) {
   const materialByType: Record<string, string> = {
@@ -321,6 +384,7 @@ function Icon({ type, size = 28 }: { type?: string; size?: number }) {
     rad: "radiology",
     shield: "shield",
     shield2: "verified_user",
+    verified: "verified",
     briefcase: "inventory_2",
     hr: "groups",
     doctor: "medical_services",
@@ -328,11 +392,25 @@ function Icon({ type, size = 28 }: { type?: string; size?: number }) {
     ambulance: "emergency",
     support: "support_agent",
     stars: "stars",
+    auto_awesome: "auto_awesome",
+    insights: "insights",
     microscope: "biotech",
     users: "group",
+    search: "search",
+    sync: "sync",
+    manage_search: "manage_search",
+    fact_check: "fact_check",
+    video_call: "video_call",
+    chat: "chat",
     upload: "cloud_upload",
+    event: "event",
+    message: "message",
     bell: "notifications",
     logout: "logout",
+    arrow_back: "arrow_back",
+    panel_close: "left_panel_close",
+    panel_open: "left_panel_open",
+    restaurant: "restaurant",
   };
   if (type && materialByType[type]) {
     return (
@@ -1605,11 +1683,28 @@ function EHRView() {
 
 function NursingView() {
   const [activeVisits] = useState([
-    { id: "1", patient: "Jane Doe", status: "STABLE", meds: "2 Pending" },
-    { id: "2", patient: "Samuel Mwangi", status: "OBSERVATION", meds: "None" },
-    { id: "3", patient: "Amina Hassan", status: "STABLE", meds: "1 Due" },
+    { id: "1", patient: "Jane Doe", status: "STABLE", visit: "IPD / Ward A" },
+    { id: "2", patient: "Samuel Mwangi", status: "OBSERVATION", visit: "OPD" },
+    { id: "3", patient: "Amina Hassan", status: "STABLE", visit: "IPD / Maternity" },
   ]);
-  const [search] = useState("");
+  const [search, setSearch] = useState("");
+  const filteredVisits = activeVisits.filter((visit) =>
+    `${visit.patient} ${visit.status} ${visit.visit}`
+      .toLowerCase()
+      .includes(search.toLowerCase()),
+  );
+  const nursingStats = [
+    { label: "Active Admissions", value: activeVisits.length, color: "#1e3a8a" },
+    { label: "Assigned Patients", value: activeVisits.length, color: "#2563eb" },
+    { label: "Pending Medication", value: 3, color: "#f59e0b" },
+    { label: "Abnormal Vitals", value: 0, color: "#dc2626" },
+    { label: "Open Incidents", value: 0, color: "#7c3aed" },
+    { label: "Critical Incidents", value: 0, color: "#be123c" },
+    { label: "Open Tasks", value: 0, color: "#0891b2" },
+    { label: "Overdue Tasks", value: 0, color: "#ea580c" },
+    { label: "Medications Logged", value: 0, color: "#16a34a" },
+    { label: "Recent Handovers", value: 0, color: "#0d9488" },
+  ];
 
   return (
     <div className="nursing-view">
@@ -1621,33 +1716,76 @@ function NursingView() {
           </p>
         </div>
       </div>
-      <div className="pv-table-wrap">
+      <div className="pv-stats nursing-stats-grid">
+        {nursingStats.map((stat) => (
+          <article
+            key={stat.label}
+            className="pv-stat-card"
+            style={{ borderLeftColor: stat.color }}
+          >
+            <p className="pv-stat-label">{stat.label}</p>
+            <p className="pv-stat-value">{stat.value}</p>
+          </article>
+        ))}
+      </div>
+      <div className="pv-search-bar">
+        <div className="pv-search-wrap">
+          <svg
+            className="pv-search-icon"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden="true"
+          >
+            <circle cx="11" cy="11" r="8" />
+            <path d="m21 21-4.3-4.3" />
+          </svg>
+          <input
+            className="pv-search"
+            placeholder="Search patients..."
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
+          />
+        </div>
+      </div>
+      <div className="pv-table-wrap nursing-patient-table-wrap">
+        <div className="nursing-table-meta">
+          <h3>Patient Records</h3>
+          <span>{filteredVisits.length} records</span>
+        </div>
         <table className="pv-table">
           <thead>
             <tr>
               <th>Patient</th>
               <th>Status</th>
-              <th>Medication</th>
+              <th>Visit</th>
               <th>Actions</th>
             </tr>
           </thead>
           <tbody>
-            {activeVisits
-              .filter((v) =>
-                v.patient.toLowerCase().includes(search.toLowerCase()),
-              )
-              .map((v) => (
+            {filteredVisits.length === 0 ? (
+              <tr>
+                <td colSpan={4} className="pv-empty">
+                  No active patients found.
+                </td>
+              </tr>
+            ) : (
+              filteredVisits.map((v) => (
                 <tr key={v.id}>
                   <td className="pv-name">{v.patient}</td>
                   <td>
                     <span className="pv-badge badge-male">{v.status}</span>
                   </td>
-                  <td>{v.meds}</td>
+                  <td>{v.visit}</td>
                   <td>
-                    <button className="pv-del">Log Care</button>
+                    <button className="pv-del nursing-log-care-btn">Log Care</button>
                   </td>
                 </tr>
-              ))}
+              ))
+            )}
           </tbody>
         </table>
       </div>
@@ -1965,15 +2103,98 @@ function WardView() {
 function LaboratoryView() {
   const { patients, movePatient } = useAppStore();
   const [search, setSearch] = useState("");
+  const [statusFilter, setStatusFilter] = useState("ALL");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const [requests, setRequests] = useState<any[]>([]);
   const [selected, setSelected] = useState<any>(null);
 
-  const filtered = patients.filter(
-    (p) =>
-      p.queueStatus === "LAB" &&
-      (p.name.toLowerCase().includes(search.toLowerCase()) ||
-        p.nationalId.includes(search) ||
-        p.regNo.toLowerCase().includes(search.toLowerCase())),
-  );
+  const loadLabRequests = useCallback(async () => {
+    setLoading(true);
+    setError("");
+    try {
+      const rows = await fetchLaboratoryRequests(
+        statusFilter !== "ALL" ? { status: statusFilter } : undefined,
+      );
+      setRequests(Array.isArray(rows) ? rows : []);
+    } catch (err: any) {
+      setRequests([]);
+      setError(String(err?.message || "Failed to load laboratory data."));
+    } finally {
+      setLoading(false);
+    }
+  }, [statusFilter]);
+
+  useEffect(() => {
+    void loadLabRequests();
+  }, [loadLabRequests]);
+
+  const fallbackRows = patients
+    .filter((p) => p.queueStatus === "LAB")
+    .map((patient) => ({
+      id: patient.id,
+      patientCode: patient.regNo,
+      patientName: patient.name,
+      patientId: patient.id,
+      nationalId: patient.nationalId,
+      phone: patient.phone,
+      testName: "Malaria Parasites / FBC",
+      orderedBy: "Dr. Almalick",
+      status: "PENDING",
+      source: "local",
+    }));
+
+  const sourceRows = requests.length > 0 ? requests : fallbackRows;
+  const filtered = sourceRows.filter((row) => {
+    const status = String(row?.status || "").toUpperCase();
+    const q = search.trim().toLowerCase();
+    if (statusFilter !== "ALL" && status !== statusFilter) return false;
+    if (!q) return true;
+    return [
+      row?.patientName,
+      row?.patientCode,
+      row?.patientId,
+      row?.nationalId,
+      row?.phone,
+      row?.testName,
+      row?.testCode,
+      row?.status,
+    ]
+      .join(" ")
+      .toLowerCase()
+      .includes(q);
+  });
+  const hasStatus = (row: any, statuses: string[]) => {
+    const status = String(row?.status || "")
+      .trim()
+      .toUpperCase()
+      .replace(/[\s-]+/g, "_");
+    return statuses.includes(status);
+  };
+  const labStats = [
+    { label: "Total Orders", value: sourceRows.length, color: "#1e3a8a" },
+    {
+      label: "Sample Collected",
+      value: sourceRows.filter((row) =>
+        hasStatus(row, ["COLLECTED", "SAMPLE_COLLECTED", "VERIFIED", "RELEASED", "RESULT_ENTERED"]),
+      ).length,
+      color: "#0d9488",
+    },
+    {
+      label: "In Process",
+      value: sourceRows.filter((row) =>
+        hasStatus(row, ["IN_PROCESS", "INPROCESS", "PROCESSING", "RUNNING", "ANALYSING", "ANALYZING"]),
+      ).length,
+      color: "#f59e0b",
+    },
+    {
+      label: "Results Entered",
+      value: sourceRows.filter((row) =>
+        hasStatus(row, ["RESULT_ENTERED", "RESULTS_ENTERED", "VERIFIED", "RELEASED", "COMPLETED"]),
+      ).length,
+      color: "#16a34a",
+    },
+  ];
 
   return (
     <div className="patients-view">
@@ -1986,15 +2207,55 @@ function LaboratoryView() {
         </div>
       </div>
 
-      <div className="pv-search-wrap" style={{ marginBottom: 16 }}>
-        <input
-          className="pv-search"
-          placeholder="Search Patient (ID / Reg No / Name / Phone)"
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          style={{ width: "100%", maxWidth: "none" }}
-        />
+      <div className="pv-stats">
+        {labStats.map((stat) => (
+          <article
+            key={stat.label}
+            className="pv-stat-card"
+            style={{ borderLeftColor: stat.color }}
+          >
+            <p className="pv-stat-label">{stat.label}</p>
+            <p className="pv-stat-value">{loading ? "..." : stat.value}</p>
+          </article>
+        ))}
       </div>
+
+      <div className="pv-search-bar laboratory-search-row">
+        <div className="pv-search-wrap">
+          <svg
+            className="pv-search-icon"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden="true"
+          >
+            <circle cx="11" cy="11" r="8" />
+            <path d="m21 21-4.3-4.3" />
+          </svg>
+          <input
+            className="pv-search"
+            placeholder="Search Patient (ID / Reg No / Name / Phone)"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+          />
+        </div>
+        <select
+          value={statusFilter}
+          onChange={(e) => setStatusFilter(e.target.value)}
+          className="form-input laboratory-status-filter"
+        >
+          {["ALL", "PENDING", "COLLECTED", "IN_PROCESS", "VERIFIED", "RELEASED", "CANCELLED"].map((status) => (
+            <option key={status} value={status}>
+              {status}
+            </option>
+          ))}
+        </select>
+      </div>
+
+      {error ? <div className="workflow-notice is-error">{error}</div> : null}
 
       <div className="pv-table-wrap">
         <table className="pv-table">
@@ -2008,22 +2269,28 @@ function LaboratoryView() {
             </tr>
           </thead>
           <tbody>
-            {filtered.length === 0 ? (
+            {loading ? (
+              <tr>
+                <td colSpan={5} className="pv-empty">
+                  Loading lab requests...
+                </td>
+              </tr>
+            ) : filtered.length === 0 ? (
               <tr>
                 <td colSpan={5} className="pv-empty">
                   No patients in Lab Queue. Try searching...
                 </td>
               </tr>
             ) : (
-              filtered.map((p) => (
-                <tr key={p.id}>
-                  <td className="pv-code">{p.regNo}</td>
-                  <td className="pv-name">{p.name}</td>
-                  <td>Malaria Parasites / FBC</td>
-                  <td>Dr. Almalick</td>
+              filtered.map((row) => (
+                <tr key={row.id}>
+                  <td className="pv-code">{row.patientCode || row.patientId || "—"}</td>
+                  <td className="pv-name">{row.patientName || "Patient"}</td>
+                  <td>{row.testName || row.testCode || "—"}</td>
+                  <td>{row.orderedBy || row.doctorName || "—"}</td>
                   <td>
                     <button
-                      onClick={() => setSelected(p)}
+                      onClick={() => setSelected(row)}
                       className="btn-primary"
                     >
                       Record Results
@@ -2040,7 +2307,7 @@ function LaboratoryView() {
         <div className="modal-overlay">
           <div className="modal-box">
             <div className="modal-header">
-              <h3>Lab Results: {selected.name}</h3>
+              <h3>Lab Results: {selected.patientName || selected.name || "Patient"}</h3>
               <button className="modal-close" onClick={() => setSelected(null)}>
                 ×
               </button>
@@ -2355,162 +2622,3895 @@ function BloodBankView() {
     </div>
   );
 }
+void BloodBankView;
 
 function TelemedicineView() {
-  const [sessions] = useState([
-    { id: "1", patient: "John Doe", time: "14:00", status: "READY" },
-    { id: "2", patient: "Jane Smith", time: "16:30", status: "SCHEDULED" },
+  type TelemedicineField = {
+    key: string;
+    label: string;
+    note: string;
+    type: string;
+    required?: boolean;
+    placeholder?: string;
+    options?: string[];
+  };
+  const [search, setSearch] = useState("");
+  const [activeForm, setActiveForm] = useState<"booking" | "consultation" | null>(null);
+  const [formValues, setFormValues] = useState<Record<string, string | boolean>>({});
+  const [notice, setNotice] = useState("");
+  const [sessions, setSessions] = useState([
+    {
+      id: "1",
+      patient: "A. Hassan",
+      doctor: "Dr. Mugo",
+      time: "10:40 AM",
+      status: "Waiting",
+    },
+    {
+      id: "2",
+      patient: "B. Maina",
+      doctor: "Dr. Atieno",
+      time: "11:10 AM",
+      status: "In Session",
+    },
+    {
+      id: "3",
+      patient: "C. Wanjiku",
+      doctor: "Dr. Mutua",
+      time: "2:30 PM",
+      status: "Upcoming",
+    },
+    {
+      id: "4",
+      patient: "D. Otieno",
+      doctor: "Dr. Mugo",
+      time: "8:50 AM",
+      status: "Completed",
+    },
   ]);
+  const doctors = ["Dr. Mugo", "Dr. Atieno", "Dr. Mutua", "Dr. Njeri"];
+  const formAccent = activeForm === "consultation" ? "#2563eb" : "#16a34a";
+  const activeFormTitle =
+    activeForm === "consultation" ? "Telemedicine Consultation" : "Telemedicine Session Booking";
+  const activeFormDescription =
+    activeForm === "consultation"
+      ? "Capture technical checks, clinical notes, diagnosis, management plan, and follow-up decision."
+      : "Capture patient, doctor, session type, time slot, device context, and virtual care consent.";
+  const bookingFields: TelemedicineField[] = [
+    {
+      key: "patient",
+      label: "Patient",
+      note: "Patient MRN or search by name.",
+      type: "text",
+      required: true,
+      placeholder: "Patient MRN or search by name",
+    },
+    {
+      key: "doctor",
+      label: "Doctor",
+      note: "Doctor for the telemedicine session.",
+      type: "select",
+      required: true,
+      options: doctors,
+    },
+    {
+      key: "session_type",
+      label: "Session type",
+      note: "New consultation, follow-up, or specialist referral.",
+      type: "select",
+      required: true,
+      options: ["New consultation", "Follow-up", "Specialist referral"],
+    },
+    {
+      key: "date_and_time",
+      label: "Date and time",
+      note: "From available telemedicine slots.",
+      type: "datetime-local",
+      required: true,
+    },
+    {
+      key: "chief_complaint",
+      label: "Chief complaint",
+      note: "Reason for virtual consultation.",
+      type: "text",
+      required: true,
+      placeholder: "Reason for virtual consultation",
+    },
+    {
+      key: "patient_device",
+      label: "Patient device",
+      note: "Used for technical support before and during the session.",
+      type: "select",
+      options: ["Web", "iOS", "Android - for technical support"],
+    },
+    {
+      key: "consent_for_telemedicine",
+      label: "Consent for telemedicine",
+      note: "Patient consents to virtual consultation and recording policy.",
+      type: "checkbox",
+      required: true,
+    },
+  ];
+  const consultationFields: TelemedicineField[] = [
+    {
+      key: "technical_check",
+      label: "Technical check",
+      note: "Confirm audio, video, and patient identity.",
+      type: "checkbox",
+      required: true,
+    },
+    {
+      key: "session_notes",
+      label: "Session notes",
+      note: "Consultation notes using OPD-style clinical documentation.",
+      type: "textarea",
+      required: true,
+    },
+    {
+      key: "diagnosis",
+      label: "Diagnosis",
+      note: "ICD-10 coded diagnosis.",
+      type: "text",
+      required: true,
+      placeholder: "e.g. J06.9 Acute upper respiratory infection",
+    },
+    {
+      key: "management_plan",
+      label: "Management plan",
+      note: "Treatment plan including virtual prescriptions.",
+      type: "textarea",
+      required: true,
+    },
+    {
+      key: "prescription_issued",
+      label: "Prescription issued",
+      note: "Tick to indicate a digital prescription was issued.",
+      type: "checkbox",
+    },
+    {
+      key: "investigations_ordered",
+      label: "Investigations ordered",
+      note: "Tests to be done at the nearest facility.",
+      type: "text",
+      placeholder: "FBC, malaria test, urinalysis...",
+    },
+    {
+      key: "follow_up",
+      label: "Follow-up",
+      note: "Telemedicine, physical visit, or no follow-up needed.",
+      type: "select",
+      required: true,
+      options: ["Telemedicine", "Physical visit", "No follow-up needed"],
+    },
+    {
+      key: "referral_to_physical",
+      label: "Referral to physical",
+      note: "Tick if physical attendance is needed.",
+      type: "checkbox",
+    },
+  ];
+  const activeFields = activeForm === "consultation" ? consultationFields : bookingFields;
+  const chatMessages = 18;
+  const upcomingSessions = sessions.filter((session) =>
+    ["Waiting", "In Session", "Upcoming"].includes(session.status),
+  ).length;
+  const completedSessions = sessions.filter((session) => session.status === "Completed").length;
+  const filteredSessions = sessions.filter((session) => {
+    const needle = search.trim().toLowerCase();
+    if (!needle) return true;
+    return `${session.patient} ${session.doctor} ${session.status} ${session.time}`.toLowerCase().includes(needle);
+  });
+  const openForm = (form: "booking" | "consultation") => {
+    setActiveForm(form);
+    setFormValues({});
+    setNotice("");
+  };
+  const updateFormValue = (key: string, value: string | boolean) => {
+    setFormValues((current) => ({ ...current, [key]: value }));
+  };
+  const submitTelemedicineForm = (event: React.FormEvent) => {
+    event.preventDefault();
+    if (activeForm === "booking") {
+      const rawTime = String(formValues.date_and_time || "");
+      const date = rawTime ? new Date(rawTime) : null;
+      const time =
+        date && !Number.isNaN(date.getTime())
+          ? date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+          : "Scheduled";
+      setSessions((current) => [
+        {
+          id: `local-${Date.now()}`,
+          patient: String(formValues.patient || "New Patient"),
+          doctor: String(formValues.doctor || "Assigned Doctor"),
+          time,
+          status: "Upcoming",
+        },
+        ...current,
+      ]);
+      setNotice("Telemedicine session booked and added to the session table.");
+    } else {
+      setNotice("Telemedicine consultation saved and clinical follow-up captured.");
+    }
+    setActiveForm(null);
+    setFormValues({});
+  };
+  const renderTelemedicineField = (field: TelemedicineField) => {
+    const value = formValues[field.key];
+    if (field.type === "textarea") {
+      return (
+        <textarea
+          className="telemedicine-form-control"
+          value={typeof value === "string" ? value : ""}
+          onChange={(event) => updateFormValue(field.key, event.target.value)}
+          placeholder={field.placeholder}
+          required={field.required}
+        />
+      );
+    }
+    if (field.type === "select") {
+      return (
+        <select
+          className="telemedicine-form-control"
+          value={typeof value === "string" ? value : ""}
+          onChange={(event) => updateFormValue(field.key, event.target.value)}
+          required={field.required}
+        >
+          <option value="">Select {field.label.toLowerCase()}</option>
+          {(field.options || []).map((option) => (
+            <option key={option} value={option}>
+              {option}
+            </option>
+          ))}
+        </select>
+      );
+    }
+    if (field.type === "checkbox") {
+      return (
+        <label className="telemedicine-checkbox">
+          <input
+            type="checkbox"
+            checked={Boolean(value)}
+            onChange={(event) => updateFormValue(field.key, event.target.checked)}
+            required={field.required}
+          />
+          <span>{field.required ? "Required confirmation" : "Mark as yes"}</span>
+        </label>
+      );
+    }
+    return (
+      <input
+        className="telemedicine-form-control"
+        type={field.type || "text"}
+        value={typeof value === "string" ? value : ""}
+        onChange={(event) => updateFormValue(field.key, event.target.value)}
+        placeholder={field.placeholder}
+        required={field.required}
+      />
+    );
+  };
 
   return (
-    <div className="telemedicine-view">
+    <div className="patients-view telemedicine-web-view">
       <div className="pv-header">
         <div>
-          <h2 className="pv-title">Virtual Care Console</h2>
-          <p className="pv-subtitle">
-            Manage encrypted video consultations and virtual clinics
-          </p>
+          <div className="pv-title">
+            <Icon type="video_call" />
+            Telemedicine
+          </div>
+          <p className="pv-subtitle">Virtual consultations and remote follow-ups</p>
         </div>
+        <div className="module-actions">
+          <button type="button" onClick={() => openForm("booking")}>
+            <Icon type="video_call" size={16} /> Telemedicine Session Booking
+          </button>
+          <button type="button" onClick={() => openForm("consultation")}>
+            <Icon type="stethoscope" size={16} /> Telemedicine Consultation
+          </button>
+        </div>
+      </div>
+
+      {notice ? <div className="workflow-notice is-success">{notice}</div> : null}
+
+      <div className="pv-stats telemedicine-stat-grid">
+        <div className="pv-stat-card" style={{ borderLeftColor: "#1e3a8a" }}>
+          <p className="pv-stat-label">Sessions Today</p>
+          <p className="pv-stat-value">24</p>
+        </div>
+        <div className="pv-stat-card" style={{ borderLeftColor: "#0d9488" }}>
+          <p className="pv-stat-label">Average Wait</p>
+          <p className="pv-stat-value">6 mins</p>
+        </div>
+        <div className="pv-stat-card" style={{ borderLeftColor: "#dc2626" }}>
+          <p className="pv-stat-label">Escalations</p>
+          <p className="pv-stat-value">2</p>
+        </div>
+        <div className="pv-stat-card" style={{ borderLeftColor: "#7c3aed" }}>
+          <p className="pv-stat-label">Upcoming</p>
+          <p className="pv-stat-value">{upcomingSessions}</p>
+        </div>
+        <div className="pv-stat-card" style={{ borderLeftColor: "#16a34a" }}>
+          <p className="pv-stat-label">Completed</p>
+          <p className="pv-stat-value">{completedSessions}</p>
+        </div>
+        <div className="pv-stat-card" style={{ borderLeftColor: "#0284c7" }}>
+          <p className="pv-stat-label">Today's Sessions</p>
+          <p className="pv-stat-value">{sessions.length}</p>
+        </div>
+        <div className="pv-stat-card" style={{ borderLeftColor: "#f59e0b" }}>
+          <p className="pv-stat-label">Chat Messages</p>
+          <p className="pv-stat-value">{chatMessages}</p>
+        </div>
+      </div>
+
+      <div className="pv-search-bar">
+        <div className="pv-search-wrap">
+          <Icon type="search" size={16} />
+          <input
+            className="pv-search telemedicine-search"
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
+            placeholder="Search sessions"
+          />
+        </div>
+      </div>
+
+      <div className="pv-table-meta">
+        <strong className="pv-table-title">Telemedicine Sessions</strong>
+        <span className="pv-badge">{filteredSessions.length} sessions</span>
       </div>
       <div className="pv-table-wrap">
         <table className="pv-table">
           <thead>
             <tr>
-              <th>Patient Identity</th>
-              <th>Session Time</th>
+              <th>Patient</th>
+              <th>Doctor</th>
+              <th>Time</th>
               <th>Status</th>
               <th>Actions</th>
             </tr>
           </thead>
           <tbody>
-            {sessions.map((s) => (
-              <tr key={s.id}>
-                <td className="pv-name">{s.patient}</td>
-                <td>{s.time}</td>
-                <td>
-                  <span
-                    className={`pv-badge ${s.status === "READY" ? "badge-male" : "badge-female"}`}
-                  >
-                    {s.status}
-                  </span>
-                </td>
-                <td>
-                  <button className="pv-del">Join</button>
-                </td>
+            {filteredSessions.length === 0 ? (
+              <tr>
+                <td className="pv-empty" colSpan={5}>No sessions found.</td>
               </tr>
-            ))}
+            ) : (
+              filteredSessions.map((session) => (
+                <tr key={session.id}>
+                  <td className="pv-name">{session.patient}</td>
+                  <td>{session.doctor}</td>
+                  <td>{session.time}</td>
+                  <td>
+                    <span className={`pv-badge ${session.status === "Completed" ? "badge-male" : "badge-female"}`}>
+                      {session.status}
+                    </span>
+                  </td>
+                  <td>
+                    <button className="pv-del">
+                      {session.status === "Completed" ? "View" : "Join"}
+                    </button>
+                </td>
+                </tr>
+              ))
+            )}
           </tbody>
         </table>
       </div>
+
+      {activeForm ? (
+        <div className="telemedicine-form-overlay">
+          <div
+            className="telemedicine-form-panel"
+            style={{ "--telemedicine-accent": formAccent } as React.CSSProperties}
+          >
+            <div className="telemedicine-form-header">
+              <div className="telemedicine-form-title-wrap">
+                <div className="telemedicine-form-icon">
+                  <Icon type={activeForm === "consultation" ? "stethoscope" : "video_call"} size={24} />
+                </div>
+                <div>
+                  <p>Telemedicine</p>
+                  <h2>{activeFormTitle}</h2>
+                </div>
+              </div>
+              <button
+                type="button"
+                className="telemedicine-form-close"
+                onClick={() => setActiveForm(null)}
+                aria-label="Close form"
+              >
+                ×
+              </button>
+            </div>
+            <div className="telemedicine-form-intro">{activeFormDescription}</div>
+            <form className="telemedicine-form-body" onSubmit={submitTelemedicineForm}>
+              <div className="telemedicine-form-grid">
+                {activeFields.map((field) => (
+                  <label
+                    key={field.key}
+                    className={`telemedicine-form-field ${field.type === "textarea" ? "is-wide" : ""}`}
+                  >
+                    <span>
+                      {field.label}
+                      {field.required ? <strong>*</strong> : null}
+                    </span>
+                    <small>{field.note}</small>
+                    {renderTelemedicineField(field)}
+                  </label>
+                ))}
+              </div>
+              <div className="telemedicine-form-footer">
+                <button type="button" className="form-btn form-btn-cancel" onClick={() => setActiveForm(null)}>
+                  Cancel
+                </button>
+                <button type="submit" className="form-btn form-btn-primary">
+                  {activeForm === "consultation" ? "Save Consultation" : "Book Session"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }
 
 function AISuiteView() {
-  const [insights] = useState([
+  type AiAlertField = {
+    key: string;
+    label: string;
+    note: string;
+    type: string;
+    required?: boolean;
+    placeholder?: string;
+    options?: string[];
+  };
+  const [scope, setScope] = useState("FACILITY");
+  const [dateFrom, setDateFrom] = useState("2026-04-24");
+  const [dateTo, setDateTo] = useState("2026-05-23");
+  const [minConfidence, setMinConfidence] = useState("0.75");
+  const [riskLevel, setRiskLevel] = useState("ALL");
+  const [insightType, setInsightType] = useState("ALL");
+  const [predictionType, setPredictionType] = useState("ALL");
+  const [rowsLimit, setRowsLimit] = useState("25");
+  const [search, setSearch] = useState("");
+  const [activeForm, setActiveForm] = useState(false);
+  const [formValues, setFormValues] = useState<Record<string, string>>({});
+  const [notice, setNotice] = useState("");
+
+  const patients = [
+    { id: "P001", scope: "FACILITY" },
+    { id: "P002", scope: "FACILITY" },
+    { id: "P003", scope: "FACILITY" },
+    { id: "P004", scope: "DEPARTMENT" },
+    { id: "P005", scope: "DEPARTMENT" },
+    { id: "P006", scope: "FACILITY" },
+  ];
+  const visits = [
+    { id: "V001", date: "2026-05-22", scope: "FACILITY" },
+    { id: "V002", date: "2026-05-20", scope: "FACILITY" },
+    { id: "V003", date: "2026-05-18", scope: "DEPARTMENT" },
+    { id: "V004", date: "2026-05-12", scope: "FACILITY" },
+    { id: "V005", date: "2026-04-30", scope: "FACILITY" },
+  ];
+  const admissions = [
+    { id: "A001", date: "2026-05-20", scope: "FACILITY" },
+    { id: "A002", date: "2026-05-09", scope: "FACILITY" },
+    { id: "A003", date: "2026-05-01", scope: "DEPARTMENT" },
+  ];
+  const revenue = [
+    { id: "R001", date: "2026-05-22", amount: 126000, forecast: 148000, scope: "FACILITY" },
+    { id: "R002", date: "2026-05-16", amount: 98400, forecast: 112500, scope: "FACILITY" },
+    { id: "R003", date: "2026-05-04", amount: 86000, forecast: 94000, scope: "DEPARTMENT" },
+  ];
+  const stock = [
+    { item: "Amoxicillin 500mg", lowStock: true, expiringSoon: false, scope: "FACILITY" },
+    { item: "Insulin Regular", lowStock: true, expiringSoon: true, scope: "FACILITY" },
+    { item: "Ceftriaxone 1g", lowStock: false, expiringSoon: true, scope: "DEPARTMENT" },
+  ];
+  const analyticsRows = [
     {
-      id: "1",
-      type: "Patient Flow",
-      prediction: "High (+12%)",
-      confidence: "94%",
+      model: "Readmission Risk",
+      signal: "12% above baseline",
+      status: "Monitoring",
+      owner: "Clinical",
+      date: "2026-05-22",
+      scope: "FACILITY",
+      confidence: 0.92,
+      risk: "HIGH",
+      insightType: "Clinical",
+      predictionType: "Readmission",
+      billingAnomaly: false,
     },
     {
-      id: "2",
-      type: "Anomaly detection",
-      prediction: "Stable",
-      confidence: "99%",
+      model: "Denial Prediction",
+      signal: "High risk payer",
+      status: "Escalate",
+      owner: "RCM",
+      date: "2026-05-21",
+      scope: "FACILITY",
+      confidence: 0.88,
+      risk: "HIGH",
+      insightType: "Financial",
+      predictionType: "Revenue",
+      billingAnomaly: true,
     },
-  ]);
+    {
+      model: "Bed Demand",
+      signal: "Next 7 days +8%",
+      status: "Stable",
+      owner: "Operations",
+      date: "2026-05-18",
+      scope: "FACILITY",
+      confidence: 0.81,
+      risk: "MEDIUM",
+      insightType: "Operations",
+      predictionType: "Bed demand",
+      billingAnomaly: false,
+    },
+    {
+      model: "Low Stock Predictor",
+      signal: "Insulin will breach reorder level",
+      status: "Review",
+      owner: "Pharmacy",
+      date: "2026-05-12",
+      scope: "DEPARTMENT",
+      confidence: 0.79,
+      risk: "MEDIUM",
+      insightType: "Inventory",
+      predictionType: "Stock",
+      billingAnomaly: false,
+    },
+    {
+      model: "Billing Outlier Detection",
+      signal: "Procedure charge mismatch",
+      status: "Escalate",
+      owner: "Finance",
+      date: "2026-05-08",
+      scope: "FACILITY",
+      confidence: 0.74,
+      risk: "LOW",
+      insightType: "Financial",
+      predictionType: "Anomaly",
+      billingAnomaly: true,
+    },
+  ];
+  const aiAlertFields: AiAlertField[] = [
+    {
+      key: "patient",
+      label: "Patient",
+      note: "Patient flagged by AI model.",
+      type: "text",
+      required: true,
+      placeholder: "Patient flagged by AI model",
+    },
+    {
+      key: "risk_type",
+      label: "Risk type",
+      note: "Readmission, deterioration, sepsis, or revenue anomaly.",
+      type: "text",
+      required: true,
+      placeholder: "Readmission | Deterioration | Sepsis | Revenue anomaly",
+    },
+    {
+      key: "risk_score",
+      label: "Risk score",
+      note: "AI confidence score 0-100%.",
+      type: "text",
+      required: true,
+      placeholder: "AI confidence score 0-100%",
+    },
+    {
+      key: "contributing_factors",
+      label: "Contributing factors",
+      note: "Factors the AI used to determine risk.",
+      type: "text",
+      required: true,
+      placeholder: "Factors the AI used to determine risk",
+    },
+    {
+      key: "clinician_assessment",
+      label: "Clinician assessment",
+      note: "Clinical review outcome for the AI alert.",
+      type: "select",
+      required: true,
+      options: ["Agree - will act", "Disagree - not at risk", "Uncertain"],
+    },
+    {
+      key: "action_planned",
+      label: "Action planned",
+      note: "What action will be taken in response to this alert.",
+      type: "textarea",
+    },
+    {
+      key: "review_notes",
+      label: "Review notes",
+      note: "Any clinical notes on the AI prediction.",
+      type: "text",
+      placeholder: "Any clinical notes on the AI prediction",
+    },
+  ];
+  const dateInRange = (date: string) => {
+    if (dateFrom && date < dateFrom) return false;
+    if (dateTo && date > dateTo) return false;
+    return true;
+  };
+  const scopeMatches = (itemScope: string) => scope === "ALL" || itemScope === scope;
+  const formatKes = (amount: number) =>
+    `Ksh ${amount.toLocaleString("en-KE", { maximumFractionDigits: 0 })}`;
+  const min = Number(minConfidence || 0);
+  const limit = Math.max(1, Number(rowsLimit || 25));
+  const filteredAnalyticsRows = analyticsRows
+    .filter((row) => scopeMatches(row.scope))
+    .filter((row) => dateInRange(row.date))
+    .filter((row) => row.confidence >= min)
+    .filter((row) => riskLevel === "ALL" || row.risk === riskLevel)
+    .filter((row) => insightType === "ALL" || row.insightType === insightType)
+    .filter((row) => predictionType === "ALL" || row.predictionType === predictionType)
+    .filter((row) => {
+      const needle = search.trim().toLowerCase();
+      if (!needle) return true;
+      return `${row.model} ${row.signal} ${row.status} ${row.owner}`.toLowerCase().includes(needle);
+    })
+    .slice(0, limit);
+  const filteredVisits = visits.filter((visit) => scopeMatches(visit.scope) && dateInRange(visit.date));
+  const filteredAdmissions = admissions.filter((admission) => scopeMatches(admission.scope) && dateInRange(admission.date));
+  const filteredRevenue = revenue.filter((entry) => scopeMatches(entry.scope) && dateInRange(entry.date));
+  const filteredStock = stock.filter((item) => scopeMatches(item.scope));
+  const revenueCollected = filteredRevenue.reduce((sum, entry) => sum + entry.amount, 0);
+  const revenueForecast = filteredRevenue.reduce((sum, entry) => sum + entry.forecast, 0);
+  const readmissionHighRisk = filteredAnalyticsRows.filter(
+    (row) => row.predictionType === "Readmission" && row.risk === "HIGH",
+  ).length;
+  const billingAnomalies = filteredAnalyticsRows.filter((row) => row.billingAnomaly).length;
+  const updateFormValue = (key: string, value: string) => {
+    setFormValues((current) => ({ ...current, [key]: value }));
+  };
+  const renderAiAlertField = (field: AiAlertField) => {
+    const value = formValues[field.key] || "";
+    if (field.type === "textarea") {
+      return (
+        <textarea
+          className="ai-analytics-form-control"
+          value={value}
+          onChange={(event) => updateFormValue(field.key, event.target.value)}
+          placeholder={field.placeholder}
+          required={field.required}
+        />
+      );
+    }
+    if (field.type === "select") {
+      return (
+        <select
+          className="ai-analytics-form-control"
+          value={value}
+          onChange={(event) => updateFormValue(field.key, event.target.value)}
+          required={field.required}
+        >
+          <option value="">Select {field.label.toLowerCase()}</option>
+          {(field.options || []).map((option) => (
+            <option key={option} value={option}>{option}</option>
+          ))}
+        </select>
+      );
+    }
+    return (
+      <input
+        className="ai-analytics-form-control"
+        type={field.type}
+        value={value}
+        onChange={(event) => updateFormValue(field.key, event.target.value)}
+        placeholder={field.placeholder}
+        required={field.required}
+      />
+    );
+  };
+  const submitAiAlertReview = (event: React.FormEvent) => {
+    event.preventDefault();
+    setNotice("AI alert review saved for clinical governance follow-up.");
+    setActiveForm(false);
+    setFormValues({});
+  };
 
   return (
-    <div className="ai-suite-view">
+    <div className="patients-view ai-analytics-web-view">
       <div className="pv-header">
         <div>
-          <h2 className="pv-title">Augmented Intelligence</h2>
-          <p className="pv-subtitle">
-            Predictive modeling and clinical insight telemetry
-          </p>
+          <div className="pv-title">
+            <Icon type="auto_awesome" />
+            AI Analytics
+          </div>
+          <p className="pv-subtitle">Predictive clinical and financial intelligence</p>
+        </div>
+        <div className="module-actions">
+          <button type="button" onClick={() => setActiveForm(true)}>
+            <Icon type="auto_awesome" size={16} /> AI Alert Review
+          </button>
         </div>
       </div>
+
+      {notice ? <div className="workflow-notice is-success">{notice}</div> : null}
+
+      <div className="pv-stats ai-analytics-stat-grid">
+        <div className="pv-stat-card" style={{ borderLeftColor: "#1e3a8a" }}>
+          <p className="pv-stat-label">Patients</p>
+          <p className="pv-stat-value">{patients.filter((patient) => scopeMatches(patient.scope)).length}</p>
+        </div>
+        <div className="pv-stat-card" style={{ borderLeftColor: "#0d9488" }}>
+          <p className="pv-stat-label">Visits (30d)</p>
+          <p className="pv-stat-value">{filteredVisits.length}</p>
+        </div>
+        <div className="pv-stat-card" style={{ borderLeftColor: "#7c3aed" }}>
+          <p className="pv-stat-label">Admissions (30d)</p>
+          <p className="pv-stat-value">{filteredAdmissions.length}</p>
+        </div>
+        <div className="pv-stat-card" style={{ borderLeftColor: "#dc2626" }}>
+          <p className="pv-stat-label">Readmission High Risk</p>
+          <p className="pv-stat-value">{readmissionHighRisk}</p>
+        </div>
+        <div className="pv-stat-card" style={{ borderLeftColor: "#16a34a" }}>
+          <p className="pv-stat-label">Revenue Collected (30d)</p>
+          <p className="pv-stat-value">{formatKes(revenueCollected)}</p>
+        </div>
+        <div className="pv-stat-card" style={{ borderLeftColor: "#0284c7" }}>
+          <p className="pv-stat-label">Revenue Forecast (30d)</p>
+          <p className="pv-stat-value">{formatKes(revenueForecast)}</p>
+        </div>
+        <div className="pv-stat-card" style={{ borderLeftColor: "#f59e0b" }}>
+          <p className="pv-stat-label">Low Stock</p>
+          <p className="pv-stat-value">{filteredStock.filter((item) => item.lowStock).length}</p>
+        </div>
+        <div className="pv-stat-card" style={{ borderLeftColor: "#be123c" }}>
+          <p className="pv-stat-label">Expiring Soon</p>
+          <p className="pv-stat-value">{filteredStock.filter((item) => item.expiringSoon).length}</p>
+        </div>
+        <div className="pv-stat-card" style={{ borderLeftColor: "#dc2626" }}>
+          <p className="pv-stat-label">Billing Anomalies</p>
+          <p className="pv-stat-value">{billingAnomalies}</p>
+        </div>
+        <div className="pv-stat-card" style={{ borderLeftColor: "#6366f1" }}>
+          <p className="pv-stat-label">AI Insights Stored</p>
+          <p className="pv-stat-value">{filteredAnalyticsRows.length}</p>
+        </div>
+        <div className="pv-stat-card" style={{ borderLeftColor: "#0891b2" }}>
+          <p className="pv-stat-label">Predictions Stored</p>
+          <p className="pv-stat-value">{filteredAnalyticsRows.length}</p>
+        </div>
+      </div>
+
+      <section className="module-filter-panel ai-analytics-filter-panel">
+        <div className="module-filter-grid">
+          <label className="module-filter-field">
+            <span>Scope</span>
+            <select value={scope} onChange={(event) => setScope(event.target.value)}>
+              <option value="ALL">All</option>
+              <option value="FACILITY">Facility</option>
+              <option value="DEPARTMENT">Department</option>
+            </select>
+          </label>
+          <label className="module-filter-field">
+            <span>Date From</span>
+            <input type="date" value={dateFrom} onChange={(event) => setDateFrom(event.target.value)} />
+          </label>
+          <label className="module-filter-field">
+            <span>Date To</span>
+            <input type="date" value={dateTo} onChange={(event) => setDateTo(event.target.value)} />
+          </label>
+          <label className="module-filter-field">
+            <span>Min Confidence (0-1)</span>
+            <input type="number" min="0" max="1" step="0.01" value={minConfidence} onChange={(event) => setMinConfidence(event.target.value)} />
+          </label>
+          <label className="module-filter-field">
+            <span>Risk Level</span>
+            <select value={riskLevel} onChange={(event) => setRiskLevel(event.target.value)}>
+              <option value="ALL">All</option>
+              <option value="HIGH">High</option>
+              <option value="MEDIUM">Medium</option>
+              <option value="LOW">Low</option>
+            </select>
+          </label>
+          <label className="module-filter-field">
+            <span>Insight Type Filter</span>
+            <select value={insightType} onChange={(event) => setInsightType(event.target.value)}>
+              <option value="ALL">All</option>
+              <option value="Clinical">Clinical</option>
+              <option value="Financial">Financial</option>
+              <option value="Operations">Operations</option>
+              <option value="Inventory">Inventory</option>
+            </select>
+          </label>
+          <label className="module-filter-field">
+            <span>Prediction Type Filter</span>
+            <select value={predictionType} onChange={(event) => setPredictionType(event.target.value)}>
+              <option value="ALL">All</option>
+              <option value="Readmission">Readmission</option>
+              <option value="Revenue">Revenue</option>
+              <option value="Bed demand">Bed demand</option>
+              <option value="Stock">Stock</option>
+              <option value="Anomaly">Anomaly</option>
+            </select>
+          </label>
+          <label className="module-filter-field">
+            <span>Rows Limit</span>
+            <input type="number" min="1" max="100" value={rowsLimit} onChange={(event) => setRowsLimit(event.target.value)} />
+          </label>
+        </div>
+      </section>
+
+      <div className="pv-search-bar">
+        <div className="pv-search-wrap">
+          <Icon type="search" size={16} />
+          <input
+            className="pv-search ai-analytics-search"
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
+            placeholder="Search AI models"
+          />
+        </div>
+      </div>
+
       <div className="pv-table-wrap">
         <table className="pv-table">
           <thead>
             <tr>
-              <th>Insight Type</th>
-              <th>Prediction</th>
-              <th>Confidence</th>
-              <th>Actions</th>
+              <th>Model</th>
+              <th>Signal</th>
+              <th>Status</th>
+              <th>Owner</th>
             </tr>
           </thead>
           <tbody>
-            {insights.map((i) => (
-              <tr key={i.id}>
-                <td className="pv-name">{i.type}</td>
-                <td>{i.prediction}</td>
-                <td className="font-bold">{i.confidence}</td>
-                <td>
-                  <button className="pv-del">Detail</button>
-                </td>
+            {filteredAnalyticsRows.length === 0 ? (
+              <tr>
+                <td className="pv-empty" colSpan={4}>No AI analytics records found.</td>
               </tr>
-            ))}
+            ) : (
+              filteredAnalyticsRows.map((row) => (
+                <tr key={`${row.model}-${row.date}`}>
+                  <td className="pv-name">{row.model}</td>
+                  <td>{row.signal}</td>
+                  <td>{row.status}</td>
+                  <td>{row.owner}</td>
+                </tr>
+              ))
+            )}
           </tbody>
         </table>
       </div>
+
+      {activeForm ? (
+        <div className="ai-analytics-form-overlay">
+          <div className="ai-analytics-form-panel">
+            <div className="ai-analytics-form-header">
+              <div className="ai-analytics-form-title-wrap">
+                <div className="ai-analytics-form-icon">
+                  <Icon type="auto_awesome" size={24} />
+                </div>
+                <div>
+                  <p>AI Analytics</p>
+                  <h2>AI Alert Review</h2>
+                </div>
+              </div>
+              <button type="button" className="ai-analytics-form-close" onClick={() => setActiveForm(false)} aria-label="Close form">
+                ×
+              </button>
+            </div>
+            <div className="ai-analytics-form-intro">
+              Capture AI alert review details and clinical response.
+            </div>
+            <form className="ai-analytics-form-body" onSubmit={submitAiAlertReview}>
+              <div className="ai-analytics-form-grid">
+                {aiAlertFields.map((field) => (
+                  <label
+                    key={field.key}
+                    className={`ai-analytics-form-field ${field.type === "textarea" ? "is-wide" : ""}`}
+                  >
+                    <span>
+                      {field.label}
+                      {field.required ? <strong>*</strong> : null}
+                    </span>
+                    <small>{field.note}</small>
+                    {renderAiAlertField(field)}
+                  </label>
+                ))}
+              </div>
+              <div className="ai-analytics-form-footer">
+                <button type="button" className="form-btn form-btn-cancel" onClick={() => setActiveForm(false)}>
+                  Cancel
+                </button>
+                <button type="submit" className="form-btn form-btn-primary">
+                  Save AI Alert Review
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }
 
 function BlockchainView() {
-  const [ledger] = useState([
-    { id: "1", type: "Diagnostic", hash: "0x8a2f...3c91", status: "VERIFIED" },
-    { id: "2", type: "Admission", hash: "0x4e10...9b22", status: "ON-CHAIN" },
+  type BlockchainField = {
+    key: string;
+    label: string;
+    note: string;
+    type: string;
+    required?: boolean;
+    placeholder?: string;
+    options?: string[];
+  };
+  const [search, setSearch] = useState("");
+  const [activeForm, setActiveForm] = useState<"audit" | "integrity" | null>(null);
+  const [formValues, setFormValues] = useState<Record<string, string>>({});
+  const [notice, setNotice] = useState("");
+  const [ledgerEvents, setLedgerEvents] = useState([
+    {
+      hash: "0x9f2b...a11",
+      module: "EMR",
+      action: "NOTE_SIGNED",
+      time: "2 mins ago",
+      integrity: "Passed",
+      tamperAttempt: false,
+    },
+    {
+      hash: "0x83a7...f4c",
+      module: "Billing",
+      action: "PAYMENT_POSTED",
+      time: "7 mins ago",
+      integrity: "Passed",
+      tamperAttempt: false,
+    },
+    {
+      hash: "0x7bd4...901",
+      module: "User & Security",
+      action: "ROLE_UPDATED",
+      time: "16 mins ago",
+      integrity: "Passed",
+      tamperAttempt: false,
+    },
+    {
+      hash: "0x41aa...e22",
+      module: "External Integrations",
+      action: "EXPORT_VERIFIED",
+      time: "28 mins ago",
+      integrity: "Failed",
+      tamperAttempt: true,
+    },
   ]);
+  const auditFields: BlockchainField[] = [
+    {
+      key: "date_range",
+      label: "Date range",
+      note: "Period to search audit trail.",
+      type: "text",
+      required: true,
+      placeholder: "Today, last 7 days, 01/05/2026 - 23/05/2026",
+    },
+    {
+      key: "user",
+      label: "User",
+      note: "Filter by specific user.",
+      type: "select",
+      options: ["All users", "Dr. Mugo", "Billing Officer", "System Administrator"],
+    },
+    {
+      key: "module",
+      label: "Module",
+      note: "Filter by module.",
+      type: "select",
+      options: ["All modules", "EMR", "Billing", "User & Security", "External Integrations"],
+    },
+    {
+      key: "action_type",
+      label: "Action type",
+      note: "Insert, update, delete, login, or export.",
+      type: "select",
+      options: ["Insert", "Update", "Delete", "Login", "Export"],
+    },
+    {
+      key: "record_id",
+      label: "Record ID",
+      note: "Specific record to trace all changes.",
+      type: "text",
+      placeholder: "Record UUID or internal ID",
+    },
+    {
+      key: "patient_mrn",
+      label: "Patient MRN",
+      note: "All actions on this patient's records.",
+      type: "text",
+      placeholder: "MRN / Patient number",
+    },
+  ];
+  const integrityFields: BlockchainField[] = [
+    {
+      key: "from_entry_id",
+      label: "From entry ID",
+      note: "Start of chain to verify.",
+      type: "number",
+      required: true,
+      placeholder: "1001",
+    },
+    {
+      key: "to_entry_id",
+      label: "To entry ID",
+      note: "End of chain to verify.",
+      type: "number",
+      required: true,
+      placeholder: "1100",
+    },
+    {
+      key: "verification_result",
+      label: "Verification result",
+      note: "Pass - chain intact | Fail - tampering detected.",
+      type: "select",
+      required: true,
+      options: ["Pass - chain intact", "Fail - tampering detected"],
+    },
+  ];
+  const activeFields = activeForm === "integrity" ? integrityFields : auditFields;
+  const activeFormTitle =
+    activeForm === "integrity" ? "Chain Integrity Verification" : "Audit Query";
+  const activeFormDescription =
+    activeForm === "integrity"
+      ? "Verify an entry range and detect broken hashes, failed checks, or tampering."
+      : "Search immutable audit events by date range, user, module, action type, record, or MRN.";
+  const activeAccent = activeForm === "integrity" ? "#2563eb" : "#16a34a";
+  const eventsToday = ledgerEvents.length;
+  const failedChecks = ledgerEvents.filter((event) => event.integrity === "Failed").length;
+  const tamperAttempts = ledgerEvents.filter((event) => event.tamperAttempt).length;
+  const alerts = failedChecks + tamperAttempts;
+  const integrityScore =
+    eventsToday > 0 ? `${Math.round(((eventsToday - failedChecks) / eventsToday) * 100)}%` : "100%";
+  const filteredEvents = ledgerEvents.filter((event) => {
+    const needle = search.trim().toLowerCase();
+    if (!needle) return true;
+    return `${event.hash} ${event.module} ${event.action} ${event.integrity}`.toLowerCase().includes(needle);
+  });
+  const updateFormValue = (key: string, value: string) => {
+    setFormValues((current) => ({ ...current, [key]: value }));
+  };
+  const openBlockchainForm = (form: "audit" | "integrity") => {
+    setActiveForm(form);
+    setFormValues({});
+    setNotice("");
+  };
+  const submitBlockchainForm = (event: React.FormEvent) => {
+    event.preventDefault();
+    if (activeForm === "integrity") {
+      const failed = String(formValues.verification_result || "").toLowerCase().startsWith("fail");
+      setLedgerEvents((current) => [
+        {
+          hash: failed ? "0xfail...chk" : "0xpass...chk",
+          module: "Blockchain Audit",
+          action: "CHAIN_VERIFICATION",
+          time: "Just now",
+          integrity: failed ? "Failed" : "Passed",
+          tamperAttempt: failed,
+        },
+        ...current,
+      ]);
+      setNotice(
+        failed
+          ? "Chain integrity check saved. Failed check and tamper attempt counters updated."
+          : "Chain integrity check saved. Ledger range passed verification.",
+      );
+    } else {
+      setNotice("Audit query saved. Matching ledger filters are ready for review.");
+    }
+    setActiveForm(null);
+    setFormValues({});
+  };
+  const renderBlockchainField = (field: BlockchainField) => {
+    const value = formValues[field.key] || "";
+    if (field.type === "select") {
+      return (
+        <select
+          className="blockchain-form-control"
+          value={value}
+          onChange={(event) => updateFormValue(field.key, event.target.value)}
+          required={field.required}
+        >
+          <option value="">Select {field.label.toLowerCase()}</option>
+          {(field.options || []).map((option) => (
+            <option key={option} value={option}>
+              {option}
+            </option>
+          ))}
+        </select>
+      );
+    }
+    return (
+      <input
+        className="blockchain-form-control"
+        type={field.type}
+        value={value}
+        onChange={(event) => updateFormValue(field.key, event.target.value)}
+        placeholder={field.placeholder}
+        required={field.required}
+      />
+    );
+  };
 
   return (
-    <div className="blockchain-view">
+    <div className="patients-view blockchain-web-view">
       <div className="pv-header">
         <div>
-          <h2 className="pv-title">Immutable Audit Ledger</h2>
-          <p className="pv-subtitle">
-            Verifiable record hashes and distributed trust auditing
-          </p>
+          <div className="pv-title">
+            <Icon type="verified" />
+            Blockchain Audit
+          </div>
+          <p className="pv-subtitle">Immutable platform-wide event ledger</p>
         </div>
+        <div className="module-actions">
+          <button type="button" onClick={() => openBlockchainForm("audit")}>
+            <Icon type="manage_search" size={16} /> Audit Query
+          </button>
+          <button type="button" onClick={() => openBlockchainForm("integrity")}>
+            <Icon type="fact_check" size={16} /> Chain Integrity Verification
+          </button>
+          <button type="button">
+            <Icon type="verified" size={16} /> Export Ledger
+          </button>
+        </div>
+      </div>
+
+      {notice ? <div className="workflow-notice is-success">{notice}</div> : null}
+
+      <div className="pv-stats blockchain-stat-grid">
+        <div className="pv-stat-card" style={{ borderLeftColor: "#1e3a8a" }}>
+          <p className="pv-stat-label">Events Today</p>
+          <p className="pv-stat-value">{eventsToday}</p>
+        </div>
+        <div className="pv-stat-card" style={{ borderLeftColor: "#0d9488" }}>
+          <p className="pv-stat-label">Integrity Score</p>
+          <p className="pv-stat-value">{integrityScore}</p>
+        </div>
+        <div className="pv-stat-card" style={{ borderLeftColor: "#dc2626" }}>
+          <p className="pv-stat-label">Alerts</p>
+          <p className="pv-stat-value">{alerts}</p>
+        </div>
+        <div className="pv-stat-card" style={{ borderLeftColor: "#7c3aed" }}>
+          <p className="pv-stat-label">Tamper Attempts</p>
+          <p className="pv-stat-value">{tamperAttempts}</p>
+        </div>
+        <div className="pv-stat-card" style={{ borderLeftColor: "#f59e0b" }}>
+          <p className="pv-stat-label">Failed Checks</p>
+          <p className="pv-stat-value">{failedChecks}</p>
+        </div>
+      </div>
+
+      <div className="pv-search-bar">
+        <div className="pv-search-wrap">
+          <Icon type="search" size={16} />
+          <input
+            className="pv-search blockchain-search"
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
+            placeholder="Search audit hashes"
+          />
+        </div>
+      </div>
+
+      <div className="pv-table-meta">
+        <strong className="pv-table-title">Audit Ledger</strong>
+        <span className="pv-badge">{filteredEvents.length} events</span>
       </div>
       <div className="pv-table-wrap">
         <table className="pv-table">
           <thead>
             <tr>
-              <th>Record Type</th>
-              <th>Blockchain Hash</th>
-              <th>Status</th>
-              <th>Actions</th>
+              <th>Hash</th>
+              <th>Module</th>
+              <th>Action</th>
+              <th>Integrity</th>
+              <th>Time</th>
             </tr>
           </thead>
           <tbody>
-            {ledger.map((l) => (
-              <tr key={l.id}>
-                <td className="pv-name">{l.type}</td>
-                <td className="font-mono text-xs">{l.hash}</td>
-                <td>
-                  <span
-                    className={`pv-badge ${l.status === "VERIFIED" ? "badge-male" : "badge-female"}`}
+            {filteredEvents.length === 0 ? (
+              <tr>
+                <td className="pv-empty" colSpan={5}>No audit events found.</td>
+              </tr>
+            ) : (
+              filteredEvents.map((event) => (
+                <tr key={event.hash}>
+                  <td className="pv-code">{event.hash}</td>
+                  <td>{event.module}</td>
+                  <td>{event.action}</td>
+                  <td>
+                    <span className={`pv-badge ${event.integrity === "Passed" ? "badge-male" : "badge-female"}`}>
+                      {event.integrity}
+                    </span>
+                  </td>
+                  <td>{event.time}</td>
+                </tr>
+              ))
+            )}
+          </tbody>
+        </table>
+      </div>
+
+      {activeForm ? (
+        <div className="blockchain-form-overlay">
+          <div
+            className="blockchain-form-panel"
+            style={{ "--blockchain-accent": activeAccent } as React.CSSProperties}
+          >
+            <div className="blockchain-form-header">
+              <div className="blockchain-form-title-wrap">
+                <div className="blockchain-form-icon">
+                  <Icon type={activeForm === "integrity" ? "fact_check" : "manage_search"} size={24} />
+                </div>
+                <div>
+                  <p>Blockchain Audit</p>
+                  <h2>{activeFormTitle}</h2>
+                </div>
+              </div>
+              <button
+                type="button"
+                className="blockchain-form-close"
+                onClick={() => setActiveForm(null)}
+                aria-label="Close form"
+              >
+                ×
+              </button>
+            </div>
+            <div className="blockchain-form-intro">{activeFormDescription}</div>
+            <form className="blockchain-form-body" onSubmit={submitBlockchainForm}>
+              <div className="blockchain-form-grid">
+                {activeFields.map((field) => (
+                  <label key={field.key} className="blockchain-form-field">
+                    <span>
+                      {field.label}
+                      {field.required ? <strong>*</strong> : null}
+                    </span>
+                    <small>{field.note}</small>
+                    {renderBlockchainField(field)}
+                  </label>
+                ))}
+              </div>
+              <div className="blockchain-form-footer">
+                <button type="button" className="form-btn form-btn-cancel" onClick={() => setActiveForm(null)}>
+                  Cancel
+                </button>
+                <button type="submit" className="form-btn form-btn-primary">
+                  {activeForm === "integrity" ? "Verify Chain" : "Run Audit Query"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function PatientPortalView() {
+  type PortalField = {
+    key: string;
+    label: string;
+    note: string;
+    type: string;
+    required?: boolean;
+    placeholder?: string;
+    options?: string[];
+  };
+  type PortalForm = {
+    key: "account" | "appointment" | "feedback";
+    title: string;
+    description: string;
+    accent: string;
+    icon: string;
+    submitLabel: string;
+    fields: PortalField[];
+  };
+  const [search, setSearch] = useState("");
+  const [activeFormKey, setActiveFormKey] = useState<PortalForm["key"] | null>(null);
+  const [formValues, setFormValues] = useState<Record<string, string>>({});
+  const [notice, setNotice] = useState("");
+  const [notifications, setNotifications] = useState([
+    { patient: "A. Hassan", type: "Lab result ready", status: "Unread", sent: "Today 10:20 AM" },
+    { patient: "B. Maina", type: "Appointment reminder", status: "Read", sent: "Yesterday 3:40 PM" },
+    { patient: "C. Wanjiku", type: "Bill receipt", status: "Unread", sent: "Today 9:05 AM" },
+    { patient: "D. Otieno", type: "Telemedicine link", status: "Read", sent: "Mon 2:12 PM" },
+  ]);
+  const forms: PortalForm[] = [
+    {
+      key: "account",
+      title: "Portal Account Registration",
+      description: "Capture portal account registration details.",
+      accent: "#16a34a",
+      icon: "users",
+      submitLabel: "Register Portal Account",
+      fields: [
+        { key: "mrn", label: "MRN", type: "text", required: true, note: "Medical record number from facility registration.", placeholder: "Medical record number from facility registration" },
+        { key: "date_of_birth", label: "Date of birth", type: "date", required: true, note: "Verified against hospital records." },
+        { key: "phone_number", label: "Phone number", type: "tel", required: true, note: "Registered phone for OTP verification.", placeholder: "Registered phone for OTP verification" },
+        { key: "email_address", label: "Email address", type: "email", required: true, note: "Login email.", placeholder: "Login email" },
+        { key: "create_password", label: "Create password", type: "password", required: true, note: "Minimum 8 characters with complexity requirements." },
+        { key: "confirm_password", label: "Confirm password", type: "password", required: true, note: "Must match password field." },
+        { key: "notification_preferences", label: "Notification preferences", type: "text", note: "SMS | Email | WhatsApp - what to receive.", placeholder: "SMS | Email | WhatsApp" },
+      ],
+    },
+    {
+      key: "appointment",
+      title: "Appointment Booking (Portal)",
+      description: "Capture appointment booking (portal) details.",
+      accent: "#2563eb",
+      icon: "event",
+      submitLabel: "Book Portal Appointment",
+      fields: [
+        { key: "department", label: "Department", type: "select", required: true, note: "Clinic or specialty.", options: ["Outpatient", "Dental", "Maternity", "Physiotherapy", "Specialist Clinic"] },
+        { key: "appointment_type", label: "Appointment type", type: "select", required: true, note: "New | Follow-up | Telemedicine.", options: ["New", "Follow-up", "Telemedicine"] },
+        { key: "preferred_date", label: "Preferred date", type: "date", required: true, note: "Select from available calendar." },
+        { key: "available_slot", label: "Available slot", type: "select", required: true, note: "Choose from doctor's available times.", options: ["08:30 AM", "10:00 AM", "11:30 AM", "02:00 PM", "04:00 PM"] },
+        { key: "chief_complaint", label: "Chief complaint", type: "text", required: true, note: "Reason for appointment.", placeholder: "Reason for appointment" },
+        { key: "insurance_to_use", label: "Insurance to use", type: "select", note: "Active insurance scheme for this visit.", options: ["Cash", "SHA/NHIF", "AAR", "Jubilee", "Corporate"] },
+      ],
+    },
+    {
+      key: "feedback",
+      title: "Patient Feedback (Portal)",
+      description: "Capture patient feedback form (portal) details.",
+      accent: "#7c3aed",
+      icon: "message",
+      submitLabel: "Submit Patient Feedback",
+      fields: [
+        { key: "visit_date", label: "Visit date", type: "date", required: true, note: "Date of the visit being rated." },
+        { key: "overall_satisfaction", label: "Overall satisfaction", type: "text", required: true, note: "1-5 star rating.", placeholder: "1-5 star rating" },
+        { key: "staff_attitude", label: "Staff attitude", type: "text", note: "1-5 rating.", placeholder: "1-5 rating" },
+        { key: "cleanliness", label: "Cleanliness", type: "text", note: "1-5 rating.", placeholder: "1-5 rating" },
+        { key: "wait_time", label: "Wait time", type: "text", note: "1-5 rating.", placeholder: "1-5 rating" },
+        { key: "would_recommend", label: "Would recommend", type: "text", required: true, note: "Net Promoter Score 0-10.", placeholder: "Net Promoter Score 0-10" },
+        { key: "comments", label: "Comments", type: "textarea", note: "Free-text feedback." },
+      ],
+    },
+  ];
+  const activeForm = forms.find((form) => form.key === activeFormKey) || null;
+  const filteredNotifications = notifications.filter((notification) => {
+    const needle = search.trim().toLowerCase();
+    if (!needle) return true;
+    return `${notification.patient} ${notification.type} ${notification.status} ${notification.sent}`.toLowerCase().includes(needle);
+  });
+  const activeAccounts = 128;
+  const appointments = 36;
+  const unreadAlerts = notifications.filter((notification) => notification.status === "Unread").length;
+  const messages = notifications.length;
+  const openForm = (key: PortalForm["key"]) => {
+    setActiveFormKey(key);
+    setFormValues({});
+    setNotice("");
+  };
+  const updateFormValue = (key: string, value: string) => {
+    setFormValues((current) => ({ ...current, [key]: value }));
+  };
+  const renderPortalField = (field: PortalField) => {
+    const value = formValues[field.key] || "";
+    if (field.type === "textarea") {
+      return (
+        <textarea
+          className="patient-portal-form-control"
+          value={value}
+          onChange={(event) => updateFormValue(field.key, event.target.value)}
+          placeholder={field.placeholder}
+          required={field.required}
+        />
+      );
+    }
+    if (field.type === "select") {
+      return (
+        <select
+          className="patient-portal-form-control"
+          value={value}
+          onChange={(event) => updateFormValue(field.key, event.target.value)}
+          required={field.required}
+        >
+          <option value="">Select {field.label.toLowerCase()}</option>
+          {(field.options || []).map((option) => (
+            <option key={option} value={option}>{option}</option>
+          ))}
+        </select>
+      );
+    }
+    return (
+      <input
+        className="patient-portal-form-control"
+        type={field.type}
+        value={value}
+        onChange={(event) => updateFormValue(field.key, event.target.value)}
+        placeholder={field.placeholder}
+        required={field.required}
+      />
+    );
+  };
+  const submitPortalForm = (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!activeForm) return;
+    const patient = String(formValues.mrn || formValues.patient || "Portal patient");
+    const nextType =
+      activeForm.key === "account"
+        ? "Portal account registered"
+        : activeForm.key === "appointment"
+          ? "Portal appointment booked"
+          : "Portal feedback received";
+    setNotifications((current) => [
+      { patient, type: nextType, status: "Unread", sent: "Just now" },
+      ...current,
+    ]);
+    setNotice(`${activeForm.title} saved and reflected in Recent Notifications.`);
+    setActiveFormKey(null);
+    setFormValues({});
+  };
+
+  return (
+    <div className="patients-view patient-portal-web-view">
+      <div className="pv-header">
+        <div>
+          <div className="pv-title">
+            <Icon type="users" />
+            Patient Portal
+          </div>
+          <p className="pv-subtitle">Self-service engagement, messaging, and appointment tracking for patients.</p>
+        </div>
+        <div className="module-actions">
+          {forms.map((form) => (
+            <button
+              key={form.key}
+              type="button"
+              onClick={() => openForm(form.key)}
+              style={{
+                backgroundColor: form.accent,
+                borderColor: form.accent,
+                boxShadow: `0 8px 18px ${form.accent}33`,
+              }}
+            >
+              <Icon type={form.icon} size={16} /> {form.title}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {notice ? <div className="workflow-notice is-success">{notice}</div> : null}
+
+      <div className="pv-stats patient-portal-stat-grid">
+        <div className="pv-stat-card" style={{ borderLeftColor: "#1e3a8a" }}>
+          <p className="pv-stat-label">Active Accounts</p>
+          <p className="pv-stat-value">{activeAccounts}</p>
+        </div>
+        <div className="pv-stat-card" style={{ borderLeftColor: "#0d9488" }}>
+          <p className="pv-stat-label">Appointments</p>
+          <p className="pv-stat-value">{appointments}</p>
+        </div>
+        <div className="pv-stat-card" style={{ borderLeftColor: "#dc2626" }}>
+          <p className="pv-stat-label">Unread Alerts</p>
+          <p className="pv-stat-value">{unreadAlerts}</p>
+        </div>
+        <div className="pv-stat-card" style={{ borderLeftColor: "#7c3aed" }}>
+          <p className="pv-stat-label">Messages</p>
+          <p className="pv-stat-value">{messages}</p>
+        </div>
+      </div>
+
+      <div className="pv-search-bar">
+        <div className="pv-search-wrap">
+          <Icon type="search" size={16} />
+          <input
+            className="pv-search patient-portal-search"
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
+            placeholder="Search patient portal records"
+          />
+        </div>
+      </div>
+
+      <div className="pv-table-meta">
+        <strong className="pv-table-title">Recent Notifications</strong>
+        <span className="pv-badge">{filteredNotifications.length} records</span>
+      </div>
+      <div className="pv-table-wrap">
+        <table className="pv-table">
+          <thead>
+            <tr>
+              <th>Patient</th>
+              <th>Type</th>
+              <th>Status</th>
+              <th>Sent</th>
+            </tr>
+          </thead>
+          <tbody>
+            {filteredNotifications.length === 0 ? (
+              <tr>
+                <td className="pv-empty" colSpan={4}>No patient portal notifications found.</td>
+              </tr>
+            ) : (
+              filteredNotifications.map((notification, index) => (
+                <tr key={`${notification.patient}-${notification.type}-${index}`}>
+                  <td className="pv-name">{notification.patient}</td>
+                  <td>{notification.type}</td>
+                  <td>
+                    <span className={`pv-badge ${notification.status === "Unread" ? "badge-female" : "badge-male"}`}>
+                      {notification.status}
+                    </span>
+                  </td>
+                  <td>{notification.sent}</td>
+                </tr>
+              ))
+            )}
+          </tbody>
+        </table>
+      </div>
+
+      {activeForm ? (
+        <div className="patient-portal-form-overlay">
+          <div
+            className="patient-portal-form-panel"
+            style={{ "--patient-portal-accent": activeForm.accent } as React.CSSProperties}
+          >
+            <div className="patient-portal-form-header">
+              <div className="patient-portal-form-title-wrap">
+                <div className="patient-portal-form-icon">
+                  <Icon type={activeForm.icon} size={24} />
+                </div>
+                <div>
+                  <p>Patient Portal</p>
+                  <h2>{activeForm.title}</h2>
+                </div>
+              </div>
+              <button
+                type="button"
+                className="patient-portal-form-close"
+                onClick={() => setActiveFormKey(null)}
+                aria-label="Close form"
+              >
+                ×
+              </button>
+            </div>
+            <div className="patient-portal-form-intro">{activeForm.description}</div>
+            <form className="patient-portal-form-body" onSubmit={submitPortalForm}>
+              <div className="patient-portal-form-grid">
+                {activeForm.fields.map((field) => (
+                  <label
+                    key={field.key}
+                    className={`patient-portal-form-field ${field.type === "textarea" ? "is-wide" : ""}`}
                   >
-                    {l.status}
-                  </span>
-                </td>
-                <td>
-                  <button className="pv-del">Verify</button>
-                </td>
+                    <span>
+                      {field.label}
+                      {field.required ? <strong>*</strong> : null}
+                    </span>
+                    <small>{field.note}</small>
+                    {renderPortalField(field)}
+                  </label>
+                ))}
+              </div>
+              <div className="patient-portal-form-footer">
+                <button type="button" className="form-btn form-btn-cancel" onClick={() => setActiveFormKey(null)}>
+                  Cancel
+                </button>
+                <button type="submit" className="form-btn form-btn-primary">
+                  {activeForm.submitLabel}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function EmergencyView() {
+  type EmergencyField = {
+    key: string;
+    label: string;
+    note: string;
+    type: string;
+    required?: boolean;
+    placeholder?: string;
+    options?: string[];
+  };
+  type EmergencyForm = {
+    key: "triage" | "encounter" | "trauma";
+    title: string;
+    description: string;
+    accent: string;
+    icon: string;
+    submitLabel: string;
+    fields: EmergencyField[];
+  };
+  const [search, setSearch] = useState("");
+  const [activeFormKey, setActiveFormKey] = useState<EmergencyForm["key"] | null>(null);
+  const [formValues, setFormValues] = useState<Record<string, string | boolean>>({});
+  const [notice, setNotice] = useState("");
+  const [boardRows, setBoardRows] = useState([
+    { patient: "A. Hassan", triage: "P1 Immediate", status: "Resuscitation", waiting: 4 },
+    { patient: "B. Maina", triage: "P2 Urgent", status: "Doctor Review", waiting: 12 },
+    { patient: "Unknown Male", triage: "P3 Semi-urgent", status: "Triage Complete", waiting: 21 },
+    { patient: "C. Wanjiku", triage: "P4 Non-urgent", status: "Observation", waiting: 38 },
+  ]);
+  const forms: EmergencyForm[] = [
+    {
+      key: "triage",
+      title: "Emergency Triage",
+      description: "Capture emergency triage details.",
+      accent: "#dc2626",
+      icon: "fact_check",
+      submitLabel: "Save Emergency Triage",
+      fields: [
+        { key: "patient_name", label: "Patient name", type: "text", required: true, note: "Full name - MRN auto-searched or created.", placeholder: "Full name - MRN auto-searched or created" },
+        { key: "arrival_mode", label: "Arrival mode", type: "select", required: true, note: "Walk-in | Ambulance | Police | Referred | Air.", options: ["Walk-in", "Ambulance", "Police", "Referred", "Air"] },
+        { key: "triage_category", label: "Triage category", type: "select", required: true, note: "P1 Immediate | P2 Urgent | P3 Semi-urgent | P4 Non-urgent | P5 Dead.", options: ["P1 Immediate", "P2 Urgent", "P3 Semi-urgent", "P4 Non-urgent", "P5 Dead"] },
+        { key: "triage_system", label: "Triage system", type: "select", required: true, note: "MTS | SATS | ESI | START.", options: ["MTS", "SATS", "ESI", "START"] },
+        { key: "chief_complaint", label: "Chief complaint", type: "text", required: true, note: "Primary emergency complaint.", placeholder: "Primary emergency complaint" },
+        { key: "mechanism_of_injury", label: "Mechanism of injury", type: "text", note: "For trauma: how injury occurred.", placeholder: "For trauma: how injury occurred" },
+        { key: "airway", label: "Airway", type: "select", required: true, note: "Patent | Compromised | Obstructed.", options: ["Patent", "Compromised", "Obstructed"] },
+        { key: "breathing", label: "Breathing", type: "select", required: true, note: "Adequate | Inadequate | Absent.", options: ["Adequate", "Inadequate", "Absent"] },
+        { key: "circulation", label: "Circulation", type: "select", required: true, note: "Normal | Compromised | Absent.", options: ["Normal", "Compromised", "Absent"] },
+        { key: "disability_avpu", label: "Disability (AVPU)", type: "select", required: true, note: "Alert | Voice | Pain | Unresponsive.", options: ["Alert", "Voice", "Pain", "Unresponsive"] },
+        { key: "temperature_c", label: "Temperature (C)", type: "number", required: true, note: "Body temperature.", placeholder: "Body temperature" },
+        { key: "pulse_bpm", label: "Pulse (bpm)", type: "number", required: true, note: "Heart rate.", placeholder: "Heart rate" },
+        { key: "blood_pressure", label: "Blood pressure", type: "text", required: true, note: "Systolic/Diastolic.", placeholder: "Systolic/Diastolic" },
+        { key: "respiratory_rate", label: "Respiratory rate", type: "number", required: true, note: "Breaths per minute.", placeholder: "Breaths per minute" },
+        { key: "spo2", label: "SpO2 (%)", type: "number", required: true, note: "Oxygen saturation.", placeholder: "Oxygen saturation" },
+        { key: "gcs_total", label: "GCS total", type: "number", required: true, note: "Glasgow Coma Scale 3-15.", placeholder: "Glasgow Coma Scale 3-15" },
+        { key: "pain_score", label: "Pain score", type: "text", required: true, note: "0-10 scale.", placeholder: "0-10 scale" },
+        { key: "blood_glucose", label: "Blood glucose", type: "number", note: "Bedside glucose mmol/L.", placeholder: "Bedside glucose mmol/L" },
+        { key: "pregnancy_status", label: "Pregnancy status", type: "select", note: "If applicable - female of reproductive age.", options: ["Not applicable", "Pregnant", "Not pregnant", "Unknown"] },
+        { key: "allergies", label: "Allergies", type: "checkbox", required: true, note: "Confirm allergy status checked." },
+        { key: "resuscitation_bay_needed", label: "Resuscitation bay needed", type: "checkbox", note: "Tick to activate resuscitation bay." },
+        { key: "pre_arrival_notification", label: "Pre-arrival notification", type: "checkbox", note: "Tick if ambulance pre-notified." },
+      ],
+    },
+    {
+      key: "encounter",
+      title: "Emergency Encounter",
+      description: "Capture emergency encounter details.",
+      accent: "#2563eb",
+      icon: "stethoscope",
+      submitLabel: "Save Emergency Encounter",
+      fields: [
+        { key: "clinical_assessment", label: "Clinical assessment", type: "textarea", required: true, note: "Full clinical assessment by emergency doctor." },
+        { key: "working_diagnosis", label: "Working diagnosis", type: "text", required: true, note: "Emergency diagnosis - ICD-10 coded.", placeholder: "Emergency diagnosis - ICD-10 coded" },
+        { key: "investigations_ordered", label: "Investigations ordered", type: "text", note: "Labs, imaging, ECG, blood cultures.", placeholder: "Labs, imaging, ECG, blood cultures" },
+        { key: "resuscitation_actions", label: "Resuscitation actions", type: "textarea", note: "Detailed resuscitation steps performed." },
+        { key: "treatments_given", label: "Treatments given", type: "text", note: "Drugs and interventions in emergency department.", placeholder: "Drugs and interventions in emergency department" },
+        { key: "disposition", label: "Disposition", type: "select", required: true, note: "Admitted | ICU | Theatre | Discharged | Transferred | Deceased.", options: ["Admitted", "ICU", "Theatre", "Discharged", "Transferred", "Deceased"] },
+        { key: "disposition_time", label: "Disposition time", type: "datetime-local", required: true, note: "Time disposition decision was made." },
+        { key: "trauma_team_activated", label: "Trauma team activated", type: "checkbox", note: "Tick if trauma team was paged." },
+      ],
+    },
+    {
+      key: "trauma",
+      title: "Trauma Documentation",
+      description: "Capture trauma documentation details.",
+      accent: "#7c3aed",
+      icon: "shield",
+      submitLabel: "Save Trauma Documentation",
+      fields: [
+        { key: "time_of_injury", label: "Time of injury", type: "datetime-local", required: true, note: "When injury occurred." },
+        { key: "injury_mechanism", label: "Injury mechanism", type: "select", required: true, note: "MVA | Fall | Assault | Gunshot | Stab | Burns | Drowning | Other.", options: ["MVA", "Fall", "Assault", "Gunshot", "Stab", "Burns", "Drowning", "Other"] },
+        { key: "body_regions_injured", label: "Body regions injured", type: "text", required: true, note: "Head | Neck | Chest | Abdomen | Pelvis | Spine | Upper limb | Lower limb.", placeholder: "Head | Neck | Chest | Abdomen | Pelvis | Spine | Upper limb | Lower limb" },
+        { key: "injury_severity_score", label: "Injury severity score", type: "number", note: "ISS - calculated from AIS scores per region.", placeholder: "ISS - calculated from AIS scores per region" },
+        { key: "police_case_number", label: "Police case number", type: "text", note: "P3 form or OB number if police case.", placeholder: "P3 form or OB number if police case" },
+        { key: "tetanus_status", label: "Tetanus status", type: "select", note: "Up to date | Not up to date | Unknown.", options: ["Up to date", "Not up to date", "Unknown"] },
+        { key: "tetanus_given", label: "Tetanus given", type: "checkbox", note: "Tick if tetanus prophylaxis administered." },
+      ],
+    },
+  ];
+  const activeForm = forms.find((form) => form.key === activeFormKey) || null;
+  const filteredRows = boardRows.filter((row) => {
+    const needle = search.trim().toLowerCase();
+    if (!needle) return true;
+    return `${row.patient} ${row.triage} ${row.status}`.toLowerCase().includes(needle);
+  });
+  const criticalCases = boardRows.filter((row) => row.triage.startsWith("P1") || row.triage.startsWith("P2")).length;
+  const averageDoorToTriage = Math.round(boardRows.reduce((sum, row) => sum + row.waiting, 0) / Math.max(boardRows.length, 1));
+  const updateFormValue = (key: string, value: string | boolean) => {
+    setFormValues((current) => ({ ...current, [key]: value }));
+  };
+  const renderField = (field: EmergencyField) => {
+    const value = formValues[field.key];
+    if (field.type === "textarea") {
+      return <textarea className="emergency-form-control" value={typeof value === "string" ? value : ""} onChange={(event) => updateFormValue(field.key, event.target.value)} placeholder={field.placeholder} required={field.required} />;
+    }
+    if (field.type === "select") {
+      return (
+        <select className="emergency-form-control" value={typeof value === "string" ? value : ""} onChange={(event) => updateFormValue(field.key, event.target.value)} required={field.required}>
+          <option value="">Select {field.label.toLowerCase()}</option>
+          {(field.options || []).map((option) => <option key={option} value={option}>{option}</option>)}
+        </select>
+      );
+    }
+    if (field.type === "checkbox") {
+      return (
+        <label className="emergency-checkbox">
+          <input type="checkbox" checked={Boolean(value)} onChange={(event) => updateFormValue(field.key, event.target.checked)} required={field.required} />
+          <span>{field.required ? "Required confirmation" : "Mark as yes"}</span>
+        </label>
+      );
+    }
+    return <input className="emergency-form-control" type={field.type} value={typeof value === "string" ? value : ""} onChange={(event) => updateFormValue(field.key, event.target.value)} placeholder={field.placeholder} required={field.required} />;
+  };
+  const submitForm = (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!activeForm) return;
+    if (activeForm.key === "triage") {
+      setBoardRows((current) => [
+        {
+          patient: String(formValues.patient_name || "Emergency patient"),
+          triage: String(formValues.triage_category || "P3 Semi-urgent"),
+          status: Boolean(formValues.resuscitation_bay_needed) ? "Resuscitation" : "Waiting Triage",
+          waiting: 0,
+        },
+        ...current,
+      ]);
+    }
+    setNotice(`${activeForm.title} saved and reflected on the emergency board.`);
+    setActiveFormKey(null);
+    setFormValues({});
+  };
+
+  return (
+    <div className="patients-view emergency-web-view">
+      <div className="pv-header">
+        <div>
+          <div className="pv-title">
+            <Icon type="ambulance" />
+            Emergency
+          </div>
+          <p className="pv-subtitle">Triage-first emergency dashboard with critical case alerts and rapid escalation tracking.</p>
+        </div>
+        <div className="module-actions">
+          {forms.map((form) => (
+            <button key={form.key} type="button" onClick={() => setActiveFormKey(form.key)} style={{ backgroundColor: form.accent, borderColor: form.accent, boxShadow: `0 8px 18px ${form.accent}33` }}>
+              <Icon type={form.icon} size={16} /> {form.title}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {notice ? <div className="workflow-notice is-success">{notice}</div> : null}
+
+      <div className="pv-stats emergency-stat-grid">
+        <div className="pv-stat-card" style={{ borderLeftColor: "#1e3a8a" }}>
+          <p className="pv-stat-label">Active Cases</p>
+          <p className="pv-stat-value">{boardRows.length}</p>
+        </div>
+        <div className="pv-stat-card" style={{ borderLeftColor: "#f59e0b" }}>
+          <p className="pv-stat-label">Waiting Triage</p>
+          <p className="pv-stat-value">{boardRows.filter((row) => row.status.includes("Triage")).length}</p>
+        </div>
+        <div className="pv-stat-card" style={{ borderLeftColor: "#dc2626" }}>
+          <p className="pv-stat-label">Critical (L1/L2)</p>
+          <p className="pv-stat-value">{criticalCases}</p>
+        </div>
+        <div className="pv-stat-card" style={{ borderLeftColor: "#0d9488" }}>
+          <p className="pv-stat-label">Avg Door→Triage</p>
+          <p className="pv-stat-value">{averageDoorToTriage} min</p>
+        </div>
+      </div>
+
+      <div className="pv-search-bar">
+        <div className="pv-search-wrap">
+          <Icon type="search" size={16} />
+          <input className="pv-search emergency-search" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search emergency board" />
+        </div>
+      </div>
+
+      <div className="pv-table-meta">
+        <strong className="pv-table-title">Active Emergency Board</strong>
+        <span className="pv-badge">{filteredRows.length} cases</span>
+      </div>
+      <div className="pv-table-wrap">
+        <table className="pv-table">
+          <thead>
+            <tr>
+              <th>Patient</th>
+              <th>Triage</th>
+              <th>Status</th>
+              <th>Waiting</th>
+            </tr>
+          </thead>
+          <tbody>
+            {filteredRows.length === 0 ? (
+              <tr><td className="pv-empty" colSpan={4}>No emergency cases found.</td></tr>
+            ) : filteredRows.map((row, index) => (
+              <tr key={`${row.patient}-${index}`}>
+                <td className="pv-name">{row.patient}</td>
+                <td><span className={`pv-badge ${row.triage.startsWith("P1") || row.triage.startsWith("P2") ? "badge-female" : "badge-male"}`}>{row.triage}</span></td>
+                <td>{row.status}</td>
+                <td>{row.waiting} min</td>
               </tr>
             ))}
           </tbody>
         </table>
       </div>
+
+      {activeForm ? (
+        <div className="emergency-form-overlay">
+          <div className="emergency-form-panel" style={{ "--emergency-accent": activeForm.accent } as React.CSSProperties}>
+            <div className="emergency-form-header">
+              <div className="emergency-form-title-wrap">
+                <div className="emergency-form-icon"><Icon type={activeForm.icon} size={24} /></div>
+                <div><p>Emergency</p><h2>{activeForm.title}</h2></div>
+              </div>
+              <button type="button" className="emergency-form-close" onClick={() => setActiveFormKey(null)} aria-label="Close form">×</button>
+            </div>
+            <div className="emergency-form-intro">{activeForm.description}</div>
+            <form className="emergency-form-body" onSubmit={submitForm}>
+              <div className="emergency-form-grid">
+                {activeForm.fields.map((field) => (
+                  <label key={field.key} className={`emergency-form-field ${field.type === "textarea" ? "is-wide" : ""}`}>
+                    <span>{field.label}{field.required ? <strong>*</strong> : null}</span>
+                    <small>{field.note}</small>
+                    {renderField(field)}
+                  </label>
+                ))}
+              </div>
+              <div className="emergency-form-footer">
+                <button type="button" className="form-btn form-btn-cancel" onClick={() => setActiveFormKey(null)}>Cancel</button>
+                <button type="submit" className="form-btn form-btn-primary">{activeForm.submitLabel}</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function AmbulanceView() {
+  type AmbulanceField = {
+    key: string;
+    label: string;
+    note: string;
+    type: string;
+    required?: boolean;
+    placeholder?: string;
+    options?: string[];
+  };
+  type AmbulanceForm = {
+    key: "dispatch" | "scene" | "maintenance";
+    title: string;
+    description: string;
+    accent: string;
+    icon: string;
+    submitLabel: string;
+    fields: AmbulanceField[];
+  };
+  const [search, setSearch] = useState("");
+  const [activeFormKey, setActiveFormKey] = useState<AmbulanceForm["key"] | null>(null);
+  const [formValues, setFormValues] = useState<Record<string, string>>({});
+  const [notice, setNotice] = useState("");
+  const [dispatches, setDispatches] = useState([
+    { vehicle: "AMB-001", status: "Dispatched", location: "Mumias town", response: 8 },
+    { vehicle: "AMB-002", status: "Available", location: "Hospital bay", response: 0 },
+    { vehicle: "AMB-003", status: "En route", location: "Kakamega road", response: 14 },
+    { vehicle: "AMB-004", status: "Maintenance", location: "Garage", response: 0 },
+  ]);
+  const forms: AmbulanceForm[] = [
+    {
+      key: "dispatch",
+      title: "Dispatch",
+      description: "Capture dispatch details.",
+      accent: "#16a34a",
+      icon: "ambulance",
+      submitLabel: "Dispatch Ambulance",
+      fields: [
+        { key: "call_received_time", label: "Call received time", type: "datetime-local", required: true, note: "Exact time emergency call was received." },
+        { key: "caller_name", label: "Caller name", type: "text", note: "Name of person who called.", placeholder: "Name of person who called" },
+        { key: "caller_phone", label: "Caller phone", type: "tel", required: true, note: "Phone number of caller.", placeholder: "Phone number of caller" },
+        { key: "scene_address", label: "Scene address", type: "text", required: true, note: "Location of emergency - as specific as possible.", placeholder: "Location of emergency - as specific as possible" },
+        { key: "gps_coordinates", label: "GPS coordinates", type: "text", note: "Auto-capture GPS from caller or map pin.", placeholder: "Auto-capture GPS from caller or map pin" },
+        { key: "call_type", label: "Call type", type: "select", required: true, note: "Medical | Trauma | Obstetric | Paediatric | Cardiac | Psychiatric | Fire | RTA.", options: ["Medical", "Trauma", "Obstetric", "Paediatric", "Cardiac", "Psychiatric", "Fire", "RTA"] },
+        { key: "patient_condition", label: "Patient condition", type: "text", note: "Brief patient status from caller.", placeholder: "Brief patient status from caller" },
+        { key: "ambulance_assigned", label: "Ambulance assigned", type: "select", required: true, note: "Vehicle to dispatch.", options: ["AMB-001", "AMB-002", "AMB-003", "AMB-004"] },
+        { key: "crew_assigned", label: "Crew assigned", type: "text", required: true, note: "Paramedic team for this call.", placeholder: "Paramedic team for this call" },
+        { key: "dispatch_time", label: "Dispatch time", type: "datetime-local", required: true, note: "Time ambulance was dispatched." },
+      ],
+    },
+    {
+      key: "scene",
+      title: "Scene Report",
+      description: "Capture scene report details.",
+      accent: "#2563eb",
+      icon: "fact_check",
+      submitLabel: "Save Scene Report",
+      fields: [
+        { key: "en_route_time", label: "En route time", type: "time", required: true, note: "Time vehicle started moving." },
+        { key: "scene_arrival_time", label: "Scene arrival time", type: "time", required: true, note: "Time vehicle arrived at scene." },
+        { key: "patient_found", label: "Patient found", type: "text", required: true, note: "Yes | No | Deceased at scene.", placeholder: "Yes | No | Deceased at scene" },
+        { key: "patient_name", label: "Patient name", type: "text", note: "Patient name if obtainable.", placeholder: "Patient name if obtainable" },
+        { key: "age_estimate", label: "Age estimate", type: "text", note: "Estimated age if ID not available.", placeholder: "Estimated age if ID not available" },
+        { key: "scene_assessment", label: "Scene assessment", type: "textarea", required: true, note: "Scene safety, mechanism, patient condition." },
+        { key: "vital_signs_at_scene", label: "Vital signs at scene", type: "text", required: true, note: "BP, HR, RR, SpO2, GCS, Temp.", placeholder: "BP, HR, RR, SpO2, GCS, Temp" },
+        { key: "pre_hospital_interventions", label: "Pre-hospital interventions", type: "textarea", required: true, note: "Airway management, IV access, drugs given, immobilisation." },
+        { key: "departed_scene_time", label: "Departed scene time", type: "time", required: true, note: "Time vehicle left scene." },
+        { key: "hospital_arrival_time", label: "Hospital arrival time", type: "time", required: true, note: "Time patient arrived at hospital." },
+        { key: "handover_to", label: "Handover to", type: "text", required: true, note: "Name of receiving clinician.", placeholder: "Name of receiving clinician" },
+        { key: "handover_notes", label: "Handover notes", type: "textarea", required: true, note: "Verbal handover content documented." },
+      ],
+    },
+    {
+      key: "maintenance",
+      title: "Fleet Maintenance Record",
+      description: "Capture fleet maintenance record details.",
+      accent: "#7c3aed",
+      icon: "gears",
+      submitLabel: "Save Maintenance Record",
+      fields: [
+        { key: "ambulance", label: "Ambulance", type: "select", required: true, note: "Vehicle registration.", options: ["AMB-001", "AMB-002", "AMB-003", "AMB-004"] },
+        { key: "maintenance_type", label: "Maintenance type", type: "select", required: true, note: "Preventive | Corrective | Inspection.", options: ["Preventive", "Corrective", "Inspection"] },
+        { key: "service_date", label: "Service date", type: "date", required: true, note: "Date of service." },
+        { key: "mileage", label: "Mileage", type: "number", required: true, note: "Odometer reading at service.", placeholder: "Odometer reading at service" },
+        { key: "work_performed", label: "Work performed", type: "textarea", required: true, note: "Description of maintenance work done." },
+        { key: "parts_replaced", label: "Parts replaced", type: "text", note: "Parts or consumables replaced.", placeholder: "Parts or consumables replaced" },
+        { key: "cost_kes", label: "Cost (KES)", type: "number", note: "Total maintenance cost.", placeholder: "Total maintenance cost" },
+        { key: "next_service_due", label: "Next service due", type: "date", required: true, note: "Next scheduled maintenance date." },
+        { key: "serviced_by", label: "Serviced by", type: "text", required: true, note: "Mechanic or garage name.", placeholder: "Mechanic or garage name" },
+      ],
+    },
+  ];
+  const activeForm = forms.find((form) => form.key === activeFormKey) || null;
+  const filteredDispatches = dispatches.filter((row) => {
+    const needle = search.trim().toLowerCase();
+    if (!needle) return true;
+    return `${row.vehicle} ${row.status} ${row.location}`.toLowerCase().includes(needle);
+  });
+  const revenue = 46000;
+  const updateFormValue = (key: string, value: string) => setFormValues((current) => ({ ...current, [key]: value }));
+  const renderField = (field: AmbulanceField) => {
+    const value = formValues[field.key] || "";
+    if (field.type === "textarea") {
+      return <textarea className="ambulance-form-control" value={value} onChange={(event) => updateFormValue(field.key, event.target.value)} placeholder={field.placeholder} required={field.required} />;
+    }
+    if (field.type === "select") {
+      return (
+        <select className="ambulance-form-control" value={value} onChange={(event) => updateFormValue(field.key, event.target.value)} required={field.required}>
+          <option value="">Select {field.label.toLowerCase()}</option>
+          {(field.options || []).map((option) => <option key={option} value={option}>{option}</option>)}
+        </select>
+      );
+    }
+    return <input className="ambulance-form-control" type={field.type} value={value} onChange={(event) => updateFormValue(field.key, event.target.value)} placeholder={field.placeholder} required={field.required} />;
+  };
+  const submitForm = (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!activeForm) return;
+    if (activeForm.key === "dispatch") {
+      setDispatches((current) => [
+        {
+          vehicle: String(formValues.ambulance_assigned || "AMB-001"),
+          status: "Dispatched",
+          location: String(formValues.scene_address || "Scene"),
+          response: 0,
+        },
+        ...current,
+      ]);
+    }
+    setNotice(`${activeForm.title} saved and reflected in Recent Dispatches.`);
+    setActiveFormKey(null);
+    setFormValues({});
+  };
+
+  return (
+    <div className="patients-view ambulance-web-view">
+      <div className="pv-header">
+        <div>
+          <div className="pv-title"><Icon type="ambulance" /> Ambulance</div>
+          <p className="pv-subtitle">Fleet readiness, dispatch coordination, and rapid response analytics for pre-hospital care.</p>
+        </div>
+        <div className="module-actions">
+          {forms.map((form) => (
+            <button key={form.key} type="button" onClick={() => setActiveFormKey(form.key)} style={{ backgroundColor: form.accent, borderColor: form.accent, boxShadow: `0 8px 18px ${form.accent}33` }}>
+              <Icon type={form.icon} size={16} /> {form.title}
+            </button>
+          ))}
+        </div>
+      </div>
+      {notice ? <div className="workflow-notice is-success">{notice}</div> : null}
+      <div className="pv-stats ambulance-stat-grid">
+        <div className="pv-stat-card" style={{ borderLeftColor: "#1e3a8a" }}><p className="pv-stat-label">Fleet Total</p><p className="pv-stat-value">{dispatches.length}</p></div>
+        <div className="pv-stat-card" style={{ borderLeftColor: "#16a34a" }}><p className="pv-stat-label">Available</p><p className="pv-stat-value">{dispatches.filter((row) => row.status === "Available").length}</p></div>
+        <div className="pv-stat-card" style={{ borderLeftColor: "#dc2626" }}><p className="pv-stat-label">Active Dispatches</p><p className="pv-stat-value">{dispatches.filter((row) => ["Dispatched", "En route"].includes(row.status)).length}</p></div>
+        <div className="pv-stat-card" style={{ borderLeftColor: "#0d9488" }}><p className="pv-stat-label">Revenue</p><p className="pv-stat-value">Ksh {revenue.toLocaleString("en-KE")}</p></div>
+      </div>
+      <div className="pv-search-bar"><div className="pv-search-wrap"><Icon type="search" size={16} /><input className="pv-search ambulance-search" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search dispatches" /></div></div>
+      <div className="pv-table-meta"><strong className="pv-table-title">Recent Dispatches</strong><span className="pv-badge">{filteredDispatches.length} records</span></div>
+      <div className="pv-table-wrap">
+        <table className="pv-table">
+          <thead><tr><th>Vehicle</th><th>Status</th><th>Location</th><th>Response</th></tr></thead>
+          <tbody>
+            {filteredDispatches.length === 0 ? <tr><td className="pv-empty" colSpan={4}>No ambulance dispatches found.</td></tr> : filteredDispatches.map((row, index) => (
+              <tr key={`${row.vehicle}-${index}`}><td className="pv-name">{row.vehicle}</td><td><span className={`pv-badge ${row.status === "Available" ? "badge-male" : "badge-female"}`}>{row.status}</span></td><td>{row.location}</td><td>{row.response} min</td></tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      {activeForm ? (
+        <div className="ambulance-form-overlay">
+          <div className="ambulance-form-panel" style={{ "--ambulance-accent": activeForm.accent } as React.CSSProperties}>
+            <div className="ambulance-form-header"><div className="ambulance-form-title-wrap"><div className="ambulance-form-icon"><Icon type={activeForm.icon} size={24} /></div><div><p>Ambulance</p><h2>{activeForm.title}</h2></div></div><button type="button" className="ambulance-form-close" onClick={() => setActiveFormKey(null)} aria-label="Close form">×</button></div>
+            <div className="ambulance-form-intro">{activeForm.description}</div>
+            <form className="ambulance-form-body" onSubmit={submitForm}>
+              <div className="ambulance-form-grid">
+                {activeForm.fields.map((field) => <label key={field.key} className={`ambulance-form-field ${field.type === "textarea" ? "is-wide" : ""}`}><span>{field.label}{field.required ? <strong>*</strong> : null}</span><small>{field.note}</small>{renderField(field)}</label>)}
+              </div>
+              <div className="ambulance-form-footer"><button type="button" className="form-btn form-btn-cancel" onClick={() => setActiveFormKey(null)}>Cancel</button><button type="submit" className="form-btn form-btn-primary">{activeForm.submitLabel}</button></div>
+            </form>
+          </div>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function MortuaryView() {
+  type MortuaryField = {
+    key: string;
+    label: string;
+    note: string;
+    type: string;
+    required?: boolean;
+    placeholder?: string;
+    options?: string[];
+  };
+  type MortuaryForm = {
+    key: "reception" | "certificate" | "release";
+    title: string;
+    description: string;
+    accent: string;
+    icon: string;
+    submitLabel: string;
+    fields: MortuaryField[];
+  };
+  type MortuaryRecord = {
+    deceased: string;
+    dateOfDeath: string;
+    status: "In Care" | "Pending Release" | "Released";
+    cause: string;
+    unclaimed?: boolean;
+    overstay?: boolean;
+    releasedToday?: boolean;
+  };
+
+  const today = new Date().toISOString().slice(0, 10);
+  const [activeFormKey, setActiveFormKey] = useState<MortuaryForm["key"] | null>(null);
+  const [formValues, setFormValues] = useState<Record<string, string | boolean>>({});
+  const [notice, setNotice] = useState("");
+  const [records, setRecords] = useState<MortuaryRecord[]>([
+    { deceased: "John Mwangi", dateOfDeath: "2026-05-21", status: "In Care", cause: "Cardiac arrest" },
+    { deceased: "Unknown Female", dateOfDeath: "2026-05-12", status: "In Care", cause: "Under investigation", unclaimed: true, overstay: true },
+    { deceased: "Samuel Otieno", dateOfDeath: "2026-05-18", status: "Pending Release", cause: "Road traffic trauma" },
+    { deceased: "Mary Wanjiku", dateOfDeath: today, status: "Released", cause: "Respiratory failure", releasedToday: true },
+  ]);
+
+  const forms: MortuaryForm[] = [
+    {
+      key: "reception",
+      title: "Body Reception",
+      description: "Capture body reception, identification, storage, and police case details.",
+      accent: "#16a34a",
+      icon: "archive",
+      submitLabel: "Receive Body",
+      fields: [
+        { key: "patient", label: "Patient", type: "text", note: "Link to patient MRN if known", placeholder: "Link to patient MRN if known" },
+        { key: "body_received_from", label: "Body received from", type: "select", required: true, note: "Inpatient ward | Emergency | Theatre | Home | Scene | Police | Coroner", options: ["Inpatient ward", "Emergency", "Theatre", "Home", "Scene", "Police", "Coroner"] },
+        { key: "received_at_time", label: "Received at time", type: "datetime-local", required: true, note: "Time body arrived in mortuary" },
+        { key: "sex", label: "Sex", type: "select", required: true, note: "Male | Female | Unknown", options: ["Male", "Female", "Unknown"] },
+        { key: "approximate_age", label: "Approximate age", type: "text", note: "Estimated age if identity not confirmed", placeholder: "Estimated age if identity not confirmed" },
+        { key: "body_condition", label: "Body condition", type: "select", required: true, note: "Fresh | Early decomposition | Advanced decomposition | Embalmed", options: ["Fresh", "Early decomposition", "Advanced decomposition", "Embalmed"] },
+        { key: "identifying_features", label: "Identifying features", type: "textarea", note: "Physical description for identification" },
+        { key: "compartment_assigned", label: "Compartment assigned", type: "select", required: true, note: "Cold storage compartment number", options: ["Compartment A1", "Compartment A2", "Compartment B1", "Compartment B2", "Overflow bay"] },
+        { key: "police_case", label: "Police case", type: "checkbox", required: true, note: "Tick if death involves police investigation" },
+        { key: "police_reference", label: "Police reference", type: "text", note: "OB number or case reference", placeholder: "OB number or case reference" },
+        { key: "accompanying_documentation", label: "Accompanying documentation", type: "text", required: true, note: "Death notification | Medical certificate | Police release", placeholder: "Death notification | Medical certificate | Police release" },
+      ],
+    },
+    {
+      key: "certificate",
+      title: "Death Certificate",
+      description: "Document cause, ICD-10 coding, manner of death, and certifying doctor details.",
+      accent: "#2563eb",
+      icon: "fact_check",
+      submitLabel: "Save Death Certificate",
+      fields: [
+        { key: "deceased_name", label: "Deceased name", type: "text", required: true, note: "Full legal name", placeholder: "Full legal name" },
+        { key: "date_of_death", label: "Date of death", type: "date", required: true, note: "Certified date of death" },
+        { key: "time_of_death", label: "Time of death", type: "time", note: "Time if known" },
+        { key: "place_of_death", label: "Place of death", type: "text", required: true, note: "Hospital name and ward or location", placeholder: "Hospital name and ward or location" },
+        { key: "cause_ia_immediate_cause", label: "Cause Ia — Immediate cause", type: "text", required: true, note: "Disease directly causing death", placeholder: "Disease directly causing death" },
+        { key: "cause_ib_antecedent_cause", label: "Cause Ib — Antecedent cause", type: "text", note: "Disease leading to immediate cause", placeholder: "Disease leading to immediate cause" },
+        { key: "cause_ic_underlying_cause", label: "Cause Ic — Underlying cause", type: "text", note: "Disease leading to Ib", placeholder: "Disease leading to Ib" },
+        { key: "cause_ii_contributing_conditions", label: "Cause II — Contributing conditions", type: "text", note: "Other conditions contributing to death", placeholder: "Other conditions contributing to death" },
+        { key: "icd_10_code", label: "ICD-10 code", type: "text", required: true, note: "Code for underlying cause of death", placeholder: "Code for underlying cause of death" },
+        { key: "manner_of_death", label: "Manner of death", type: "select", required: true, note: "Natural | Accident | Homicide | Suicide | Undetermined", options: ["Natural", "Accident", "Homicide", "Suicide", "Undetermined"] },
+        { key: "post_mortem_performed", label: "Post-mortem performed", type: "text", required: true, note: "Yes | No", placeholder: "Yes | No" },
+        { key: "certifying_doctor", label: "Certifying doctor", type: "text", required: true, note: "Auto-filled - logged in doctor", placeholder: "Auto-filled - logged in doctor" },
+      ],
+    },
+    {
+      key: "release",
+      title: "Body Release",
+      description: "Record family or funeral home collection, permit, billing clearance, and certificate status.",
+      accent: "#7c3aed",
+      icon: "logout",
+      submitLabel: "Release Body",
+      fields: [
+        { key: "released_to_name", label: "Released to name", type: "text", required: true, note: "Full name of person collecting body", placeholder: "Full name of person collecting body" },
+        { key: "collector_id_number", label: "Collector ID number", type: "text", required: true, note: "National ID of collector", placeholder: "National ID of collector" },
+        { key: "relationship_to_deceased", label: "Relationship to deceased", type: "select", required: true, note: "Spouse | Parent | Child | Sibling | Funeral home | Other", options: ["Spouse", "Parent", "Child", "Sibling", "Funeral home", "Other"] },
+        { key: "funeral_home_name", label: "Funeral home name", type: "text", note: "If released to funeral home", placeholder: "If released to funeral home" },
+        { key: "burial_permit_number", label: "Burial permit number", type: "text", required: true, note: "County burial permit reference", placeholder: "County burial permit reference" },
+        { key: "death_certificate_issued", label: "Death certificate issued", type: "checkbox", required: true, note: "Confirm death certificate was given" },
+        { key: "outstanding_bill_cleared", label: "Outstanding bill cleared", type: "checkbox", required: true, note: "Confirm hospital bill is fully settled" },
+      ],
+    },
+  ];
+
+  const activeForm = forms.find((form) => form.key === activeFormKey) || null;
+  const capacity = 12;
+  const occupied = records.filter((record) => record.status !== "Released").length;
+  const stats = [
+    { label: "Capacity", value: capacity, color: "#16a34a" },
+    { label: "Occupied", value: occupied, color: "#2563eb" },
+    { label: "Available", value: Math.max(0, capacity - occupied), color: "#7c3aed" },
+    { label: "Pending Release", value: records.filter((record) => record.status === "Pending Release").length, color: "#f59e0b" },
+    { label: "Unclaimed", value: records.filter((record) => record.unclaimed).length, color: "#0d9488" },
+    { label: "Today Releases", value: records.filter((record) => record.releasedToday || (record.status === "Released" && record.dateOfDeath === today)).length, color: "#dc2626" },
+    { label: "Overstay Alerts", value: records.filter((record) => record.overstay).length, color: "#0891b2" },
+  ];
+  const filteredRecords = records;
+  const updateFormValue = (key: string, value: string | boolean) => setFormValues((current) => ({ ...current, [key]: value }));
+  const renderField = (field: MortuaryField) => {
+    const value = formValues[field.key];
+    if (field.type === "textarea") {
+      return <textarea className="mortuary-form-control" value={typeof value === "string" ? value : ""} onChange={(event) => updateFormValue(field.key, event.target.value)} placeholder={field.placeholder} required={field.required} />;
+    }
+    if (field.type === "select") {
+      return (
+        <select className="mortuary-form-control" value={typeof value === "string" ? value : ""} onChange={(event) => updateFormValue(field.key, event.target.value)} required={field.required}>
+          <option value="">Select {field.label.toLowerCase()}</option>
+          {(field.options || []).map((option) => <option key={option} value={option}>{option}</option>)}
+        </select>
+      );
+    }
+    if (field.type === "checkbox") {
+      return (
+        <label className="mortuary-checkbox-row">
+          <input type="checkbox" checked={Boolean(value)} onChange={(event) => updateFormValue(field.key, event.target.checked)} required={field.required} />
+          <span>Confirmed</span>
+        </label>
+      );
+    }
+    return <input className="mortuary-form-control" type={field.type} value={typeof value === "string" ? value : ""} onChange={(event) => updateFormValue(field.key, event.target.value)} placeholder={field.placeholder} required={field.required} />;
+  };
+  const submitForm = (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!activeForm) return;
+    if (activeForm.key === "reception") {
+      const deceased = String(formValues.patient || "").trim() || "Unidentified body";
+      setRecords((current) => [
+        {
+          deceased,
+          dateOfDeath: today,
+          status: "In Care",
+          cause: "Pending certification",
+          unclaimed: !String(formValues.patient || "").trim(),
+        },
+        ...current,
+      ]);
+    }
+    if (activeForm.key === "certificate") {
+      setRecords((current) => [
+        {
+          deceased: String(formValues.deceased_name || "Certified deceased"),
+          dateOfDeath: String(formValues.date_of_death || today),
+          status: "Pending Release",
+          cause: String(formValues.cause_ia_immediate_cause || "Certified cause"),
+        },
+        ...current,
+      ]);
+    }
+    if (activeForm.key === "release") {
+      setRecords((current) => {
+        const index = current.findIndex((record) => record.status !== "Released");
+        if (index < 0) return current;
+        return current.map((record, currentIndex) =>
+          currentIndex === index
+            ? { ...record, status: "Released", releasedToday: true, unclaimed: false, overstay: false }
+            : record,
+        );
+      });
+    }
+    setNotice(`${activeForm.title} saved successfully.`);
+    setActiveFormKey(null);
+    setFormValues({});
+  };
+
+  return (
+    <div className="patients-view mortuary-web-view">
+      <div className="pv-header">
+        <div>
+          <div className="pv-title">Mortuary</div>
+          <div className="pv-subtitle">Body reception, storage, and release tracking with compliance-ready logs.</div>
+        </div>
+        <div className="module-actions">
+          {forms.map((form) => (
+            <button key={form.key} type="button" className="topbar-logout-btn" onClick={() => setActiveFormKey(form.key)} style={{ backgroundColor: form.accent, borderColor: form.accent, color: "#ffffff", boxShadow: `0 8px 18px ${form.accent}33` }}>
+              <Icon type={form.icon} size={16} /> {form.title}
+            </button>
+          ))}
+          <button type="button" className="topbar-logout-btn mortuary-refresh-btn" onClick={() => setNotice("Mortuary dashboard refreshed.")}>
+            <Icon type="sync" size={16} /> Refresh
+          </button>
+        </div>
+      </div>
+      {notice ? <div className="workflow-notice is-success">{notice}</div> : null}
+      <div className="pv-stats mortuary-stat-grid">
+        {stats.map((stat) => (
+          <div key={stat.label} className="pv-stat-card" style={{ borderLeftColor: stat.color }}>
+            <p className="pv-stat-label">{stat.label}</p>
+            <p className="pv-stat-value">{stat.value}</p>
+          </div>
+        ))}
+      </div>
+      <div className="pv-table-meta"><div><div className="pv-title" style={{ fontSize: "0.9rem" }}>Mortuary Records</div></div><span className="pv-badge">{filteredRecords.length} records</span></div>
+      <div className="pv-table-wrap">
+        <table className="pv-table">
+          <thead><tr><th>Deceased</th><th>Date of Death</th><th>Status</th><th>Cause</th></tr></thead>
+          <tbody>
+            {filteredRecords.length === 0 ? <tr><td className="pv-empty" colSpan={4}>No mortuary records found.</td></tr> : filteredRecords.map((record, index) => (
+              <tr key={`${record.deceased}-${index}`}>
+                <td className="pv-name">{record.deceased}</td>
+                <td>{record.dateOfDeath}</td>
+                <td><span className={`pv-badge ${record.status === "Released" ? "badge-male" : "badge-female"}`}>{record.status}</span></td>
+                <td>{record.cause}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      {activeForm ? (
+        <div className="mortuary-form-overlay">
+          <div className="mortuary-form-panel" style={{ "--mortuary-accent": activeForm.accent } as React.CSSProperties}>
+            <div className="mortuary-form-header"><div className="mortuary-form-title-wrap"><div className="mortuary-form-icon"><Icon type={activeForm.icon} size={24} /></div><div><p>Mortuary</p><h2>{activeForm.title}</h2></div></div><button type="button" className="mortuary-form-close" onClick={() => setActiveFormKey(null)} aria-label="Close form">×</button></div>
+            <div className="mortuary-form-intro">{activeForm.description}</div>
+            <form className="mortuary-form-body" onSubmit={submitForm}>
+              <div className="mortuary-form-grid">
+                {activeForm.fields.map((field) => <label key={field.key} className={`mortuary-form-field ${field.type === "textarea" ? "is-wide" : ""}`}><span>{field.label}{field.required ? <strong>*</strong> : null}</span><small>{field.note}</small>{renderField(field)}</label>)}
+              </div>
+              <div className="mortuary-form-footer"><button type="button" className="form-btn form-btn-cancel" onClick={() => setActiveFormKey(null)}>Cancel</button><button type="submit" className="form-btn form-btn-primary">{activeForm.submitLabel}</button></div>
+            </form>
+          </div>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function QueueManagementView() {
+  type QueueField = {
+    key: string;
+    label: string;
+    note: string;
+    type: string;
+    required?: boolean;
+    placeholder?: string;
+    options?: string[];
+  };
+  type QueueForm = {
+    key: "token" | "counter";
+    title: string;
+    description: string;
+    accent: string;
+    icon: string;
+    submitLabel: string;
+    fields: QueueField[];
+  };
+  type QueueRow = {
+    token: string;
+    patient: string;
+    status: "Waiting" | "Called" | "In Service" | "Completed";
+    estimatedWait: number;
+    serviceType: string;
+    priority: string;
+  };
+
+  const [search, setSearch] = useState("");
+  const [activeFormKey, setActiveFormKey] = useState<QueueForm["key"] | null>(null);
+  const [formValues, setFormValues] = useState<Record<string, string>>({});
+  const [notice, setNotice] = useState("");
+  const [queueRows, setQueueRows] = useState<QueueRow[]>([
+    { token: "OPD-001", patient: "Jane Doe", status: "Waiting", estimatedWait: 12, serviceType: "OPD", priority: "Normal" },
+    { token: "LAB-014", patient: "Samuel Mwangi", status: "Called", estimatedWait: 4, serviceType: "Lab", priority: "Urgent" },
+    { token: "PHA-008", patient: "Amina Hassan", status: "In Service", estimatedWait: 0, serviceType: "Pharmacy", priority: "Normal" },
+    { token: "BIL-021", patient: "Peter Otieno", status: "Completed", estimatedWait: 0, serviceType: "Billing", priority: "Normal" },
+  ]);
+  const forms: QueueForm[] = [
+    {
+      key: "token",
+      title: "Token Issuance",
+      description: "Capture token issuance details.",
+      accent: "#16a34a",
+      icon: "calendar",
+      submitLabel: "Issue Token",
+      fields: [
+        { key: "patient", label: "Patient", type: "text", required: true, note: "Patient MRN or name - auto-filled from registration.", placeholder: "Patient MRN or name" },
+        { key: "service_type", label: "Service type", type: "select", required: true, note: "OPD | Lab | Pharmacy | Billing | Radiology | Triage.", options: ["OPD", "Lab", "Pharmacy", "Billing", "Radiology", "Triage"] },
+        { key: "priority_level", label: "Priority level", type: "select", required: true, note: "Normal | Urgent | Emergency - affects queue position.", options: ["Normal", "Urgent", "Emergency"] },
+        { key: "linked_appointment", label: "Linked appointment", type: "select", note: "Appointment number if pre-booked.", options: ["None", "APT-1021", "APT-1044", "APT-1063"] },
+        { key: "counter_assignment", label: "Counter assignment", type: "select", note: "Specific counter if directed.", options: ["Auto assign", "OPD Room 3", "Lab Counter 1", "Pharmacy Window 2", "Billing Counter 1"] },
+      ],
+    },
+    {
+      key: "counter",
+      title: "Counter Configuration",
+      description: "Capture counter configuration details.",
+      accent: "#2563eb",
+      icon: "gears",
+      submitLabel: "Save Counter Configuration",
+      fields: [
+        { key: "counter_name", label: "Counter name", type: "text", required: true, note: "e.g. OPD Room 3, Lab Counter 1.", placeholder: "e.g. OPD Room 3, Lab Counter 1" },
+        { key: "service_type", label: "Service type", type: "select", required: true, note: "Service this counter handles.", options: ["OPD", "Lab", "Pharmacy", "Billing", "Radiology", "Triage"] },
+        { key: "assigned_staff", label: "Assigned staff", type: "select", required: true, note: "User currently operating this counter.", options: ["Dr. Kamau", "Grace Achieng", "Nurse Wanjiru", "Pharmacist Otieno", "Cashier Njeri"] },
+        { key: "is_open", label: "Is open", type: "select", required: true, note: "Open or closed status for the day.", options: ["Open", "Closed"] },
+      ],
+    },
+  ];
+
+  const activeForm = forms.find((form) => form.key === activeFormKey) || null;
+  const filteredRows = queueRows.filter((row) => {
+    const needle = search.trim().toLowerCase();
+    if (!needle) return true;
+    return `${row.token} ${row.patient} ${row.status} ${row.serviceType} ${row.priority}`.toLowerCase().includes(needle);
+  });
+  const stats = [
+    { label: "Tokens", value: queueRows.length, color: "#1e3a8a" },
+    { label: "Waiting", value: queueRows.filter((row) => row.status === "Waiting").length, color: "#f59e0b" },
+    { label: "Completed", value: queueRows.filter((row) => row.status === "Completed").length, color: "#16a34a" },
+    {
+      label: "Avg Wait",
+      value: `${Math.round(queueRows.reduce((sum, row) => sum + row.estimatedWait, 0) / Math.max(queueRows.length, 1))} min`,
+      color: "#0d9488",
+    },
+  ];
+  const updateFormValue = (key: string, value: string) => setFormValues((current) => ({ ...current, [key]: value }));
+  const renderField = (field: QueueField) => {
+    const value = formValues[field.key] || "";
+    if (field.type === "select") {
+      return (
+        <select className="queue-form-control" value={value} onChange={(event) => updateFormValue(field.key, event.target.value)} required={field.required}>
+          <option value="">Select {field.label.toLowerCase()}</option>
+          {(field.options || []).map((option) => <option key={option} value={option}>{option}</option>)}
+        </select>
+      );
+    }
+    return <input className="queue-form-control" type={field.type} value={value} onChange={(event) => updateFormValue(field.key, event.target.value)} placeholder={field.placeholder} required={field.required} />;
+  };
+  const submitForm = (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!activeForm) return;
+    if (activeForm.key === "token") {
+      const service = String(formValues.service_type || "OPD");
+      const prefix = service.slice(0, 3).toUpperCase();
+      const nextNumber = queueRows.length + 1;
+      setQueueRows((current) => [
+        {
+          token: `${prefix}-${String(nextNumber).padStart(3, "0")}`,
+          patient: String(formValues.patient || "Queued Patient"),
+          status: "Waiting",
+          estimatedWait: String(formValues.priority_level || "") === "Emergency" ? 1 : String(formValues.priority_level || "") === "Urgent" ? 5 : 14,
+          serviceType: service,
+          priority: String(formValues.priority_level || "Normal"),
+        },
+        ...current,
+      ]);
+    }
+    setNotice(`${activeForm.title} saved successfully.`);
+    setActiveFormKey(null);
+    setFormValues({});
+  };
+
+  return (
+    <div className="patients-view queue-web-view">
+      <div className="pv-header">
+        <div>
+          <div className="pv-title"><Icon type="users" /> Queue Management</div>
+          <p className="pv-subtitle">Live queue operations, wait time intelligence, and token routing across all service points.</p>
+        </div>
+        <div className="module-actions">
+          {forms.map((form) => (
+            <button key={form.key} type="button" onClick={() => setActiveFormKey(form.key)} style={{ backgroundColor: form.accent, borderColor: form.accent, boxShadow: `0 8px 18px ${form.accent}33` }}>
+              <Icon type={form.icon} size={16} /> {form.title}
+            </button>
+          ))}
+        </div>
+      </div>
+      {notice ? <div className="workflow-notice is-success">{notice}</div> : null}
+      <div className="pv-stats queue-stat-grid">
+        {stats.map((stat) => (
+          <div key={stat.label} className="pv-stat-card" style={{ borderLeftColor: stat.color }}>
+            <p className="pv-stat-label">{stat.label}</p>
+            <p className="pv-stat-value">{stat.value}</p>
+          </div>
+        ))}
+      </div>
+      <div className="pv-search-bar">
+        <div className="pv-search-wrap">
+          <Icon type="search" size={16} />
+          <input className="pv-search queue-search" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search queue tokens, patients, counters..." />
+        </div>
+      </div>
+      <div className="pv-table-meta"><strong className="pv-table-title">Live Queue Board</strong><span className="pv-badge">Sorted by priority and waiting position.</span></div>
+      <div className="pv-table-wrap">
+        <table className="pv-table">
+          <thead><tr><th>Token</th><th>Patient</th><th>Status</th><th>Est. Wait</th></tr></thead>
+          <tbody>
+            {filteredRows.length === 0 ? <tr><td className="pv-empty" colSpan={4}>No queue records found.</td></tr> : filteredRows.map((row) => (
+              <tr key={row.token}>
+                <td className="pv-name">{row.token}</td>
+                <td>{row.patient}</td>
+                <td><span className={`pv-badge ${row.status === "Completed" ? "badge-male" : "badge-female"}`}>{row.status}</span></td>
+                <td>{row.estimatedWait} min</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      {activeForm ? (
+        <div className="queue-form-overlay">
+          <div className="queue-form-panel" style={{ "--queue-accent": activeForm.accent } as React.CSSProperties}>
+            <div className="queue-form-header"><div className="queue-form-title-wrap"><div className="queue-form-icon"><Icon type={activeForm.icon} size={24} /></div><div><p>Queue Management</p><h2>{activeForm.title}</h2></div></div><button type="button" className="queue-form-close" onClick={() => setActiveFormKey(null)} aria-label="Close form">×</button></div>
+            <div className="queue-form-intro">{activeForm.description}</div>
+            <form className="queue-form-body" onSubmit={submitForm}>
+              <div className="queue-form-grid">
+                {activeForm.fields.map((field) => <label key={field.key} className="queue-form-field"><span>{field.label}{field.required ? <strong>*</strong> : null}</span><small>{field.note}</small>{renderField(field)}</label>)}
+              </div>
+              <div className="queue-form-footer"><button type="button" className="form-btn form-btn-cancel" onClick={() => setActiveFormKey(null)}>Cancel</button><button type="submit" className="form-btn form-btn-primary">{activeForm.submitLabel}</button></div>
+            </form>
+          </div>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function HelpdeskView() {
+  type HelpdeskField = {
+    key: string;
+    label: string;
+    note: string;
+    type: string;
+    required?: boolean;
+    placeholder?: string;
+    options?: string[];
+  };
+  type HelpdeskForm = {
+    key: "ticket" | "resolution";
+    title: string;
+    description: string;
+    accent: string;
+    icon: string;
+    submitLabel: string;
+    fields: HelpdeskField[];
+  };
+  type HelpdeskTicket = {
+    ticket: string;
+    subject: string;
+    priority: "Low" | "Medium" | "High" | "Critical";
+    status: "Open" | "Assigned" | "In Progress" | "Resolved" | "Overdue";
+    assignedTo: string;
+    mine?: boolean;
+    resolutionHours?: number;
+    slaMet?: boolean;
+  };
+
+  const [search, setSearch] = useState("");
+  const [activeFormKey, setActiveFormKey] = useState<HelpdeskForm["key"] | null>(null);
+  const [formValues, setFormValues] = useState<Record<string, string>>({});
+  const [notice, setNotice] = useState("");
+  const [tickets, setTickets] = useState<HelpdeskTicket[]>([
+    { ticket: "HD-1001", subject: "OPD printer not printing receipts", priority: "High", status: "Open", assignedTo: "IT Support", mine: true, slaMet: true },
+    { ticket: "HD-1002", subject: "Lab network point intermittent", priority: "Critical", status: "Overdue", assignedTo: "Network Team", mine: false, slaMet: false },
+    { ticket: "HD-1003", subject: "Ward tap leaking near sluice room", priority: "Medium", status: "Assigned", assignedTo: "Maintenance", mine: true, slaMet: true },
+    { ticket: "HD-1004", subject: "Pharmacy barcode scanner replaced", priority: "Low", status: "Resolved", assignedTo: "IT Support", mine: false, resolutionHours: 2.5, slaMet: true },
+  ]);
+
+  const forms: HelpdeskForm[] = [
+    {
+      key: "ticket",
+      title: "Support Ticket",
+      description: "Capture support ticket details.",
+      accent: "#2563eb",
+      icon: "support",
+      submitLabel: "Create Ticket",
+      fields: [
+        { key: "category", label: "Category", type: "select", required: true, note: "IT | Maintenance | Biomedical | Housekeeping | HR | Security.", options: ["IT", "Maintenance", "Biomedical", "Housekeeping", "HR", "Security"] },
+        { key: "sub_category", label: "Sub-category", type: "select", required: true, note: "Network | Hardware | Plumbing | Electrical | Equipment | Other.", options: ["Network", "Hardware", "Plumbing", "Electrical", "Equipment", "Other"] },
+        { key: "priority", label: "Priority", type: "select", required: true, note: "Low | Medium | High | Critical.", options: ["Low", "Medium", "High", "Critical"] },
+        { key: "title", label: "Title", type: "text", required: true, note: "Short issue description - max 100 characters.", placeholder: "Short issue description" },
+        { key: "description", label: "Description", type: "textarea", required: true, note: "Detailed description - what happened, when, impact." },
+        { key: "affected_asset", label: "Affected asset", type: "select", note: "Asset from asset register if applicable.", options: ["None", "Printer OPD-01", "Lab Switch 2", "Barcode Scanner PH-03", "Ward Plumbing"] },
+        { key: "attach_screenshot", label: "Attach screenshot", type: "text", note: "Screenshot or photo of the issue.", placeholder: "File name or reference" },
+      ],
+    },
+    {
+      key: "resolution",
+      title: "Ticket Resolution",
+      description: "Capture ticket resolution details.",
+      accent: "#16a34a",
+      icon: "fact_check",
+      submitLabel: "Resolve Ticket",
+      fields: [
+        { key: "ticket_number", label: "Ticket number", type: "select", required: true, note: "Ticket being resolved.", options: ["HD-1001", "HD-1002", "HD-1003", "HD-1004"] },
+        { key: "resolution_notes", label: "Resolution notes", type: "textarea", required: true, note: "What was done to resolve the issue." },
+        { key: "time_spent_hours", label: "Time spent (hours)", type: "number", required: true, note: "Total time to resolve.", placeholder: "Total time to resolve" },
+        { key: "parts_used", label: "Parts used", type: "text", note: "Any parts or consumables used.", placeholder: "Any parts or consumables used" },
+        { key: "requester_satisfaction", label: "Requester satisfaction", type: "text", note: "1-5 star rating from requester.", placeholder: "1-5 star rating" },
+      ],
+    },
+  ];
+
+  const activeForm = forms.find((form) => form.key === activeFormKey) || null;
+  const openTickets = tickets.filter((ticket) => ticket.status !== "Resolved");
+  const resolvedTickets = tickets.filter((ticket) => ticket.status === "Resolved");
+  const slaCompliance =
+    tickets.length > 0
+      ? ((tickets.filter((ticket) => ticket.slaMet !== false).length / tickets.length) * 100).toFixed(1)
+      : "0.0";
+  const avgResolution =
+    resolvedTickets.length > 0
+      ? (resolvedTickets.reduce((sum, ticket) => sum + Number(ticket.resolutionHours || 0), 0) / resolvedTickets.length).toFixed(2)
+      : "0.00";
+  const stats = [
+    { label: "Open Tickets", value: openTickets.length, color: "#1e3a8a" },
+    { label: "Overdue Tickets", value: tickets.filter((ticket) => ticket.status === "Overdue").length, color: "#dc2626" },
+    { label: "Assigned To Me", value: tickets.filter((ticket) => ticket.mine && ticket.status !== "Resolved").length, color: "#2563eb" },
+    { label: "My Tickets", value: tickets.filter((ticket) => ticket.mine).length, color: "#0d9488" },
+    { label: "SLA Compliance", value: `${slaCompliance}%`, color: "#16a34a" },
+    { label: "Avg Resolution (hrs)", value: avgResolution, color: "#7c3aed" },
+    { label: "Critical", value: tickets.filter((ticket) => ticket.priority === "Critical").length, color: "#be123c" },
+  ];
+  const filteredTickets = tickets.filter((ticket) => {
+    const needle = search.trim().toLowerCase();
+    if (!needle) return true;
+    return `${ticket.ticket} ${ticket.subject} ${ticket.priority} ${ticket.status} ${ticket.assignedTo}`.toLowerCase().includes(needle);
+  });
+  const updateFormValue = (key: string, value: string) => setFormValues((current) => ({ ...current, [key]: value }));
+  const renderField = (field: HelpdeskField) => {
+    const value = formValues[field.key] || "";
+    if (field.type === "textarea") {
+      return <textarea className="helpdesk-form-control" value={value} onChange={(event) => updateFormValue(field.key, event.target.value)} placeholder={field.placeholder} required={field.required} />;
+    }
+    if (field.type === "select") {
+      return (
+        <select className="helpdesk-form-control" value={value} onChange={(event) => updateFormValue(field.key, event.target.value)} required={field.required}>
+          <option value="">Select {field.label.toLowerCase()}</option>
+          {(field.options || []).map((option) => <option key={option} value={option}>{option}</option>)}
+        </select>
+      );
+    }
+    return <input className="helpdesk-form-control" type={field.type} value={value} onChange={(event) => updateFormValue(field.key, event.target.value)} placeholder={field.placeholder} required={field.required} />;
+  };
+  const submitForm = (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!activeForm) return;
+    if (activeForm.key === "ticket") {
+      setTickets((current) => [
+        {
+          ticket: `HD-${1001 + current.length}`,
+          subject: String(formValues.title || "Support ticket"),
+          priority: (String(formValues.priority || "Medium") as HelpdeskTicket["priority"]),
+          status: "Open",
+          assignedTo: String(formValues.category || "Helpdesk"),
+          mine: true,
+          slaMet: String(formValues.priority || "") !== "Critical",
+        },
+        ...current,
+      ]);
+    }
+    if (activeForm.key === "resolution") {
+      const selected = String(formValues.ticket_number || "");
+      setTickets((current) =>
+        current.map((ticket) =>
+          ticket.ticket === selected || (!selected && ticket.status !== "Resolved")
+            ? {
+                ...ticket,
+                status: "Resolved",
+                resolutionHours: Number(formValues.time_spent_hours || 0),
+                slaMet: true,
+              }
+            : ticket,
+        ),
+      );
+    }
+    setNotice(`${activeForm.title} saved successfully.`);
+    setActiveFormKey(null);
+    setFormValues({});
+  };
+
+  return (
+    <div className="patients-view helpdesk-web-view">
+      <div className="pv-header">
+        <div>
+          <div className="pv-title"><Icon type="support" /> Helpdesk</div>
+          <p className="pv-subtitle">Support ticket volumes, SLA compliance, and resolution performance tracking.</p>
+        </div>
+        <div className="module-actions">
+          {forms.map((form) => (
+            <button key={form.key} type="button" onClick={() => setActiveFormKey(form.key)} style={{ backgroundColor: form.accent, borderColor: form.accent, boxShadow: `0 8px 18px ${form.accent}33` }}>
+              <Icon type={form.icon} size={16} /> {form.title}
+            </button>
+          ))}
+        </div>
+      </div>
+      {notice ? <div className="workflow-notice is-success">{notice}</div> : null}
+      <div className="pv-stats helpdesk-stat-grid">
+        {stats.map((stat) => (
+          <div key={stat.label} className="pv-stat-card" style={{ borderLeftColor: stat.color }}>
+            <p className="pv-stat-label">{stat.label}</p>
+            <p className="pv-stat-value">{stat.value}</p>
+          </div>
+        ))}
+      </div>
+      <div className="pv-search-bar">
+        <div className="pv-search-wrap">
+          <Icon type="search" size={16} />
+          <input className="pv-search helpdesk-search" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search helpdesk tickets..." />
+        </div>
+      </div>
+      <div className="pv-table-meta"><strong className="pv-table-title">Open Tickets</strong><span className="pv-badge">{filteredTickets.length} tickets</span></div>
+      <div className="pv-table-wrap">
+        <table className="pv-table">
+          <thead><tr><th>Ticket</th><th>Subject</th><th>Priority</th><th>Status</th></tr></thead>
+          <tbody>
+            {filteredTickets.length === 0 ? <tr><td className="pv-empty" colSpan={4}>No helpdesk tickets found.</td></tr> : filteredTickets.map((ticket) => (
+              <tr key={ticket.ticket}>
+                <td className="pv-name">{ticket.ticket}</td>
+                <td>{ticket.subject}</td>
+                <td><span className={`pv-badge ${ticket.priority === "Critical" || ticket.priority === "High" ? "badge-female" : "badge-male"}`}>{ticket.priority}</span></td>
+                <td>{ticket.status}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      {activeForm ? (
+        <div className="helpdesk-form-overlay">
+          <div className="helpdesk-form-panel" style={{ "--helpdesk-accent": activeForm.accent } as React.CSSProperties}>
+            <div className="helpdesk-form-header"><div className="helpdesk-form-title-wrap"><div className="helpdesk-form-icon"><Icon type={activeForm.icon} size={24} /></div><div><p>Helpdesk</p><h2>{activeForm.title}</h2></div></div><button type="button" className="helpdesk-form-close" onClick={() => setActiveFormKey(null)} aria-label="Close form">×</button></div>
+            <div className="helpdesk-form-intro">{activeForm.description}</div>
+            <form className="helpdesk-form-body" onSubmit={submitForm}>
+              <div className="helpdesk-form-grid">
+                {activeForm.fields.map((field) => <label key={field.key} className={`helpdesk-form-field ${field.type === "textarea" ? "is-wide" : ""}`}><span>{field.label}{field.required ? <strong>*</strong> : null}</span><small>{field.note}</small>{renderField(field)}</label>)}
+              </div>
+              <div className="helpdesk-form-footer"><button type="button" className="form-btn form-btn-cancel" onClick={() => setActiveFormKey(null)}>Cancel</button><button type="submit" className="form-btn form-btn-primary">{activeForm.submitLabel}</button></div>
+            </form>
+          </div>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function CanteenView() {
+  type CanteenField = {
+    key: string;
+    label: string;
+    note: string;
+    type: string;
+    required?: boolean;
+    placeholder?: string;
+    options?: string[];
+  };
+  type MealOrder = {
+    order: string;
+    ward: string;
+    diet: string;
+    status: "Preparing" | "Queued" | "Delivered";
+  };
+  type CanteenForm = {
+    key: "diet" | "pos";
+    title: string;
+    description: string;
+    accent: string;
+    icon: string;
+    submitLabel: string;
+    fields: CanteenField[];
+  };
+
+  const [search, setSearch] = useState("");
+  const [activeFormKey, setActiveFormKey] = useState<CanteenForm["key"] | null>(null);
+  const [formValues, setFormValues] = useState<Record<string, string>>({});
+  const [notice, setNotice] = useState("");
+  const [orders, setOrders] = useState<MealOrder[]>([
+    { order: "CT-302", ward: "Maternity", diet: "Low Sodium", status: "Preparing" },
+    { order: "CT-303", ward: "ICU", diet: "Liquid", status: "Queued" },
+  ]);
+
+  const forms: CanteenForm[] = [
+    {
+      key: "diet",
+      title: "Patient Diet Order",
+      description: "Capture patient diet order details.",
+      accent: "#dc2626",
+      icon: "restaurant",
+      submitLabel: "Save Diet Order",
+      fields: [
+        { key: "patient", label: "Patient", type: "text", required: true, note: "Auto-filled from admission.", placeholder: "Patient name or MRN" },
+        { key: "ward", label: "Ward", type: "select", required: true, note: "Ward or service point receiving the meal.", options: ["Maternity", "ICU", "General Ward", "Paediatric", "Surgical Ward"] },
+        { key: "diet_type", label: "Diet type", type: "select", required: true, note: "Normal | Diabetic | Low-sodium | Renal | Soft | Liquid | NPO | High-protein | Vegetarian | Halal | Low-fat.", options: ["Normal", "Diabetic", "Low-sodium", "Renal", "Soft", "Liquid", "NPO", "High-protein", "Vegetarian", "Halal", "Low-fat"] },
+        { key: "texture", label: "Texture", type: "select", note: "Regular | Soft | Minced | Pureed | Liquid - for dysphagia.", options: ["Regular", "Soft", "Minced", "Pureed", "Liquid"] },
+        { key: "caloric_target", label: "Caloric target", type: "number", note: "Daily calorie target if prescribed by dietitian.", placeholder: "Daily calorie target" },
+        { key: "fluid_restriction_ml", label: "Fluid restriction (mL)", type: "number", note: "Daily fluid limit if restricted.", placeholder: "Daily fluid limit" },
+        { key: "allergens_to_exclude", label: "Allergens to exclude", type: "text", note: "Nuts | Gluten | Dairy | Eggs | Seafood | Soy.", placeholder: "Nuts, gluten, dairy..." },
+        { key: "special_instructions", label: "Special instructions", type: "text", note: "Additional preparation notes for kitchen.", placeholder: "Preparation notes" },
+        { key: "start_date", label: "Start date", type: "date", required: true, note: "When this diet order begins." },
+        { key: "ordered_by", label: "Ordered by", type: "text", required: true, note: "Doctor or dietitian - auto-filled.", placeholder: "Doctor or dietitian" },
+      ],
+    },
+    {
+      key: "pos",
+      title: "Canteen POS",
+      description: "Capture canteen point-of-sale details.",
+      accent: "#0d9488",
+      icon: "billing",
+      submitLabel: "Record POS Sale",
+      fields: [
+        { key: "customer_type", label: "Customer type", type: "select", required: true, note: "Staff | Visitor | Patient | Other.", options: ["Staff", "Visitor", "Patient", "Other"] },
+        { key: "staff_id", label: "Staff ID", type: "select", note: "If selling to staff - enables salary deduction option.", options: ["Not applicable", "STF-001", "STF-014", "STF-029"] },
+        { key: "items", label: "Items", type: "text", required: true, note: "Items selected from menu with quantities.", placeholder: "Rice x2, tea x1" },
+        { key: "total", label: "Total", type: "text", required: true, note: "Sum of selected items.", placeholder: "Ksh 350" },
+        { key: "payment_method", label: "Payment method", type: "select", required: true, note: "Cash | MPESA | Staff salary deduction | Credit.", options: ["Cash", "MPESA", "Staff salary deduction", "Credit"] },
+      ],
+    },
+  ];
+  const activeForm = forms.find((form) => form.key === activeFormKey) || null;
+
+  const filteredOrders = orders.filter((row) => {
+    const needle = search.trim().toLowerCase();
+    if (!needle) return true;
+    return `${row.order} ${row.ward} ${row.diet} ${row.status}`.toLowerCase().includes(needle);
+  });
+  const updateFormValue = (key: string, value: string) => setFormValues((current) => ({ ...current, [key]: value }));
+  const renderField = (field: CanteenField) => {
+    const value = formValues[field.key] || "";
+    if (field.type === "select") {
+      return (
+        <select className="canteen-form-control" value={value} onChange={(event) => updateFormValue(field.key, event.target.value)} required={field.required}>
+          <option value="">Select {field.label.toLowerCase()}</option>
+          {(field.options || []).map((option) => <option key={option} value={option}>{option}</option>)}
+        </select>
+      );
+    }
+    return <input className="canteen-form-control" type={field.type} value={value} onChange={(event) => updateFormValue(field.key, event.target.value)} placeholder={field.placeholder} required={field.required} />;
+  };
+  const submitCanteenForm = (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!activeForm) return;
+    setOrders((current) => [
+      {
+        order: `CT-${302 + current.length + 1}`,
+        ward: activeForm.key === "pos" ? String(formValues.customer_type || "Visitor") : String(formValues.ward || "General Ward"),
+        diet: activeForm.key === "pos" ? String(formValues.items || "Canteen sale") : String(formValues.diet_type || "Normal"),
+        status: "Queued",
+      },
+      ...current,
+    ]);
+    setNotice(`${activeForm.title} saved successfully.`);
+    setActiveFormKey(null);
+    setFormValues({});
+  };
+
+  return (
+    <div className="patients-view canteen-web-view">
+      <div className="pv-header">
+        <div>
+          <div className="pv-title"><Icon type="restaurant" /> Canteen Operations</div>
+          <p className="pv-subtitle">Meal plans, orders, and dietary coordination</p>
+        </div>
+        <div className="module-actions">
+          {forms.map((form) => (
+            <button key={form.key} type="button" className="canteen-action-btn" onClick={() => setActiveFormKey(form.key)} style={{ backgroundColor: form.accent, borderColor: form.accent, boxShadow: `0 8px 18px ${form.accent}33` }}>
+              <Icon type={form.icon} size={16} /> {form.title}
+            </button>
+          ))}
+        </div>
+      </div>
+      {notice ? <div className="workflow-notice is-success">{notice}</div> : null}
+      <div className="pv-stats canteen-stat-grid">
+        <div className="pv-stat-card" style={{ borderLeftColor: "#1e3a8a" }}><p className="pv-stat-label">Meals Today</p><p className="pv-stat-value">240</p></div>
+        <div className="pv-stat-card" style={{ borderLeftColor: "#0d9488" }}><p className="pv-stat-label">Diet Orders</p><p className="pv-stat-value">{56 + Math.max(0, orders.length - 2)}</p></div>
+        <div className="pv-stat-card" style={{ borderLeftColor: "#dc2626" }}><p className="pv-stat-label">Pending Prep</p><p className="pv-stat-value">{orders.filter((order) => order.status === "Queued" || order.status === "Preparing").length + 16}</p></div>
+      </div>
+      <div className="pv-search-bar">
+        <div className="pv-search-wrap">
+          <Icon type="search" size={16} />
+          <input className="pv-search canteen-search" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search meal orders" />
+        </div>
+      </div>
+      <div className="pv-table-meta"><strong className="pv-table-title">Meal Orders</strong><span className="pv-badge">{filteredOrders.length} orders</span></div>
+      <div className="pv-table-wrap">
+        <table className="pv-table">
+          <thead><tr><th>Order</th><th>Ward</th><th>Diet</th><th>Status</th></tr></thead>
+          <tbody>
+            {filteredOrders.length === 0 ? <tr><td className="pv-empty" colSpan={4}>No meal orders found.</td></tr> : filteredOrders.map((order) => (
+              <tr key={order.order}>
+                <td className="pv-name">{order.order}</td>
+                <td>{order.ward}</td>
+                <td>{order.diet}</td>
+                <td><span className={`pv-badge ${order.status === "Delivered" ? "badge-male" : "badge-female"}`}>{order.status}</span></td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      {activeForm ? (
+        <div className="canteen-form-overlay">
+          <div className="canteen-form-panel" style={{ "--canteen-accent": activeForm.accent } as React.CSSProperties}>
+            <div className="canteen-form-header"><div className="canteen-form-title-wrap"><div className="canteen-form-icon"><Icon type={activeForm.icon} size={24} /></div><div><p>Canteen Operations</p><h2>{activeForm.title}</h2></div></div><button type="button" className="canteen-form-close" onClick={() => setActiveFormKey(null)} aria-label="Close form">×</button></div>
+            <div className="canteen-form-intro">{activeForm.description}</div>
+            <form className="canteen-form-body" onSubmit={submitCanteenForm}>
+              <div className="canteen-form-grid">
+                {activeForm.fields.map((field) => <label key={field.key} className="canteen-form-field"><span>{field.label}{field.required ? <strong>*</strong> : null}</span><small>{field.note}</small>{renderField(field)}</label>)}
+              </div>
+              <div className="canteen-form-footer"><button type="button" className="form-btn form-btn-cancel" onClick={() => setActiveFormKey(null)}>Cancel</button><button type="submit" className="form-btn form-btn-primary">{activeForm.submitLabel}</button></div>
+            </form>
+          </div>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function PatientFeedbackView() {
+  type FeedbackField = {
+    key: string;
+    label: string;
+    note: string;
+    type: string;
+    required?: boolean;
+    placeholder?: string;
+    options?: string[];
+  };
+  type FeedbackForm = {
+    key: "survey" | "complaint";
+    title: string;
+    description: string;
+    accent: string;
+    icon: string;
+    submitLabel: string;
+    fields: FeedbackField[];
+  };
+  type FeedbackRow = {
+    patient: string;
+    rating: number;
+    sentiment: "Positive" | "Neutral" | "Negative";
+    status: "Open" | "Closed";
+    category: string;
+    highRisk?: boolean;
+  };
+
+  const [search, setSearch] = useState("");
+  const [activeFormKey, setActiveFormKey] = useState<FeedbackForm["key"] | null>(null);
+  const [formValues, setFormValues] = useState<Record<string, string>>({});
+  const [notice, setNotice] = useState("");
+  const [rows, setRows] = useState<FeedbackRow[]>([
+    { patient: "Jane Doe", rating: 5, sentiment: "Positive", status: "Closed", category: "Service" },
+    { patient: "Samuel Mwangi", rating: 3, sentiment: "Neutral", status: "Open", category: "Long Wait Time" },
+    { patient: "Amina Hassan", rating: 2, sentiment: "Negative", status: "Open", category: "Billing Issue", highRisk: true },
+    { patient: "Peter Otieno", rating: 4, sentiment: "Positive", status: "Closed", category: "Staff Attitude" },
+  ]);
+
+  const forms: FeedbackForm[] = [
+    {
+      key: "survey",
+      title: "Patient Satisfaction Survey",
+      description: "Capture patient satisfaction survey details.",
+      accent: "#2563eb",
+      icon: "fact_check",
+      submitLabel: "Submit Survey",
+      fields: [
+        { key: "patient", label: "Patient", type: "text", required: true, note: "Patient name or MRN.", placeholder: "Patient name or MRN" },
+        { key: "visit_type", label: "Visit type", type: "select", required: true, note: "OPD | Inpatient | Emergency | Telemedicine.", options: ["OPD", "Inpatient", "Emergency", "Telemedicine"] },
+        { key: "overall_satisfaction", label: "Overall satisfaction", type: "text", required: true, note: "1 (Very poor) to 5 (Excellent).", placeholder: "1 to 5" },
+        { key: "staff_attitude", label: "Staff attitude", type: "text", note: "How staff treated you.", placeholder: "How staff treated you" },
+        { key: "cleanliness", label: "Cleanliness", type: "text", note: "Cleanliness of facility.", placeholder: "Cleanliness of facility" },
+        { key: "wait_time", label: "Wait time", type: "text", note: "How long you waited.", placeholder: "How long you waited" },
+        { key: "explanation_of_condition", label: "Explanation of condition", type: "text", note: "How well your condition was explained.", placeholder: "How well your condition was explained" },
+        { key: "would_recommend_facility", label: "Would recommend facility", type: "text", required: true, note: "0-10 Net Promoter Score.", placeholder: "0-10" },
+        { key: "best_aspect", label: "Best aspect", type: "text", note: "What you liked most.", placeholder: "What you liked most" },
+        { key: "improvement_suggestion", label: "Improvement suggestion", type: "textarea", note: "What could be better." },
+      ],
+    },
+    {
+      key: "complaint",
+      title: "Complaint / Compliment",
+      description: "Capture complaint / compliment details.",
+      accent: "#dc2626",
+      icon: "message",
+      submitLabel: "Save Feedback Case",
+      fields: [
+        { key: "patient", label: "Patient", type: "text", note: "Patient name or MRN if available.", placeholder: "Patient name or MRN" },
+        { key: "type", label: "Type", type: "select", required: true, note: "Complaint | Compliment | Suggestion.", options: ["Complaint", "Compliment", "Suggestion"] },
+        { key: "department_involved", label: "Department involved", type: "select", required: true, note: "Department the feedback is about.", options: ["OPD", "Inpatient", "Laboratory", "Radiology", "Pharmacy", "Billing", "Canteen", "Emergency"] },
+        { key: "date_of_incident", label: "Date of incident", type: "date", note: "When the incident occurred if complaint." },
+        { key: "staff_involved", label: "Staff involved", type: "text", note: "Name of staff if known - anonymous to them.", placeholder: "Name of staff if known" },
+        { key: "description", label: "Description", type: "textarea", required: true, note: "Detailed description of the compliment or complaint." },
+        { key: "preferred_resolution", label: "Preferred resolution", type: "text", note: "What outcome patient would like if complaint.", placeholder: "Preferred outcome" },
+        { key: "contact_for_follow_up", label: "Contact for follow-up", type: "text", note: "Yes - contact me | No - anonymous.", placeholder: "Yes / No and contact" },
+      ],
+    },
+  ];
+
+  const activeForm = forms.find((form) => form.key === activeFormKey) || null;
+  const avgRating = rows.length ? (rows.reduce((sum, row) => sum + row.rating, 0) / rows.length).toFixed(1) : "0";
+  const stats = [
+    { label: "Avg Rating", value: avgRating, color: "#1e3a8a" },
+    { label: "Responses", value: rows.length, color: "#0d9488" },
+    { label: "Open Complaints", value: rows.filter((row) => row.status === "Open" && row.sentiment === "Negative").length, color: "#dc2626" },
+    { label: "High Risk", value: rows.filter((row) => row.highRisk).length, color: "#7c3aed" },
+  ];
+  const filteredRows = rows.filter((row) => {
+    const needle = search.trim().toLowerCase();
+    if (!needle) return true;
+    return `${row.patient} ${row.rating} ${row.sentiment} ${row.status} ${row.category}`.toLowerCase().includes(needle);
+  });
+  const sentimentCounts = [
+    { label: "Positive", value: rows.filter((row) => row.sentiment === "Positive").length, color: "#22c55e" },
+    { label: "Neutral", value: rows.filter((row) => row.sentiment === "Neutral").length, color: "#f59e0b" },
+    { label: "Negative", value: rows.filter((row) => row.sentiment === "Negative").length, color: "#ef4444" },
+  ];
+  const totalSentiment = sentimentCounts.reduce((sum, item) => sum + item.value, 0);
+  let sentimentCursor = 0;
+  const sentimentGradient = sentimentCounts
+    .map((item) => {
+      const start = sentimentCursor;
+      const end = totalSentiment > 0 ? sentimentCursor + (item.value / totalSentiment) * 100 : sentimentCursor;
+      sentimentCursor = end;
+      return `${item.color} ${start}% ${end}%`;
+    })
+    .join(", ") || "#e2e8f0 0% 100%";
+  const categoryRows = Array.from(
+    rows.reduce((map, row) => map.set(row.category, (map.get(row.category) || 0) + 1), new Map<string, number>()),
+  )
+    .map(([label, value]) => ({ label, value }))
+    .sort((a, b) => b.value - a.value)
+    .slice(0, 6);
+  const trend = [
+    { label: "Mon", value: 3.6 },
+    { label: "Tue", value: 3.9 },
+    { label: "Wed", value: 4.1 },
+    { label: "Thu", value: Number(avgRating) || 0 },
+  ];
+
+  const updateFormValue = (key: string, value: string) => setFormValues((current) => ({ ...current, [key]: value }));
+  const renderField = (field: FeedbackField) => {
+    const value = formValues[field.key] || "";
+    if (field.type === "textarea") {
+      return <textarea className="feedback-form-control" value={value} onChange={(event) => updateFormValue(field.key, event.target.value)} placeholder={field.placeholder} required={field.required} />;
+    }
+    if (field.type === "select") {
+      return (
+        <select className="feedback-form-control" value={value} onChange={(event) => updateFormValue(field.key, event.target.value)} required={field.required}>
+          <option value="">Select {field.label.toLowerCase()}</option>
+          {(field.options || []).map((option) => <option key={option} value={option}>{option}</option>)}
+        </select>
+      );
+    }
+    return <input className="feedback-form-control" type={field.type} value={value} onChange={(event) => updateFormValue(field.key, event.target.value)} placeholder={field.placeholder} required={field.required} />;
+  };
+  const submitFeedbackForm = (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!activeForm) return;
+    if (activeForm.key === "survey") {
+      const rating = Math.max(1, Math.min(5, Number(formValues.overall_satisfaction || 3)));
+      setRows((current) => [
+        {
+          patient: String(formValues.patient || "Patient"),
+          rating,
+          sentiment: rating >= 4 ? "Positive" : rating === 3 ? "Neutral" : "Negative",
+          status: rating <= 2 ? "Open" : "Closed",
+          category: String(formValues.visit_type || "Service"),
+          highRisk: rating <= 2,
+        },
+        ...current,
+      ]);
+    }
+    if (activeForm.key === "complaint") {
+      const type = String(formValues.type || "Complaint");
+      setRows((current) => [
+        {
+          patient: String(formValues.patient || "Anonymous"),
+          rating: type === "Compliment" ? 5 : type === "Suggestion" ? 3 : 2,
+          sentiment: type === "Compliment" ? "Positive" : type === "Suggestion" ? "Neutral" : "Negative",
+          status: type === "Compliment" ? "Closed" : "Open",
+          category: String(formValues.department_involved || "General"),
+          highRisk: type === "Complaint",
+        },
+        ...current,
+      ]);
+    }
+    setNotice(`${activeForm.title} saved successfully.`);
+    setActiveFormKey(null);
+    setFormValues({});
+  };
+
+  return (
+    <div className="patients-view feedback-web-view">
+      <div className="pv-header">
+        <div>
+          <div className="pv-title"><Icon type="fact_check" /> Patient Feedback</div>
+          <p className="pv-subtitle">Patient satisfaction insights, complaint tracking, and service quality monitoring.</p>
+        </div>
+        <div className="module-actions">
+          {forms.map((form) => (
+            <button key={form.key} type="button" className="feedback-action-btn" onClick={() => setActiveFormKey(form.key)} style={{ backgroundColor: form.accent, borderColor: form.accent, boxShadow: `0 8px 18px ${form.accent}33` }}>
+              <Icon type={form.icon} size={16} /> {form.title}
+            </button>
+          ))}
+        </div>
+      </div>
+      {notice ? <div className="workflow-notice is-success">{notice}</div> : null}
+      <div className="pv-stats feedback-stat-grid">
+        {stats.map((stat) => (
+          <div key={stat.label} className="pv-stat-card" style={{ borderLeftColor: stat.color }}>
+            <p className="pv-stat-label">{stat.label}</p>
+            <p className="pv-stat-value">{stat.value}</p>
+          </div>
+        ))}
+      </div>
+      <section className="feedback-chart-grid">
+        <article className="feedback-chart-card">
+          <h3>Satisfaction Trend</h3>
+          <p>Average rating per day</p>
+          <div className="feedback-line-bars">
+            {trend.map((item) => <span key={item.label} style={{ height: `${Math.max(12, item.value * 18)}%` }}><em>{item.label}</em></span>)}
+          </div>
+        </article>
+        <article className="feedback-chart-card">
+          <h3>Sentiment Mix</h3>
+          <p>Positive vs neutral vs negative feedback</p>
+          <div className="feedback-donut" style={{ background: `conic-gradient(${sentimentGradient})` }}><strong>{totalSentiment}</strong></div>
+          <div className="feedback-legend">{sentimentCounts.map((item) => <span key={item.label}><i style={{ background: item.color }} />{item.label}: {item.value}</span>)}</div>
+        </article>
+        <article className="feedback-chart-card">
+          <h3>Complaint Categories</h3>
+          <p>Top complaint drivers</p>
+          <div className="feedback-category-bars">
+            {categoryRows.map((item) => <div key={item.label}><span>{item.label}</span><strong style={{ width: `${Math.max(12, item.value * 28)}%` }}>{item.value}</strong></div>)}
+          </div>
+        </article>
+      </section>
+      <div className="pv-search-bar">
+        <div className="pv-search-wrap">
+          <Icon type="search" size={16} />
+          <input className="pv-search feedback-search" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search feedback responses..." />
+        </div>
+      </div>
+      <div className="pv-table-meta"><strong className="pv-table-title">Latest Feedback</strong><span className="pv-badge">{filteredRows.length} responses</span></div>
+      <div className="pv-table-wrap">
+        <table className="pv-table">
+          <thead><tr><th>Patient</th><th>Rating</th><th>Sentiment</th><th>Status</th></tr></thead>
+          <tbody>
+            {filteredRows.length === 0 ? <tr><td className="pv-empty" colSpan={4}>No feedback responses found.</td></tr> : filteredRows.map((row, index) => (
+              <tr key={`${row.patient}-${index}`}>
+                <td className="pv-name">{row.patient}</td>
+                <td>{row.rating}</td>
+                <td><span className={`pv-badge ${row.sentiment === "Positive" ? "badge-male" : "badge-female"}`}>{row.sentiment}</span></td>
+                <td>{row.status}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      {activeForm ? (
+        <div className="feedback-form-overlay">
+          <div className="feedback-form-panel" style={{ "--feedback-accent": activeForm.accent } as React.CSSProperties}>
+            <div className="feedback-form-header"><div className="feedback-form-title-wrap"><div className="feedback-form-icon"><Icon type={activeForm.icon} size={24} /></div><div><p>Patient Feedback</p><h2>{activeForm.title}</h2></div></div><button type="button" className="feedback-form-close" onClick={() => setActiveFormKey(null)} aria-label="Close form">×</button></div>
+            <div className="feedback-form-intro">{activeForm.description}</div>
+            <form className="feedback-form-body" onSubmit={submitFeedbackForm}>
+              <div className="feedback-form-grid">
+                {activeForm.fields.map((field) => <label key={field.key} className={`feedback-form-field ${field.type === "textarea" ? "is-wide" : ""}`}><span>{field.label}{field.required ? <strong>*</strong> : null}</span><small>{field.note}</small>{renderField(field)}</label>)}
+              </div>
+              <div className="feedback-form-footer"><button type="button" className="form-btn form-btn-cancel" onClick={() => setActiveFormKey(null)}>Cancel</button><button type="submit" className="form-btn form-btn-primary">{activeForm.submitLabel}</button></div>
+            </form>
+          </div>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function QualityAssuranceView() {
+  type QaField = {
+    key: string;
+    label: string;
+    note: string;
+    type: string;
+    required?: boolean;
+    placeholder?: string;
+    options?: string[];
+  };
+  type QaForm = {
+    key: "incident" | "rca" | "audit" | "accreditation";
+    title: string;
+    description: string;
+    accent: string;
+    icon: string;
+    submitLabel: string;
+    fields: QaField[];
+  };
+  type AuditRow = {
+    audit: string;
+    department: string;
+    score: string;
+    status: string;
+  };
+
+  const [search, setSearch] = useState("");
+  const [activeFormKey, setActiveFormKey] = useState<QaForm["key"] | null>(null);
+  const [formValues, setFormValues] = useState<Record<string, string>>({});
+  const [notice, setNotice] = useState("");
+  const [rows, setRows] = useState<AuditRow[]>([
+    { audit: "Infection Control", department: "ICU", score: "88%", status: "Action Required" },
+    { audit: "Medication Safety", department: "Pharmacy", score: "94%", status: "On Track" },
+  ]);
+
+  const departmentOptions = ["ICU", "OPD", "Emergency", "Maternity", "Laboratory", "Radiology", "Pharmacy", "Ward", "Theatre"];
+  const forms: QaForm[] = [
+    {
+      key: "incident",
+      title: "Incident Report",
+      description: "Capture incident report details.",
+      accent: "#dc2626",
+      icon: "shield",
+      submitLabel: "Submit Incident Report",
+      fields: [
+        { key: "incident_date", label: "Incident date", type: "date", required: true, note: "Date incident occurred." },
+        { key: "incident_time", label: "Incident time", type: "time", note: "Approximate time if known." },
+        { key: "patient_involved", label: "Patient involved", type: "text", note: "Patient MRN - blank for staff-only incidents.", placeholder: "Patient MRN" },
+        { key: "location", label: "Location", type: "select", required: true, note: "Department or area where incident occurred.", options: departmentOptions },
+        { key: "incident_type", label: "Incident type", type: "select", required: true, note: "Medication error | Fall | Pressure injury | Wrong site | HAI | Equipment failure | Near miss | Complaint.", options: ["Medication error", "Fall", "Pressure injury", "Wrong site", "HAI", "Equipment failure", "Near miss", "Complaint"] },
+        { key: "severity", label: "Severity", type: "select", required: true, note: "Near miss | Minor | Moderate | Major | Sentinel event.", options: ["Near miss", "Minor", "Moderate", "Major", "Sentinel event"] },
+        { key: "description", label: "Description", type: "textarea", required: true, note: "Detailed, factual account of what happened." },
+        { key: "immediate_actions_taken", label: "Immediate actions taken", type: "textarea", required: true, note: "What was done immediately after the incident." },
+        { key: "patient_outcome", label: "Patient outcome", type: "text", note: "Effect on patient if applicable.", placeholder: "Effect on patient" },
+      ],
+    },
+    {
+      key: "rca",
+      title: "Root Cause Analysis (RCA)",
+      description: "Capture root cause analysis details.",
+      accent: "#7c3aed",
+      icon: "manage_search",
+      submitLabel: "Save RCA",
+      fields: [
+        { key: "incident", label: "Incident", type: "text", required: true, note: "Linked incident being investigated.", placeholder: "Incident reference" },
+        { key: "rca_team_members", label: "RCA team members", type: "text", required: true, note: "All members of the investigation team.", placeholder: "Team members" },
+        { key: "rca_methodology", label: "RCA methodology", type: "select", required: true, note: "Fishbone | 5 Whys | FMEA | Fault tree | London Protocol.", options: ["Fishbone", "5 Whys", "FMEA", "Fault tree", "London Protocol"] },
+        { key: "event_timeline", label: "Event timeline", type: "text", required: true, note: "Chronological sequence of events - time, event, person.", placeholder: "Timeline summary" },
+        { key: "contributing_factors", label: "Contributing factors", type: "text", required: true, note: "Patient | Staff | Environment | Equipment | Communication.", placeholder: "Contributing factors" },
+        { key: "root_causes", label: "Root causes", type: "textarea", required: true, note: "Identified fundamental causes." },
+        { key: "recommendations", label: "Recommendations", type: "text", required: true, note: "Action, responsible person, due date, priority per recommendation.", placeholder: "Recommendations" },
+        { key: "lessons_learned", label: "Lessons learned", type: "textarea", required: true, note: "Key learnings for system-wide sharing." },
+      ],
+    },
+    {
+      key: "audit",
+      title: "Clinical Audit",
+      description: "Capture clinical audit details.",
+      accent: "#1e3a8a",
+      icon: "fact_check",
+      submitLabel: "Save Clinical Audit",
+      fields: [
+        { key: "audit_title", label: "Audit title", type: "text", required: true, note: "Name of the audit e.g. Hand Hygiene Compliance Audit.", placeholder: "Audit title" },
+        { key: "audit_topic", label: "Audit topic", type: "text", required: true, note: "Clinical area or process being audited.", placeholder: "Clinical area or process" },
+        { key: "department", label: "Department", type: "select", required: true, note: "Department being audited.", options: departmentOptions },
+        { key: "standard_or_criteria", label: "Standard or criteria", type: "textarea", required: true, note: "What standard is being measured against." },
+        { key: "sample_size", label: "Sample size", type: "number", required: true, note: "Number of records or observations in the audit.", placeholder: "Sample size" },
+        { key: "audit_period", label: "Audit period", type: "text", required: true, note: "Data collection period.", placeholder: "Audit period" },
+        { key: "audit_findings", label: "Audit findings", type: "text", required: true, note: "Compliance %, numerator, denominator, notes.", placeholder: "Audit findings" },
+        { key: "score", label: "Score", type: "text", required: true, note: "Compliance score.", placeholder: "e.g. 91%" },
+        { key: "recommendations", label: "Recommendations", type: "textarea", required: true, note: "What needs to change based on findings." },
+        { key: "action_plan", label: "Action plan", type: "text", required: true, note: "Specific actions with owner and due date.", placeholder: "Action plan" },
+        { key: "re_audit_date", label: "Re-audit date", type: "date", required: true, note: "When to re-audit to measure improvement." },
+      ],
+    },
+    {
+      key: "accreditation",
+      title: "Accreditation Checklist",
+      description: "Capture accreditation checklist details.",
+      accent: "#0d9488",
+      icon: "verified",
+      submitLabel: "Save Accreditation Checklist",
+      fields: [
+        { key: "accreditation_body", label: "Accreditation body", type: "select", required: true, note: "KQMH | JCI | ISO 9001 | SafeCare | WHO SARA.", options: ["KQMH", "JCI", "ISO 9001", "SafeCare", "WHO SARA"] },
+        { key: "standard_code", label: "Standard code", type: "text", required: true, note: "Standard item code.", placeholder: "Standard code" },
+        { key: "requirement", label: "Requirement", type: "text", required: true, note: "Full standard requirement text.", placeholder: "Requirement" },
+        { key: "compliance_status", label: "Compliance status", type: "select", required: true, note: "Compliant | Partially compliant | Non-compliant | Not applicable.", options: ["Compliant", "Partially compliant", "Non-compliant", "Not applicable"] },
+        { key: "evidence_description", label: "Evidence description", type: "textarea", required: true, note: "What evidence demonstrates compliance." },
+        { key: "evidence_documents", label: "Evidence documents", type: "text", note: "Upload supporting documents.", placeholder: "Document reference" },
+        { key: "gap_description", label: "Gap description", type: "textarea", note: "What is missing for full compliance - required if not compliant." },
+        { key: "target_compliance_date", label: "Target compliance date", type: "date", note: "When full compliance will be achieved." },
+      ],
+    },
+  ];
+
+  const activeForm = forms.find((form) => form.key === activeFormKey) || null;
+  const filteredRows = rows.filter((row) => {
+    const needle = search.trim().toLowerCase();
+    if (!needle) return true;
+    return `${row.audit} ${row.department} ${row.score} ${row.status}`.toLowerCase().includes(needle);
+  });
+  const updateFormValue = (key: string, value: string) => setFormValues((current) => ({ ...current, [key]: value }));
+  const renderField = (field: QaField) => {
+    const value = formValues[field.key] || "";
+    if (field.type === "textarea") {
+      return <textarea className="qa-form-control" value={value} onChange={(event) => updateFormValue(field.key, event.target.value)} placeholder={field.placeholder} required={field.required} />;
+    }
+    if (field.type === "select") {
+      return (
+        <select className="qa-form-control" value={value} onChange={(event) => updateFormValue(field.key, event.target.value)} required={field.required}>
+          <option value="">Select {field.label.toLowerCase()}</option>
+          {(field.options || []).map((option) => <option key={option} value={option}>{option}</option>)}
+        </select>
+      );
+    }
+    return <input className="qa-form-control" type={field.type} value={value} onChange={(event) => updateFormValue(field.key, event.target.value)} placeholder={field.placeholder} required={field.required} />;
+  };
+  const submitQaForm = (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!activeForm) return;
+    const auditName =
+      String(formValues.audit_title || formValues.incident_type || formValues.accreditation_body || formValues.incident || activeForm.title);
+    const score =
+      activeForm.key === "incident" ? "0%" :
+      String(formValues.score || (activeForm.key === "accreditation" && formValues.compliance_status === "Compliant" ? "100%" : "Pending"));
+    setRows((current) => [
+      {
+        audit: auditName,
+        department: String(formValues.department || formValues.location || formValues.department_involved || "Quality"),
+        score,
+        status: activeForm.key === "incident" || String(formValues.compliance_status || "").includes("Non") ? "Action Required" : "On Track",
+      },
+      ...current,
+    ]);
+    setNotice(`${activeForm.title} saved successfully.`);
+    setActiveFormKey(null);
+    setFormValues({});
+  };
+
+  return (
+    <div className="patients-view qa-web-view">
+      <div className="pv-header">
+        <div>
+          <div className="pv-title"><Icon type="fact_check" /> Quality Assurance</div>
+          <p className="pv-subtitle">Audits, incidents, and accreditation readiness</p>
+        </div>
+        <div className="module-actions">
+          {forms.map((form) => (
+            <button key={form.key} type="button" className="qa-action-btn" onClick={() => setActiveFormKey(form.key)} style={{ backgroundColor: form.accent, borderColor: form.accent, boxShadow: `0 8px 18px ${form.accent}33` }}>
+              <Icon type={form.icon} size={16} /> {form.title}
+            </button>
+          ))}
+        </div>
+      </div>
+      {notice ? <div className="workflow-notice is-success">{notice}</div> : null}
+      <div className="pv-stats qa-stat-grid">
+        <div className="pv-stat-card" style={{ borderLeftColor: "#dc2626" }}><p className="pv-stat-label">Open Incidents</p><p className="pv-stat-value">{14 + rows.filter((row) => row.status === "Action Required").length - 1}</p></div>
+        <div className="pv-stat-card" style={{ borderLeftColor: "#1e3a8a" }}><p className="pv-stat-label">Audits This Month</p><p className="pv-stat-value">{6 + Math.max(0, rows.length - 2)}</p></div>
+        <div className="pv-stat-card" style={{ borderLeftColor: "#0d9488" }}><p className="pv-stat-label">Compliance Score</p><p className="pv-stat-value">91%</p></div>
+      </div>
+      <div className="pv-search-bar">
+        <div className="pv-search-wrap">
+          <Icon type="search" size={16} />
+          <input className="pv-search qa-search" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search audit records" />
+        </div>
+      </div>
+      <div className="pv-table-meta"><strong className="pv-table-title">Audit Records</strong><span className="pv-badge">{filteredRows.length} records</span></div>
+      <div className="pv-table-wrap">
+        <table className="pv-table">
+          <thead><tr><th>Audit</th><th>Department</th><th>Score</th><th>Status</th></tr></thead>
+          <tbody>
+            {filteredRows.length === 0 ? <tr><td className="pv-empty" colSpan={4}>No audit records found.</td></tr> : filteredRows.map((row, index) => (
+              <tr key={`${row.audit}-${index}`}>
+                <td className="pv-name">{row.audit}</td>
+                <td>{row.department}</td>
+                <td>{row.score}</td>
+                <td><span className={`pv-badge ${row.status === "On Track" ? "badge-male" : "badge-female"}`}>{row.status}</span></td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      {activeForm ? (
+        <div className="qa-form-overlay">
+          <div className="qa-form-panel" style={{ "--qa-accent": activeForm.accent } as React.CSSProperties}>
+            <div className="qa-form-header"><div className="qa-form-title-wrap"><div className="qa-form-icon"><Icon type={activeForm.icon} size={24} /></div><div><p>Quality Assurance</p><h2>{activeForm.title}</h2></div></div><button type="button" className="qa-form-close" onClick={() => setActiveFormKey(null)} aria-label="Close form">×</button></div>
+            <div className="qa-form-intro">{activeForm.description}</div>
+            <form className="qa-form-body" onSubmit={submitQaForm}>
+              <div className="qa-form-grid">
+                {activeForm.fields.map((field) => <label key={field.key} className={`qa-form-field ${field.type === "textarea" ? "is-wide" : ""}`}><span>{field.label}{field.required ? <strong>*</strong> : null}</span><small>{field.note}</small>{renderField(field)}</label>)}
+              </div>
+              <div className="qa-form-footer"><button type="button" className="form-btn form-btn-cancel" onClick={() => setActiveFormKey(null)}>Cancel</button><button type="submit" className="form-btn form-btn-primary">{activeForm.submitLabel}</button></div>
+            </form>
+          </div>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function ExternalIntegrationsView() {
+  type IntegrationField = {
+    key: string;
+    label: string;
+    note: string;
+    type: string;
+    required?: boolean;
+    placeholder?: string;
+    options?: string[];
+  };
+  type IntegrationForm = {
+    key: "configuration" | "test";
+    title: string;
+    description: string;
+    accent: string;
+    icon: string;
+    submitLabel: string;
+    fields: IntegrationField[];
+  };
+  type ProviderRow = {
+    provider: string;
+    status: "ACTIVE" | "INACTIVE" | "ERROR";
+    type: string;
+    lastSync: string;
+  };
+
+  const [search, setSearch] = useState("");
+  const [activeFormKey, setActiveFormKey] = useState<IntegrationForm["key"] | null>(null);
+  const [formValues, setFormValues] = useState<Record<string, string>>({});
+  const [notice, setNotice] = useState("");
+  const [providers, setProviders] = useState<ProviderRow[]>([
+    { provider: "NHIF Claims API", status: "ACTIVE", type: "Insurance", lastSync: "2026-05-23 09:20" },
+    { provider: "MPESA Paybill", status: "ACTIVE", type: "Payment Gateway", lastSync: "2026-05-23 10:05" },
+    { provider: "KHIS/DHIS2", status: "ACTIVE", type: "Government", lastSync: "2026-05-22 18:00" },
+    { provider: "PACS Gateway", status: "ERROR", type: "PACS", lastSync: "2026-05-21 16:42" },
+  ]);
+  const [syncJobs, setSyncJobs] = useState(18);
+
+  const forms: IntegrationForm[] = [
+    {
+      key: "configuration",
+      title: "Integration Configuration",
+      description: "Capture integration configuration details.",
+      accent: "#2563eb",
+      icon: "sync",
+      submitLabel: "Save Integration Configuration",
+      fields: [
+        { key: "integration_name", label: "Integration name", type: "select", required: true, note: "NHIF | KHIS | MPESA | KEMSA | Lab analyser | PACS.", options: ["NHIF", "KHIS", "MPESA", "KEMSA", "Lab analyser", "PACS"] },
+        { key: "base_url", label: "Base URL", type: "url", required: true, note: "API base endpoint.", placeholder: "https://api.provider.example" },
+        { key: "authentication_type", label: "Authentication type", type: "select", required: true, note: "Basic | OAuth2 | API key | JWT | Certificate.", options: ["Basic", "OAuth2", "API key", "JWT", "Certificate"] },
+        { key: "client_id_username", label: "Client ID / Username", type: "text", note: "Authentication credential.", placeholder: "Client ID or username" },
+        { key: "client_secret_password", label: "Client secret / Password", type: "password", note: "Stored encrypted - never shown after save.", placeholder: "Secret or password" },
+        { key: "message_format", label: "Message format", type: "select", required: true, note: "JSON | XML | HL7 v2 | FHIR R4 | EDI.", options: ["JSON", "XML", "HL7 v2", "FHIR R4", "EDI"] },
+        { key: "timeout_seconds", label: "Timeout (seconds)", type: "number", required: true, note: "Request timeout.", placeholder: "30" },
+        { key: "retry_attempts", label: "Retry attempts", type: "number", required: true, note: "Retries on failure.", placeholder: "3" },
+      ],
+    },
+    {
+      key: "test",
+      title: "Integration Test",
+      description: "Capture integration test details.",
+      accent: "#0d9488",
+      icon: "fact_check",
+      submitLabel: "Record Integration Test",
+      fields: [
+        { key: "integration", label: "Integration", type: "text", required: true, note: "Integration being tested.", placeholder: "Integration being tested" },
+        { key: "test_type", label: "Test type", type: "select", required: true, note: "Connectivity ping | Authentication test | Sample transaction.", options: ["Connectivity ping", "Authentication test", "Sample transaction"] },
+        { key: "test_result", label: "Test result", type: "text", required: true, note: "Success | Failed | Timeout - with response time.", placeholder: "Success in 220ms" },
+      ],
+    },
+  ];
+
+  const activeForm = forms.find((form) => form.key === activeFormKey) || null;
+  const filteredProviders = providers.filter((row) => {
+    const needle = search.trim().toLowerCase();
+    if (!needle) return true;
+    return `${row.provider} ${row.status} ${row.type} ${row.lastSync}`.toLowerCase().includes(needle);
+  });
+  const stats = [
+    { label: "Providers", value: providers.length, color: "#1e3a8a" },
+    { label: "Active", value: providers.filter((row) => row.status === "ACTIVE").length, color: "#16a34a" },
+    { label: "Sync Jobs", value: syncJobs, color: "#0d9488" },
+    { label: "Failures", value: providers.filter((row) => row.status === "ERROR").length, color: "#dc2626" },
+  ];
+  const updateFormValue = (key: string, value: string) => setFormValues((current) => ({ ...current, [key]: value }));
+  const renderField = (field: IntegrationField) => {
+    const value = formValues[field.key] || "";
+    if (field.type === "select") {
+      return (
+        <select className="integrations-form-control" value={value} onChange={(event) => updateFormValue(field.key, event.target.value)} required={field.required}>
+          <option value="">Select {field.label.toLowerCase()}</option>
+          {(field.options || []).map((option) => <option key={option} value={option}>{option}</option>)}
+        </select>
+      );
+    }
+    return <input className="integrations-form-control" type={field.type} value={value} onChange={(event) => updateFormValue(field.key, event.target.value)} placeholder={field.placeholder} required={field.required} />;
+  };
+  const submitIntegrationForm = (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!activeForm) return;
+    if (activeForm.key === "configuration") {
+      setProviders((current) => [
+        {
+          provider: String(formValues.integration_name || "External Provider"),
+          status: "ACTIVE",
+          type: String(formValues.message_format || "JSON"),
+          lastSync: "Pending first sync",
+        },
+        ...current,
+      ]);
+    }
+    if (activeForm.key === "test") {
+      const failed = String(formValues.test_result || "").toLowerCase().includes("fail") || String(formValues.test_result || "").toLowerCase().includes("timeout");
+      setProviders((current) =>
+        current.map((provider, index) =>
+          index === 0
+            ? { ...provider, status: failed ? "ERROR" : "ACTIVE", lastSync: failed ? "Test failed" : "Just now" }
+            : provider,
+        ),
+      );
+      setSyncJobs((current) => current + 1);
+    }
+    setNotice(`${activeForm.title} saved successfully.`);
+    setActiveFormKey(null);
+    setFormValues({});
+  };
+
+  return (
+    <div className="patients-view integrations-web-view">
+      <div className="pv-header">
+        <div>
+          <div className="pv-title"><Icon type="sync" /> External Integrations</div>
+          <p className="pv-subtitle">Integration health, sync performance, and connectivity status across third-party systems.</p>
+        </div>
+        <div className="module-actions">
+          {forms.map((form) => (
+            <button key={form.key} type="button" className="integrations-action-btn" onClick={() => setActiveFormKey(form.key)} style={{ backgroundColor: form.accent, borderColor: form.accent, boxShadow: `0 8px 18px ${form.accent}33` }}>
+              <Icon type={form.icon} size={16} /> {form.title}
+            </button>
+          ))}
+        </div>
+      </div>
+      {notice ? <div className="workflow-notice is-success">{notice}</div> : null}
+      <div className="pv-stats integrations-stat-grid">
+        {stats.map((stat) => (
+          <div key={stat.label} className="pv-stat-card" style={{ borderLeftColor: stat.color }}>
+            <p className="pv-stat-label">{stat.label}</p>
+            <p className="pv-stat-value">{stat.value}</p>
+          </div>
+        ))}
+      </div>
+      <div className="pv-search-bar">
+        <div className="pv-search-wrap">
+          <Icon type="search" size={16} />
+          <input className="pv-search integrations-search" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search integration providers..." />
+        </div>
+      </div>
+      <div className="pv-table-meta"><strong className="pv-table-title">Integration Providers</strong><span className="pv-badge">{filteredProviders.length} providers</span></div>
+      <div className="pv-table-wrap">
+        <table className="pv-table">
+          <thead><tr><th>Provider</th><th>Status</th><th>Type</th><th>Last Sync</th></tr></thead>
+          <tbody>
+            {filteredProviders.length === 0 ? <tr><td className="pv-empty" colSpan={4}>No integration providers found.</td></tr> : filteredProviders.map((row, index) => (
+              <tr key={`${row.provider}-${index}`}>
+                <td className="pv-name">{row.provider}</td>
+                <td><span className={`pv-badge ${row.status === "ACTIVE" ? "badge-male" : "badge-female"}`}>{row.status}</span></td>
+                <td>{row.type}</td>
+                <td>{row.lastSync}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      {activeForm ? (
+        <div className="integrations-form-overlay">
+          <div className="integrations-form-panel" style={{ "--integrations-accent": activeForm.accent } as React.CSSProperties}>
+            <div className="integrations-form-header"><div className="integrations-form-title-wrap"><div className="integrations-form-icon"><Icon type={activeForm.icon} size={24} /></div><div><p>External Integrations</p><h2>{activeForm.title}</h2></div></div><button type="button" className="integrations-form-close" onClick={() => setActiveFormKey(null)} aria-label="Close form">×</button></div>
+            <div className="integrations-form-intro">{activeForm.description}</div>
+            <form className="integrations-form-body" onSubmit={submitIntegrationForm}>
+              <div className="integrations-form-grid">
+                {activeForm.fields.map((field) => <label key={field.key} className="integrations-form-field"><span>{field.label}{field.required ? <strong>*</strong> : null}</span><small>{field.note}</small>{renderField(field)}</label>)}
+              </div>
+              <div className="integrations-form-footer"><button type="button" className="form-btn form-btn-cancel" onClick={() => setActiveFormKey(null)}>Cancel</button><button type="submit" className="form-btn form-btn-primary">{activeForm.submitLabel}</button></div>
+            </form>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }
 
 function UserManagementView() {
+  const [users, setUsers] = useState<any[]>([]);
+  const [roles, setRoles] = useState<any[]>([]);
+  const [permissionsCatalog, setPermissionsCatalog] = useState<string[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [notice, setNotice] = useState("");
+  const [error, setError] = useState("");
+  const [search, setSearch] = useState("");
+  const [newName, setNewName] = useState("");
+  const [newEmail, setNewEmail] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [newRoleName, setNewRoleName] = useState("doctor");
+  const [newModuleIds, setNewModuleIds] = useState<number[]>([]);
+  const [enterpriseRoleTemplates, setEnterpriseRoleTemplates] = useState<any[]>([]);
+
+  const roleOptions = useMemo(() => {
+    const fromCatalog = enterpriseRoleTemplates.map((template) => ({
+      name: String(template?.name || ""),
+      label: String(template?.label || template?.name || ""),
+    }));
+    const fromRoles = roles.map((role) => ({
+      name: String(role?.name || ""),
+      label: formatRoleLabel(String(role?.name || "")),
+    }));
+    const merged = [...fromCatalog, ...fromRoles].filter((role) => role.name);
+    const seen = new Set<string>();
+    return merged.filter((role) => {
+      if (seen.has(role.name)) return false;
+      seen.add(role.name);
+      return true;
+    });
+  }, [enterpriseRoleTemplates, roles]);
+
+  const loadAll = useCallback(async () => {
+    setLoading(true);
+    setError("");
+    try {
+      const [usersRows, rolesRows, rbacCatalog, permissionRows] = await Promise.all([
+        fetchTenantUsers(),
+        fetchTenantRoles(),
+        fetchSecurityRbacCatalog().catch(() => null),
+        fetchSecurityPermissionsCatalog().catch(() => []),
+      ]);
+      setUsers(Array.isArray(usersRows) ? usersRows : []);
+      setRoles(Array.isArray(rolesRows) ? rolesRows : []);
+      setEnterpriseRoleTemplates(
+        Array.isArray((rbacCatalog as any)?.templates) ? (rbacCatalog as any).templates : [],
+      );
+      setPermissionsCatalog(Array.isArray(permissionRows) ? permissionRows : []);
+      if (!newRoleName && Array.isArray((rbacCatalog as any)?.templates) && (rbacCatalog as any).templates.length > 0) {
+        setNewRoleName(String((rbacCatalog as any).templates[0]?.name || "doctor"));
+      }
+    } catch (err: any) {
+      setError(String(err?.message || "Could not load user security data."));
+    } finally {
+      setLoading(false);
+    }
+  }, [newRoleName]);
+
+  useEffect(() => {
+    void loadAll();
+  }, [loadAll]);
+
+  const activeUsers = users.filter((user) => String(user?.status || "").toUpperCase() === "ACTIVE").length;
+  const lockedUsers = users.filter((user) => String(user?.status || "").toUpperCase().includes("LOCK")).length;
+  const expiringSoon = users.filter((user) => Number(user?.passwordExpiresInDays ?? 99) <= 7).length;
+
+  const moduleNameById = useMemo(
+    () => new Map(MODULES.map((moduleItem) => [moduleItem.id, moduleItem.name])),
+    [],
+  );
+
+  const toggleModule = (moduleId: number) => {
+    setNewModuleIds((current) =>
+      current.includes(moduleId)
+        ? current.filter((id) => id !== moduleId)
+        : Array.from(new Set([...current, moduleId])),
+    );
+  };
+
+  const toggleAllModules = () => {
+    setNewModuleIds((current) =>
+      current.length === MODULES.length ? [] : MODULES.map((moduleItem) => moduleItem.id),
+    );
+  };
+
+  const clearForm = () => {
+    setNewName("");
+    setNewEmail("");
+    setNewPassword("");
+    setNewRoleName("doctor");
+    setNewModuleIds([]);
+    setError("");
+    setNotice("");
+  };
+
+  const submitUser = async (event: React.FormEvent) => {
+    event.preventDefault();
+    setNotice("");
+    setError("");
+    if (newModuleIds.length === 0) {
+      setError("Select at least one module this user can access.");
+      return;
+    }
+    setSaving(true);
+    try {
+      await createTenantUser({
+        name: newName.trim(),
+        email: newEmail.trim().toLowerCase(),
+        password: newPassword,
+        roleName: newRoleName,
+        moduleIds: newModuleIds,
+      });
+      clearForm();
+      setNotice("User created. Module access and 30-day password expiry are active.");
+      await loadAll();
+    } catch (err: any) {
+      setError(String(err?.message || "Could not create user."));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const formatPasswordExpiry = (user: any) => {
+    const raw = user?.passwordExpiresAt;
+    const date = raw ? new Date(raw) : null;
+    const formatted = date && !Number.isNaN(date.getTime()) ? date.toLocaleDateString() : "Not available";
+    return {
+      date: formatted,
+      days: Number(user?.passwordExpiresInDays ?? 0),
+    };
+  };
+
+  const moduleNamesForUser = (user: any) => {
+    const assigned = Array.isArray(user?.modules) && user.modules.length > 0
+      ? user.modules.map((module: any) => String(module?.name || "")).filter(Boolean)
+      : normalizeModuleIds(user?.moduleIds).map((moduleId) => moduleNameById.get(moduleId) || `Module ${moduleId}`);
+    return assigned.length > 0 ? assigned.join(", ") : "Role default access";
+  };
+
+  const filteredUsers = users.filter((user) => {
+    const needle = search.trim().toLowerCase();
+    if (!needle) return true;
+    return `${user?.name || ""} ${user?.email || ""} ${user?.role?.name || ""} ${moduleNamesForUser(user)} ${user?.status || ""}`
+      .toLowerCase()
+      .includes(needle);
+  });
+
+  return (
+    <div className="patients-view user-security-view">
+      <div className="pv-header">
+        <div>
+          <div className="pv-title">
+            <Icon type="shield" />
+            User & Security
+          </div>
+          <p className="pv-subtitle">
+            Create users, assign module access, manage password expiry, and review permissions.
+          </p>
+        </div>
+        <div className="module-actions">
+          <button type="button" className="topbar-logout-btn" onClick={() => void loadAll()}>
+            <Icon type="sync" size={16} /> Refresh
+          </button>
+        </div>
+      </div>
+
+      {notice ? <div className="workflow-notice is-success">{notice}</div> : null}
+      {error ? <div className="auth-error">{error}</div> : null}
+
+      <div className="pv-stats">
+        <div className="pv-stat-card" style={{ borderLeftColor: "#1e3a8a" }}>
+          <p className="pv-stat-label">Users</p>
+          <p className="pv-stat-value">{users.length}</p>
+        </div>
+        <div className="pv-stat-card" style={{ borderLeftColor: "#16a34a" }}>
+          <p className="pv-stat-label">Active Users</p>
+          <p className="pv-stat-value">{activeUsers}</p>
+        </div>
+        <div className="pv-stat-card" style={{ borderLeftColor: "#dc2626" }}>
+          <p className="pv-stat-label">Locked</p>
+          <p className="pv-stat-value">{lockedUsers}</p>
+        </div>
+        <div className="pv-stat-card" style={{ borderLeftColor: "#f59e0b" }}>
+          <p className="pv-stat-label">Passwords Expiring Soon</p>
+          <p className="pv-stat-value">{expiringSoon}</p>
+        </div>
+      </div>
+
+      <section className="security-form-shell">
+        <div className="security-form-header">
+          <div className="security-form-icon">
+            <Icon type="users" />
+          </div>
+          <div>
+            <p>User Account Provisioning</p>
+            <h2>Create User Access</h2>
+            <span>Passwords expire every 30 days. Selected modules control what appears on the user's dashboard.</span>
+          </div>
+        </div>
+
+        <form className="security-user-form" onSubmit={submitUser}>
+          <label className="module-form-field">
+            <span>Full Name</span>
+            <input
+              className="module-form-input"
+              value={newName}
+              onChange={(event) => setNewName(event.target.value)}
+              placeholder="e.g. Grace Otieno"
+              required
+            />
+          </label>
+          <label className="module-form-field">
+            <span>Email / Username</span>
+            <input
+              className="module-form-input"
+              type="email"
+              value={newEmail}
+              onChange={(event) => setNewEmail(event.target.value)}
+              placeholder="user@hospital.co.ke"
+              required
+            />
+          </label>
+          <label className="module-form-field">
+            <span>Initial Password</span>
+            <input
+              className="module-form-input"
+              type="password"
+              value={newPassword}
+              onChange={(event) => setNewPassword(event.target.value)}
+              minLength={12}
+              placeholder="Minimum 12 characters"
+              required
+            />
+          </label>
+          <label className="module-form-field">
+            <span>Role</span>
+            <select
+              className="module-form-input"
+              value={newRoleName}
+              onChange={(event) => setNewRoleName(event.target.value)}
+            >
+              {(roleOptions.length > 0 ? roleOptions : [{ name: "doctor", label: "Doctor" }]).map((role) => (
+                <option key={role.name} value={role.name}>
+                  {role.label || formatRoleLabel(role.name)}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <div className="security-module-access module-form-field is-wide">
+            <div className="security-module-access-head">
+              <div>
+                <span>Module Access</span>
+                <small>Select the modules this user will see after login.</small>
+              </div>
+              <button type="button" onClick={toggleAllModules}>
+                {newModuleIds.length === MODULES.length ? "Clear All" : "Select All"}
+              </button>
+            </div>
+            <div className="security-module-grid">
+              {MODULES.map((moduleItem) => (
+                <label key={moduleItem.id} className="security-module-option">
+                  <input
+                    type="checkbox"
+                    checked={newModuleIds.includes(moduleItem.id)}
+                    onChange={() => toggleModule(moduleItem.id)}
+                  />
+                  <span>{moduleItem.name}</span>
+                  <small>{moduleItem.premium ? "Premium" : "Core"}</small>
+                </label>
+              ))}
+            </div>
+          </div>
+
+          <div className="module-form-footer security-form-footer">
+            <button type="button" className="form-btn form-btn-cancel" onClick={clearForm}>
+              Clear Form
+            </button>
+            <button type="submit" className="form-btn form-btn-primary module-form-submit" disabled={saving}>
+              <Icon type="shield" size={16} />
+              {saving ? "Creating..." : "Create User"}
+            </button>
+          </div>
+        </form>
+      </section>
+
+      <div className="pv-search-bar">
+        <div className="pv-search-wrap">
+          <Icon type="search" size={16} />
+          <input
+            className="pv-search"
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
+            placeholder="Search users, roles, modules..."
+          />
+        </div>
+      </div>
+
+      <section className="security-table-section">
+        <div className="reporting-table-header">
+          <div>
+            <h3>Users Access Table</h3>
+            <p>{filteredUsers.length} users</p>
+          </div>
+        </div>
+        <div className="pv-table-wrap">
+          <table className="pv-table">
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th>Role</th>
+                <th>Modules User Access</th>
+                <th>Password Expiry Date / Duration</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              {loading ? (
+                <tr>
+                  <td className="pv-empty" colSpan={5}>Loading users...</td>
+                </tr>
+              ) : filteredUsers.length === 0 ? (
+                <tr>
+                  <td className="pv-empty" colSpan={5}>No users found.</td>
+                </tr>
+              ) : (
+                filteredUsers.map((user) => {
+                  const expiry = formatPasswordExpiry(user);
+                  return (
+                    <tr key={String(user?.id || user?.email)}>
+                      <td>
+                        <strong>{String(user?.name || user?.email || "User")}</strong>
+                        <small className="pv-muted">{String(user?.email || "")}</small>
+                      </td>
+                      <td>{formatRoleLabel(String(user?.role?.name || user?.roleName || "User"))}</td>
+                      <td className="security-modules-cell">{moduleNamesForUser(user)}</td>
+                      <td>
+                        <span className="security-expiry-line">
+                          <Icon type="shield" size={14} /> {expiry.date}
+                        </span>
+                        <small className="pv-muted">{expiry.days} days remaining</small>
+                      </td>
+                      <td>{String(user?.status || "ACTIVE")}</td>
+                    </tr>
+                  );
+                })
+              )}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section className="security-permissions-catalog">
+        <div className="security-permissions-title">
+          <Icon type="shield" size={18} />
+          <div>
+            <h3>Permissions Catalog</h3>
+            <p>Reference permissions available for role and module policy configuration.</p>
+          </div>
+        </div>
+        <div className="security-permission-list">
+          {(permissionsCatalog.length > 0
+            ? permissionsCatalog
+            : ["USER_CREATE", "ROLE_ASSIGN", "MODULE_ACCESS_ASSIGN"]
+          ).map((permission) => (
+            <span key={permission}>{permission}</span>
+          ))}
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function LegacyUserManagementView() {
   const [users, setUsers] = useState<any[]>([]);
   const [roles, setRoles] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
@@ -3216,6 +7216,8 @@ function UserManagementView() {
   );
 }
 
+void LegacyUserManagementView;
+
 function AnalyticsView() {
   const [reports] = useState([
     {
@@ -3479,53 +7481,66 @@ function ProcurementView() {
 }
 
 function BillingView() {
-  type BillingRow = {
-    id: string;
-    invoiceNo: string;
-    patient: string;
-    amount: number;
-    paidAmount: number;
-    outstanding: number;
-    status: string;
-    paymentMethod?: string;
-    paidAt?: string;
-    transactionId?: string;
-    receiptNo?: string;
-    itemsCount: number;
+  type BillingStat = {
+    label: string;
+    value: string | number;
+    color: string;
   };
-  const [bills, setBills] = useState<BillingRow[]>([]);
+  type TrendPieRow = {
+    period: string;
+    billed: number;
+    paid: number;
+    outstanding: number;
+    color: string;
+  };
+  type FacilityInvoiceInfo = {
+    name: string;
+    location: string;
+    phone: string;
+    email: string;
+    logoUrl: string;
+  };
+
+  const { facility, facilityLogo } = useAppStore();
+  const [bills, setBills] = useState<any[]>([]);
+  const [dashboard, setDashboard] = useState<any | null>(null);
+  const [report, setReport] = useState<any | null>(null);
+  const [arReport, setArReport] = useState<any | null>(null);
+  const [discounts, setDiscounts] = useState<any[]>([]);
+  const [refunds, setRefunds] = useState<any[]>([]);
   const [loadingBills, setLoadingBills] = useState(false);
   const [billingError, setBillingError] = useState("");
-  const [activeReceipt, setActiveReceipt] = useState<BillingRow | null>(null);
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
+  const [status, setStatus] = useState("ALL");
+  const [trendGrouping, setTrendGrouping] = useState<"day" | "week" | "month">("day");
+  const [search, setSearch] = useState("");
+  const [selectedInvoice, setSelectedInvoice] = useState<any | null>(null);
+  const [activeForm, setActiveForm] = useState<WorkflowForm | null>(null);
+  const [formValues, setFormValues] = useState<Record<string, string | boolean>>({});
+  const [submittingForm, setSubmittingForm] = useState(false);
   const [notice, setNotice] = useState("");
 
-  const formatPatientName = (bill: any) => {
-    const first = String(bill?.patient?.firstName || "").trim();
-    const last = String(bill?.patient?.lastName || "").trim();
-    return `${first} ${last}`.trim() || String(bill?.patient?.name || "Unknown Patient");
+  const formatKes = (value: unknown) => {
+    const amount = Number(value || 0);
+    return `Ksh ${amount.toLocaleString("en-KE", { maximumFractionDigits: 0 })}`;
   };
 
-  const mapBillToRow = (bill: any): BillingRow => {
-    const payments = Array.isArray(bill?.payments) ? bill.payments : [];
-    const receipts = Array.isArray(bill?.receipts) ? bill.receipts : [];
-    const sortedPayments = [...payments].sort((a: any, b: any) => {
-      const at = Date.parse(String(a?.paidAt || a?.createdAt || ""));
-      const bt = Date.parse(String(b?.paidAt || b?.createdAt || ""));
-      return (Number.isFinite(bt) ? bt : 0) - (Number.isFinite(at) ? at : 0);
-    });
-    const sortedReceipts = [...receipts].sort((a: any, b: any) => {
-      const at = Date.parse(String(a?.issuedAt || a?.createdAt || ""));
-      const bt = Date.parse(String(b?.issuedAt || b?.createdAt || ""));
-      return (Number.isFinite(bt) ? bt : 0) - (Number.isFinite(at) ? at : 0);
-    });
-    const latestPayment = sortedPayments[0];
-    const latestReceipt = sortedReceipts[0];
-    const totalAmount = Number(bill?.totalAmount || 0);
-    const paidAmount = sortedPayments.reduce(
-      (sum: number, payment: any) => sum + Number(payment?.amount || 0),
-      0,
+  const asNumber = (value: unknown) => {
+    const next = Number(value || 0);
+    return Number.isFinite(next) ? next : 0;
+  };
+
+  const patientName = (bill: any) => {
+    const first = String(bill?.patient?.firstName || "").trim();
+    const last = String(bill?.patient?.lastName || "").trim();
+    return (
+      `${first} ${last}`.trim() ||
+      String(bill?.patient?.name || bill?.patientName || bill?.patientId || "Walk-in patient")
     );
-    const outstanding = Math.max(totalAmount - paidAmount, 0);
+  };
+
+  const invoiceNumber = (bill: any) => {
     const createdAtRaw = String(bill?.createdAt || "");
     const createdTs = Date.parse(createdAtRaw);
     const invoiceDate = Number.isFinite(createdTs)
@@ -3536,36 +7551,215 @@ function BillingView() {
       .slice(-6)
       .toUpperCase()
       .padStart(6, "0");
-    const invoiceNo =
+    return (
       String((bill as any)?.invoiceNumber || "").trim() ||
-      `INV-${invoiceDate}-${idSuffix}`;
+      `INV-${invoiceDate}-${idSuffix}`
+    );
+  };
 
+  const invoicePayments = (bill: any) => {
+    if (Array.isArray(bill?.payments)) return bill.payments;
+    if (Array.isArray(bill?.receipts)) return bill.receipts;
+    return [];
+  };
+
+  const paidAmount = (bill: any) =>
+    asNumber(bill?.totalPaid) ||
+    invoicePayments(bill).reduce((sum: number, payment: any) => sum + asNumber(payment?.amount), 0);
+
+  const outstandingAmount = (bill: any) =>
+    Math.max(0, asNumber(bill?.outstanding ?? bill?.balance ?? asNumber(bill?.totalAmount) - paidAmount(bill)));
+
+  const invoiceLineTotal = (item: any) =>
+    asNumber(item?.total ?? item?.lineTotal ?? asNumber(item?.quantity) * asNumber(item?.unitPrice));
+
+  const escapeHtml = (value: unknown) =>
+    String(value ?? "")
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#039;");
+
+  const cleanFormName = (value: string) => String(value || "").replace(/\s+Form$/i, "").trim();
+
+  const billingForms = useMemo(
+    () =>
+      (WORKFLOW_MODULE_BY_ID[13]?.forms || []).filter((form) =>
+        [
+          "Invoice Review & Finalise Form",
+          "Payment Receipt Form",
+          "Charge Master Entry Form",
+          "Bill Adjustment Form",
+        ].includes(form.title),
+      ),
+    [],
+  );
+
+  const actionPalette = ["#16a34a", "#2563eb", "#7c3aed", "#f59e0b"];
+
+  const getFormIconText = (name: string) => {
+    const normalized = name.toLowerCase();
+    if (normalized.includes("payment")) return "PAY";
+    if (normalized.includes("charge")) return "CHG";
+    if (normalized.includes("adjustment")) return "ADJ";
+    return "INV";
+  };
+
+  const getFormMode = (name: string) => {
+    const normalized = name.toLowerCase();
+    if (normalized.includes("payment")) return "billing-mode-payment";
+    if (normalized.includes("charge")) return "billing-mode-charge";
+    if (normalized.includes("adjustment")) return "billing-mode-adjustment";
+    return "billing-mode-invoice";
+  };
+
+  const getSubmitLabel = (name: string) => {
+    const normalized = name.toLowerCase();
+    if (normalized.includes("payment")) return "Post Payment Receipt";
+    if (normalized.includes("charge")) return "Save Charge Master Entry";
+    if (normalized.includes("adjustment")) return "Submit Bill Adjustment";
+    return "Finalise Invoice";
+  };
+
+  const readSetupFacility = () => {
+    try {
+      const raw = localStorage.getItem(SETUP_STORAGE_KEY);
+      return raw?.trim() ? JSON.parse(raw) : {};
+    } catch {
+      return {};
+    }
+  };
+
+  const facilityDetails = useMemo<FacilityInvoiceInfo>(() => {
+    const setup = readSetupFacility();
+    const values = setup?.values || {};
+    const savedFacility = setup?.savedFacility || {};
+    const branding = setup?.branding || {};
+    const activeFacility: any = facility || {};
     return {
-      id: String(bill?.id || ""),
-      invoiceNo,
-      patient: formatPatientName(bill),
-      amount: totalAmount,
-      paidAmount,
-      outstanding,
-      status: String(bill?.status || "UNPAID").toUpperCase(),
-      paymentMethod: latestPayment?.method ? String(latestPayment.method) : undefined,
-      paidAt: latestPayment?.paidAt ? String(latestPayment.paidAt) : undefined,
-      transactionId: latestPayment?.transactionId
-        ? String(latestPayment.transactionId)
-        : undefined,
-      receiptNo: latestReceipt?.receiptNumber
-        ? String(latestReceipt.receiptNumber)
-        : undefined,
-      itemsCount: Array.isArray(bill?.items) ? bill.items.length : 0,
+      name: pickHospitalName(
+        values.shortName,
+        values.legalName,
+        values.facilityName,
+        savedFacility.shortName,
+        savedFacility.legalName,
+        savedFacility.name,
+        activeFacility.name,
+      ),
+      location:
+        values.location ||
+        values.address ||
+        values.county ||
+        savedFacility.location ||
+        savedFacility.address ||
+        savedFacility.county ||
+        activeFacility.location ||
+        activeFacility.address ||
+        "Kenya",
+      phone:
+        values.phone ||
+        values.phoneNumber ||
+        savedFacility.phone ||
+        savedFacility.phoneNumber ||
+        activeFacility.phone ||
+        "",
+      email: values.email || savedFacility.email || activeFacility.email || "",
+      logoUrl:
+        resolveAssetUrl(
+          branding.logoUrl ||
+            savedFacility.logoUrl ||
+            savedFacility.logo ||
+            activeFacility.logoUrl ||
+            facilityLogo,
+        ) ||
+        getSetupFacilityLogoFallback() ||
+        "/Medilink-hmis-icon.png",
     };
+  }, [facility, facilityLogo]);
+
+  const buildInvoicePrintHtml = (bill: any) => {
+    const items = Array.isArray(bill?.items) ? bill.items : [];
+    const payments = invoicePayments(bill);
+    const doctorName =
+      `${bill?.visit?.doctor?.firstName || ""} ${bill?.visit?.doctor?.lastName || ""}`.trim() ||
+      "-";
+    const itemRows = items.length
+      ? items
+          .map(
+            (item: any, index: number) => `
+              <tr>
+                <td>${index + 1}</td>
+                <td><strong>${escapeHtml(item?.description || item?.serviceName || "Service")}</strong><span>${escapeHtml(item?.chargeType || item?.type || bill?.sourceModule || "-")}</span></td>
+                <td>${escapeHtml(asNumber(item?.quantity) || 1)}</td>
+                <td>${escapeHtml(formatKes(item?.unitPrice))}</td>
+                <td>${escapeHtml(formatKes(invoiceLineTotal(item)))}</td>
+              </tr>
+            `,
+          )
+          .join("")
+      : `<tr><td colspan="5" class="empty">No line items recorded.</td></tr>`;
+    const paymentRows = payments.length
+      ? payments
+          .map(
+            (payment: any) => `
+              <tr>
+                <td>${escapeHtml(payment?.createdAt ? new Date(payment.createdAt).toLocaleString() : "-")}</td>
+                <td>${escapeHtml(payment?.method || payment?.paymentMethod || "-")}</td>
+                <td>${escapeHtml(payment?.transactionRef || payment?.transactionId || payment?.reference || payment?.receiptNumber || "-")}</td>
+                <td>${escapeHtml(formatKes(payment?.amount))}</td>
+              </tr>
+            `,
+          )
+          .join("")
+      : `<tr><td colspan="4" class="empty">No payments posted.</td></tr>`;
+    const logoMarkup = facilityDetails.logoUrl
+      ? `<img src="${escapeHtml(facilityDetails.logoUrl)}" alt="${escapeHtml(facilityDetails.name)} logo" />`
+      : `<div class="logo-fallback">${escapeHtml(facilityDetails.name.slice(0, 1) || "H")}</div>`;
+
+    return `<!doctype html><html><head><meta charset="utf-8" /><title>Invoice ${escapeHtml(invoiceNumber(bill))}</title><style>
+      *{box-sizing:border-box}body{margin:0;background:#f1f5f9;color:#0f172a;font-family:Arial,sans-serif}.sheet{width:210mm;min-height:297mm;margin:0 auto;padding:20mm 17mm;background:#fff}.top{display:flex;justify-content:space-between;gap:24px;padding-bottom:18px;border-bottom:3px solid #1e3a8a}.brand{display:flex;gap:14px;align-items:flex-start}.brand img,.logo-fallback{width:74px;height:74px;border:1px solid #dbe4ef;border-radius:14px;object-fit:contain;padding:8px}.logo-fallback{display:grid;place-items:center;color:#fff;background:#16a34a;font-size:28px;font-weight:900}h1,h2,h3,p{margin:0}h1{font-size:24px}.muted{margin-top:5px;color:#64748b;font-size:12px;line-height:1.5}.stamp{text-align:right}.stamp span{color:#1e3a8a;font-size:12px;font-weight:800;letter-spacing:.12em;text-transform:uppercase}.stamp strong{display:block;margin-top:5px;font-size:22px}.status{display:inline-block;margin-top:8px;padding:6px 10px;border-radius:999px;background:#dcfce7;color:#166534;font-size:11px;font-weight:800}.grid{display:grid;grid-template-columns:1fr 1fr;gap:18px;margin-top:22px}.box{border:1px solid #dbe4ef;border-radius:14px;padding:14px}.box h2{color:#1e3a8a;font-size:13px;text-transform:uppercase;letter-spacing:.08em}dl{display:grid;gap:9px;margin:12px 0 0}.line{display:flex;justify-content:space-between;gap:16px;border-bottom:1px solid #f1f5f9;padding-bottom:7px}dt{color:#64748b;font-size:12px}dd{margin:0;font-size:12px;font-weight:700;text-align:right}table{width:100%;border-collapse:collapse;margin-top:22px}th{background:#f8fafc;color:#475569;font-size:11px;letter-spacing:.08em;text-align:left;text-transform:uppercase}th,td{border-bottom:1px solid #e2e8f0;padding:11px 10px;font-size:12px;vertical-align:top}td strong{display:block}td span{display:block;margin-top:3px;color:#64748b;font-size:11px}.empty{text-align:center;color:#64748b}.totals{width:46%;margin:20px 0 0 auto;border:1px solid #dbe4ef;border-radius:14px;overflow:hidden}.totals .row{display:flex;justify-content:space-between;gap:14px;padding:10px 13px;border-bottom:1px solid #e2e8f0;font-size:12px}.totals .grand{background:#0f172a;color:#fff;font-size:14px;font-weight:900}.payments-title{margin-top:28px;color:#1e3a8a;font-size:14px}.footer{margin-top:30px;padding-top:14px;border-top:1px solid #dbe4ef;color:#64748b;font-size:11px;line-height:1.5}@media print{body{background:#fff}.sheet{margin:0;box-shadow:none}}
+      </style></head><body><main class="sheet">
+        <section class="top"><div class="brand">${logoMarkup}<div><h1>${escapeHtml(facilityDetails.name)}</h1><p class="muted">${escapeHtml(facilityDetails.location)}</p><p class="muted">${escapeHtml([facilityDetails.phone, facilityDetails.email].filter(Boolean).join(" | "))}</p></div></div><div class="stamp"><span>Patient Invoice</span><strong>${escapeHtml(invoiceNumber(bill))}</strong><p class="status">${escapeHtml(bill?.status || "OPEN")}</p></div></section>
+        <section class="grid"><article class="box"><h2>Bill To</h2><dl><div class="line"><dt>Patient</dt><dd>${escapeHtml(patientName(bill))}</dd></div><div class="line"><dt>Patient ID</dt><dd>${escapeHtml(bill?.patientId || "-")}</dd></div><div class="line"><dt>Visit Type</dt><dd>${escapeHtml(bill?.visit?.visitType || bill?.sourceModule || "-")}</dd></div><div class="line"><dt>Doctor</dt><dd>${escapeHtml(doctorName)}</dd></div></dl></article><article class="box"><h2>Invoice Details</h2><dl><div class="line"><dt>Invoice No.</dt><dd>${escapeHtml(invoiceNumber(bill))}</dd></div><div class="line"><dt>Created</dt><dd>${escapeHtml(bill?.createdAt ? new Date(bill.createdAt).toLocaleString() : "-")}</dd></div><div class="line"><dt>Visit ID</dt><dd>${escapeHtml(bill?.visit?.id || bill?.visitId || "-")}</dd></div><div class="line"><dt>Payment Status</dt><dd>${escapeHtml(bill?.status || "-")}</dd></div></dl></article></section>
+        <table><thead><tr><th>#</th><th>Service / Item</th><th>Qty</th><th>Unit Price</th><th>Total</th></tr></thead><tbody>${itemRows}</tbody></table>
+        <section class="totals"><div class="row"><span>Subtotal</span><strong>${escapeHtml(formatKes(bill?.subtotal ?? bill?.totalAmount))}</strong></div><div class="row"><span>Tax</span><strong>${escapeHtml(formatKes(bill?.taxAmount))}</strong></div><div class="row"><span>Discount</span><strong>${escapeHtml(formatKes(bill?.discountAmount))}</strong></div><div class="row"><span>Insurance Cover</span><strong>${escapeHtml(formatKes(bill?.insuranceCover))}</strong></div><div class="row"><span>Total Paid</span><strong>${escapeHtml(formatKes(paidAmount(bill)))}</strong></div><div class="row grand"><span>Outstanding</span><strong>${escapeHtml(formatKes(outstandingAmount(bill)))}</strong></div></section>
+        <h3 class="payments-title">Payments & Receipts</h3><table><thead><tr><th>Date</th><th>Method</th><th>Reference</th><th>Amount</th></tr></thead><tbody>${paymentRows}</tbody></table>
+        <footer class="footer">This invoice was generated by Medilink HMIS. Please quote invoice number ${escapeHtml(invoiceNumber(bill))} when making payment or requesting support.</footer>
+      </main><script>window.onload=function(){window.focus();window.print();}</script></body></html>`;
   };
 
   const loadBills = async () => {
     setLoadingBills(true);
     setBillingError("");
     try {
-      const rows = await fetchBillingBills();
-      setBills(Array.isArray(rows) ? rows.map(mapBillToRow) : []);
+      const params = {
+        ...(dateFrom ? { fromDate: dateFrom } : {}),
+        ...(dateTo ? { toDate: dateTo } : {}),
+        ...(status !== "ALL" ? { status } : {}),
+      };
+      const dashboardParams = {
+        ...(dateFrom ? { fromDate: dateFrom } : {}),
+        ...(dateTo ? { toDate: dateTo } : {}),
+      };
+      const [dashboardRes, reportRes, arRes, discountsRes, refundsRes, billsRes] =
+        await Promise.allSettled([
+          fetchBillingDashboard(dashboardParams),
+          fetchBillingRevenueReport({ ...dashboardParams, groupBy: trendGrouping }),
+          fetchBillingArReport(),
+          fetchBillingDiscounts(),
+          fetchBillingRefunds(),
+          fetchBillingBills(params),
+        ]);
+      setDashboard(dashboardRes.status === "fulfilled" ? dashboardRes.value || null : null);
+      setReport(reportRes.status === "fulfilled" ? reportRes.value || null : null);
+      setArReport(arRes.status === "fulfilled" ? arRes.value || null : null);
+      setDiscounts(discountsRes.status === "fulfilled" && Array.isArray(discountsRes.value) ? discountsRes.value : []);
+      setRefunds(refundsRes.status === "fulfilled" && Array.isArray(refundsRes.value) ? refundsRes.value : []);
+      setBills(billsRes.status === "fulfilled" && Array.isArray(billsRes.value) ? billsRes.value : []);
+      if (![dashboardRes, reportRes, arRes, billsRes].some((result) => result.status === "fulfilled")) {
+        setBillingError("Unable to load billing data.");
+      }
     } catch (error: any) {
       setBillingError(String(error?.message || "Failed to load billing records."));
       setBills([]);
@@ -3576,10 +7770,119 @@ function BillingView() {
 
   useEffect(() => {
     void loadBills();
-  }, []);
+  }, [dateFrom, dateTo, status, trendGrouping]);
 
-  const settleBill = async (bill: BillingRow) => {
-    const amountToPay = Number(bill.outstanding > 0 ? bill.outstanding : bill.amount);
+  useEffect(() => {
+    const handleSidebarFormOpen = (event: Event) => {
+      const detail = (event as CustomEvent<{ moduleId?: number; formId?: string }>).detail;
+      if (Number(detail?.moduleId) !== 13) return;
+      const form = billingForms.find((item) => item.id === detail?.formId);
+      if (form) {
+        setFormValues({});
+        setActiveForm(form);
+      }
+    };
+    window.addEventListener("hmis:open-workflow-form", handleSidebarFormOpen);
+    return () => window.removeEventListener("hmis:open-workflow-form", handleSidebarFormOpen);
+  }, [billingForms]);
+
+  const filteredBills = useMemo(() => {
+    const needle = search.trim().toLowerCase();
+    if (!needle) return bills;
+    return bills.filter((bill) =>
+      [
+        invoiceNumber(bill),
+        bill?.id,
+        patientName(bill),
+        bill?.patientId,
+        bill?.status,
+        bill?.visit?.visitType,
+      ]
+        .join(" ")
+        .toLowerCase()
+        .includes(needle),
+    );
+  }, [bills, search]);
+
+  const filteredDiscounts = useMemo(() => {
+    const fromTs = dateFrom ? new Date(`${dateFrom}T00:00:00`).getTime() : 0;
+    const toTs = dateTo ? new Date(`${dateTo}T23:59:59`).getTime() : Number.MAX_SAFE_INTEGER;
+    return discounts.filter((row) => {
+      const ts = new Date(String(row?.createdAt || row?.approvedAt || "")).getTime();
+      if (!Number.isFinite(ts)) return true;
+      return ts >= fromTs && ts <= toTs;
+    });
+  }, [dateFrom, dateTo, discounts]);
+
+  const filteredRefunds = useMemo(() => {
+    const fromTs = dateFrom ? new Date(`${dateFrom}T00:00:00`).getTime() : 0;
+    const toTs = dateTo ? new Date(`${dateTo}T23:59:59`).getTime() : Number.MAX_SAFE_INTEGER;
+    return refunds.filter((row) => {
+      const ts = new Date(String(row?.createdAt || row?.refundedAt || "")).getTime();
+      if (!Number.isFinite(ts)) return true;
+      return ts >= fromTs && ts <= toTs;
+    });
+  }, [dateFrom, dateTo, refunds]);
+
+  const stats: BillingStat[] = useMemo(() => {
+    const dashboardTotals = dashboard?.totals || {};
+    const totalBilled = filteredBills.reduce((sum, bill) => sum + asNumber(bill?.totalAmount), 0);
+    const totalCollected = filteredBills.reduce((sum, bill) => sum + paidAmount(bill), 0);
+    const totalOutstanding = filteredBills.reduce((sum, bill) => sum + outstandingAmount(bill), 0);
+    const totalDiscounts = filteredDiscounts.reduce((sum, row) => sum + asNumber(row?.amount), 0);
+    const totalRefunds = filteredRefunds.reduce((sum, row) => sum + asNumber(row?.amount), 0);
+    const collectionEfficiency =
+      totalBilled > 0 ? Number(((totalCollected / totalBilled) * 100).toFixed(2)) : 0;
+    const refundRatio =
+      totalCollected > 0 ? Number(((totalRefunds / totalCollected) * 100).toFixed(2)) : 0;
+    const arOutstanding = asNumber(arReport?.totals?.totalOutstanding ?? dashboardTotals?.arAgingTotal);
+    const value = (fallback: string | number) => (loadingBills ? "..." : fallback);
+    return [
+      { label: "Invoices", value: value(filteredBills.length), color: "#1e3a8a" },
+      { label: "Total Billed", value: value(formatKes(totalBilled)), color: "#2563eb" },
+      { label: "Total Collected", value: value(formatKes(totalCollected)), color: "#16a34a" },
+      { label: "Total Outstanding", value: value(formatKes(totalOutstanding)), color: "#dc2626" },
+      { label: "Collection Efficiency", value: value(`${collectionEfficiency.toFixed(2)}%`), color: "#0d9488" },
+      { label: "Discounts", value: value(formatKes(totalDiscounts)), color: "#f59e0b" },
+      { label: "Refunds", value: value(formatKes(totalRefunds)), color: "#be123c" },
+      { label: "Refund Ratio", value: value(`${refundRatio.toFixed(2)}%`), color: "#7c3aed" },
+      { label: "AR Outstanding", value: value(formatKes(arOutstanding)), color: "#475569" },
+      { label: "Discount Events", value: value(filteredDiscounts.length), color: "#0891b2" },
+      { label: "Refund Events", value: value(filteredRefunds.length), color: "#991b1b" },
+    ];
+  }, [arReport, dashboard, filteredBills, filteredDiscounts, filteredRefunds, loadingBills]);
+
+  const trendRows = Array.isArray(report?.rows) ? report.rows : [];
+  const trendPie = useMemo(() => {
+    const colors = ["#1e3a8a", "#16a34a", "#7c3aed", "#f59e0b", "#0891b2", "#be123c", "#475569", "#2563eb"];
+    const rows = trendRows
+      .slice(-8)
+      .map((row: any, index: number) => ({
+        period: String(row?.period || "-"),
+        billed: asNumber(row?.billed),
+        paid: asNumber(row?.paid),
+        outstanding: asNumber(row?.outstanding),
+        color: colors[index % colors.length],
+      }))
+      .filter((row: TrendPieRow) => row.billed > 0);
+    const total = rows.reduce((sum: number, row: TrendPieRow) => sum + row.billed, 0);
+    let cursor = 0;
+    const gradient =
+      total > 0
+        ? rows
+            .map((row: TrendPieRow) => {
+              const start = cursor;
+              const end = cursor + (row.billed / total) * 100;
+              cursor = end;
+              return `${row.color} ${start.toFixed(2)}% ${end.toFixed(2)}%`;
+            })
+            .join(", ")
+        : "#e2e8f0 0% 100%";
+    return { rows, total, gradient };
+  }, [trendRows]);
+
+  const settleBill = async (bill: any) => {
+    const amountToPay = Number(outstandingAmount(bill) > 0 ? outstandingAmount(bill) : asNumber(bill?.totalAmount));
     if (amountToPay <= 0) {
       setNotice("Bill is already fully paid.");
       window.setTimeout(() => setNotice(""), 2200);
@@ -3592,229 +7895,819 @@ function BillingView() {
         transactionId: `MP-${Date.now()}`,
       });
       const fullBill = await fetchBillingBillById(bill.id);
-      const mapped = mapBillToRow(fullBill);
-      setBills((prev) => prev.map((row) => (row.id === mapped.id ? mapped : row)));
-      if (mapped.receiptNo) {
-        setActiveReceipt(mapped);
-        setNotice(`Payment received. Receipt ${mapped.receiptNo} generated automatically.`);
-      } else {
-        setNotice("Payment recorded successfully.");
-      }
+      setBills((prev) => prev.map((row) => (String(row?.id) === String(fullBill?.id) ? fullBill : row)));
+      setSelectedInvoice(fullBill);
+      setNotice("Payment recorded successfully.");
       window.setTimeout(() => setNotice(""), 2600);
     } catch (error: any) {
       setBillingError(String(error?.message || "Failed to settle bill."));
     }
   };
 
-  const openReceipt = async (bill: BillingRow) => {
+  const openInvoice = async (bill: any) => {
     try {
       const fullBill = await fetchBillingBillById(bill.id);
-      const mapped = mapBillToRow(fullBill);
-      setBills((prev) => prev.map((row) => (row.id === mapped.id ? mapped : row)));
-      if (!mapped.receiptNo) {
-        setNotice("No receipt available yet. Complete payment first.");
-        window.setTimeout(() => setNotice(""), 2200);
-        return;
-      }
-      setActiveReceipt(mapped);
+      setBills((prev) => prev.map((row) => (String(row?.id) === String(fullBill?.id) ? fullBill : row)));
+      setSelectedInvoice(fullBill);
     } catch (error: any) {
-      setBillingError(String(error?.message || "Failed to fetch receipt details."));
+      setBillingError(String(error?.message || "Failed to fetch invoice details."));
     }
   };
 
-  const downloadReceipt = (bill: BillingRow) => {
-    const paidAt = bill.paidAt ? new Date(bill.paidAt).toLocaleString() : "-";
-    const receiptText = [
-      "MediLink HMIS - Payment Receipt",
-      "--------------------------------",
-      `Receipt No: ${bill.receiptNo || "-"}`,
-      `Invoice No: ${bill.invoiceNo || "-"}`,
-      `Patient: ${bill.patient}`,
-      `Amount (KES): ${bill.amount.toLocaleString()}`,
-      `Payment Method: ${bill.paymentMethod || "-"}`,
-      `Paid At: ${paidAt}`,
-      `Status: ${bill.status}`,
-    ].join("\n");
-    const blob = new Blob([receiptText], { type: "text/plain;charset=utf-8" });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = `${bill.receiptNo || `receipt-${bill.id}`}.txt`;
-    link.click();
-    URL.revokeObjectURL(url);
+  const downloadInvoicePdf = (bill: any) => {
+    const printWindow = window.open("", "_blank", "width=940,height=1200");
+    if (!printWindow) {
+      window.print();
+      return;
+    }
+    printWindow.document.open();
+    printWindow.document.write(buildInvoicePrintHtml(bill));
+    printWindow.document.close();
+  };
+
+  const handleFormChange = (name: string, value: string | boolean) => {
+    setFormValues((prev) => ({ ...prev, [name]: value }));
+  };
+
+  const renderFormInput = (field: WorkflowField) => {
+    const value = formValues[field.key];
+    const baseClass = "billing-form-input";
+    if (field.type === "textarea") {
+      return (
+        <textarea
+          className={baseClass}
+          value={typeof value === "string" ? value : ""}
+          onChange={(event) => handleFormChange(field.key, event.target.value)}
+          placeholder={field.note}
+          required={field.required}
+        />
+      );
+    }
+    if (field.type === "checkbox") {
+      return (
+        <label className="billing-checkbox-row">
+          <input
+            type="checkbox"
+            checked={Boolean(value)}
+            onChange={(event) => handleFormChange(field.key, event.target.checked)}
+          />
+          <span>Confirmed</span>
+        </label>
+      );
+    }
+    if (field.type === "select") {
+      return (
+        <select
+          className={baseClass}
+          value={typeof value === "string" ? value : ""}
+          onChange={(event) => handleFormChange(field.key, event.target.value)}
+          required={field.required}
+        >
+          <option value="">Select an option</option>
+          {(field.options || []).map((option) => (
+            <option key={option} value={option}>{option}</option>
+          ))}
+        </select>
+      );
+    }
+    return (
+      <input
+        className={baseClass}
+        type={field.type === "number" ? "number" : field.type === "date" ? "date" : "text"}
+        value={typeof value === "string" ? value : ""}
+        onChange={(event) => handleFormChange(field.key, event.target.value)}
+        placeholder={field.note}
+        required={field.required}
+      />
+    );
+  };
+
+  const submitBillingForm = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!activeForm) return;
+    setSubmittingForm(true);
+    try {
+      await submitModuleRecord({
+        moduleId: 13,
+        formId: activeForm.id,
+        patientName: String(formValues.patient || formValues.invoice || ""),
+        formData: Object.fromEntries(
+          Object.entries(formValues).map(([key, value]) => [key, String(value)]),
+        ),
+      });
+      setNotice(`${cleanFormName(activeForm.title)} saved successfully.`);
+      setActiveForm(null);
+      setFormValues({});
+      window.setTimeout(() => setNotice(""), 2600);
+    } catch (error: any) {
+      setBillingError(String(error?.message || "Failed to save billing form."));
+    } finally {
+      setSubmittingForm(false);
+    }
   };
 
   return (
-    <div className="billing-view">
+    <div className="billing-view billing-dashboard-view">
       <div className="pv-header">
         <div>
-          <h2 className="pv-title">Revenue Terminal</h2>
-          <p className="pv-subtitle">
-            Manage patient invoicing and settlements
-          </p>
+          <h2 className="pv-title"><span className="billing-title-icon">KES</span> Billing & Payments</h2>
+          <p className="pv-subtitle">Charges, receipts, and patient balances</p>
         </div>
-        <button
-          type="button"
-          className="btn-primary"
-          onClick={() => void loadBills()}
-          disabled={loadingBills}
-        >
-          {loadingBills ? "Refreshing..." : "Refresh Bills"}
-        </button>
+        <div className="billing-action-bar">
+          {billingForms.map((form, index) => {
+            const color = actionPalette[index % actionPalette.length];
+            return (
+              <button
+                key={form.id}
+                type="button"
+                className="billing-action-btn"
+                style={{
+                  backgroundColor: color,
+                  borderColor: color,
+                  boxShadow: `0 10px 20px ${color}30`,
+                }}
+                onClick={() => {
+                  setFormValues({});
+                  setActiveForm(form);
+                }}
+              >
+                <span>{getFormIconText(form.title)}</span>
+                {cleanFormName(form.title)}
+              </button>
+            );
+          })}
+        </div>
       </div>
       {notice && <div className="workflow-notice is-success">{notice}</div>}
       {billingError && <div className="auth-error">{billingError}</div>}
-      <div className="pv-table-wrap">
+
+      <section className="module-filter-panel billing-filter-panel">
+        <div className="module-filter-grid billing-filter-grid">
+          <label className="module-filter-field">
+            <span>Date From</span>
+            <input type="date" value={dateFrom} onChange={(event) => setDateFrom(event.target.value)} />
+          </label>
+          <label className="module-filter-field">
+            <span>Date To</span>
+            <input type="date" value={dateTo} onChange={(event) => setDateTo(event.target.value)} />
+          </label>
+          <label className="module-filter-field">
+            <span>Status</span>
+            <select value={status} onChange={(event) => setStatus(event.target.value)}>
+              <option value="ALL">All</option>
+              <option value="UNPAID">Unpaid</option>
+              <option value="PARTIAL">Partial</option>
+              <option value="PAID">Paid</option>
+              <option value="OVERPAID">Overpaid</option>
+              <option value="CANCELLED">Cancelled</option>
+            </select>
+          </label>
+          <label className="module-filter-field">
+            <span>Trend Grouping</span>
+            <select value={trendGrouping} onChange={(event) => setTrendGrouping(event.target.value as any)}>
+              <option value="day">Day</option>
+              <option value="week">Week</option>
+              <option value="month">Month</option>
+            </select>
+          </label>
+          <label className="module-filter-field is-wide">
+            <span>Search Invoices</span>
+            <input
+              type="search"
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+              placeholder="Invoice number, patient, status, visit type..."
+            />
+          </label>
+        </div>
+      </section>
+
+      <div className="pv-stats billing-stats-grid">
+        {stats.map((stat) => (
+          <article key={stat.label} className="pv-stat-card" style={{ borderLeftColor: stat.color }}>
+            <p className="pv-stat-label">{stat.label}</p>
+            <p className="pv-stat-value">{stat.value}</p>
+          </article>
+        ))}
+      </div>
+
+      <section className="billing-trend-panel">
+        <div>
+          <h3>Revenue Trend</h3>
+          <p>{trendRows.length} periods grouped by {String(report?.groupBy || trendGrouping).toLowerCase()}.</p>
+        </div>
+        <div className="billing-trend-pie-layout">
+          <div className="billing-trend-pie" style={{ background: `conic-gradient(${trendPie.gradient})` }}>
+            <div><span>Total Billed</span><strong>{formatKes(trendPie.total)}</strong></div>
+          </div>
+          <div className="billing-trend-legend">
+            {trendPie.rows.map((row: TrendPieRow) => (
+              <div key={row.period} className="billing-trend-legend-row">
+                <i style={{ backgroundColor: row.color }} />
+                <span>{row.period}</span>
+                <strong>{formatKes(row.billed)}</strong>
+              </div>
+            ))}
+            {!loadingBills && trendRows.length === 0 ? <div className="pv-empty">No trend data for selected filters.</div> : null}
+          </div>
+        </div>
+      </section>
+
+      <div className="pv-table-meta">
+        <h3 className="pv-table-title">Invoice View</h3>
+        <span className="pv-table-count">{filteredBills.length} invoices</span>
+      </div>
+
+      <div className="pv-table-wrap billing-invoice-table">
         <table className="pv-table">
           <thead>
             <tr>
+              <th>Invoice</th>
               <th>Patient</th>
-              <th>Invoice No</th>
-              <th>Amount (KES)</th>
-              <th>Paid (KES)</th>
-              <th>Outstanding (KES)</th>
+              <th>Visit</th>
               <th>Status</th>
-              <th>Receipt No</th>
+              <th>Total</th>
+              <th>Paid</th>
+              <th>Outstanding</th>
+              <th>Created</th>
               <th>Actions</th>
             </tr>
           </thead>
           <tbody>
             {loadingBills && (
               <tr>
-                <td colSpan={8} className="pv-empty">Loading billing records...</td>
+                <td colSpan={9} className="pv-empty">Loading billing invoices...</td>
               </tr>
             )}
-            {bills.map((b) => (
-              <tr key={b.id}>
-                <td className="pv-name">{b.patient}</td>
-                <td>{b.invoiceNo}</td>
-                <td className="font-bold">{b.amount.toLocaleString()}</td>
-                <td>{b.paidAmount.toLocaleString()}</td>
-                <td>{b.outstanding.toLocaleString()}</td>
+            {filteredBills.map((bill) => (
+              <tr key={String(bill?.id || invoiceNumber(bill))}>
+                <td className="pv-name">{invoiceNumber(bill)}</td>
+                <td>{patientName(bill)}</td>
+                <td>{String(bill?.visit?.visitType || bill?.sourceModule || "-")}</td>
                 <td>
-                  <span
-                    className={`pv-badge ${
-                      b.status === "UNPAID" ? "badge-female" : "badge-male"
-                    }`}
-                  >
-                    {b.status}
+                  <span className={`billing-status billing-status-${String(bill?.status || "unknown").toLowerCase()}`}>
+                    {String(bill?.status || "-")}
                   </span>
                 </td>
-                <td>{b.receiptNo || "-"}</td>
+                <td>{formatKes(bill?.totalAmount)}</td>
+                <td>{formatKes(paidAmount(bill))}</td>
+                <td>{formatKes(outstandingAmount(bill))}</td>
+                <td>{bill?.createdAt ? new Date(bill.createdAt).toLocaleDateString() : "-"}</td>
                 <td>
-                  <button
-                    className="pv-del"
-                    onClick={() => {
-                      if (b.status !== "PAID") {
-                        void settleBill(b);
-                        return;
-                      }
-                      void openReceipt(b);
-                    }}
-                  >
-                    {b.status !== "PAID" ? "Settle" : "Receipt"}
+                  <button type="button" className="billing-view-btn" onClick={() => void openInvoice(bill)}>
+                    <span>INV</span>
+                    View
                   </button>
                 </td>
               </tr>
             ))}
-            {!loadingBills && bills.length === 0 && (
+            {!loadingBills && filteredBills.length === 0 && (
               <tr>
-                <td colSpan={8} className="pv-empty">No billing records found.</td>
+                <td colSpan={9} className="pv-empty">No invoices match the selected filters.</td>
               </tr>
             )}
           </tbody>
         </table>
       </div>
-      {activeReceipt && (
-        <div className="modal-overlay" onClick={() => setActiveReceipt(null)}>
-          <div className="modal-box receipt-modal" onClick={(e) => e.stopPropagation()}>
-            <div className="modal-header">
-              <h3>Payment Receipt</h3>
-              <button className="modal-close" onClick={() => setActiveReceipt(null)}>
-                ✕
+
+      {selectedInvoice ? (
+        <div className="billing-modal-overlay" onClick={() => setSelectedInvoice(null)}>
+          <section className="billing-invoice-modal" onClick={(event) => event.stopPropagation()}>
+            <div className="billing-invoice-toolbar">
+              {outstandingAmount(selectedInvoice) > 0 ? (
+                <button type="button" className="billing-settle-btn" onClick={() => void settleBill(selectedInvoice)}>
+                  Settle Balance
+                </button>
+              ) : null}
+              <button type="button" className="billing-invoice-download" onClick={() => downloadInvoicePdf(selectedInvoice)}>
+                Download PDF
               </button>
+              <button type="button" className="billing-invoice-close" onClick={() => setSelectedInvoice(null)}>x</button>
             </div>
-            <div className="receipt-grid">
-              <p><strong>Receipt No:</strong> {activeReceipt.receiptNo || "-"}</p>
-              <p><strong>Invoice No:</strong> {activeReceipt.invoiceNo}</p>
-              <p><strong>Patient:</strong> {activeReceipt.patient}</p>
-              <p><strong>Amount:</strong> KES {activeReceipt.amount.toLocaleString()}</p>
-              <p><strong>Status:</strong> {activeReceipt.status}</p>
-              <p><strong>Payment Method:</strong> {activeReceipt.paymentMethod || "-"}</p>
-              <p>
-                <strong>Paid At:</strong>{" "}
-                {activeReceipt.paidAt ? new Date(activeReceipt.paidAt).toLocaleString() : "-"}
-              </p>
-            </div>
-            <div className="modal-footer receipt-actions">
-              <button
-                type="button"
-                className="btn-cancel"
-                onClick={() => setActiveReceipt(null)}
-              >
-                Close
-              </button>
-              <button
-                type="button"
-                className="btn-primary"
-                onClick={() => downloadReceipt(activeReceipt)}
-              >
-                Download Receipt
-              </button>
-            </div>
-          </div>
+
+            <article className="billing-pdf-sheet">
+              <header className="billing-pdf-header">
+                <div className="billing-hospital-brand">
+                  {facilityDetails.logoUrl ? (
+                    <img src={facilityDetails.logoUrl} alt={`${facilityDetails.name} logo`} className="billing-hospital-logo" />
+                  ) : (
+                    <div className="billing-logo-fallback">{facilityDetails.name.slice(0, 1) || "H"}</div>
+                  )}
+                  <div>
+                    <h2>{facilityDetails.name}</h2>
+                    <p>{facilityDetails.location}</p>
+                    <p>{[facilityDetails.phone, facilityDetails.email].filter(Boolean).join(" | ")}</p>
+                  </div>
+                </div>
+                <div className="billing-invoice-stamp">
+                  <span>Patient Invoice</span>
+                  <strong>{invoiceNumber(selectedInvoice)}</strong>
+                  <p>{String(selectedInvoice?.status || "OPEN")}</p>
+                </div>
+              </header>
+
+              <section className="billing-pdf-meta-grid">
+                <article>
+                  <h3>Bill To</h3>
+                  <dl>
+                    <div><dt>Patient</dt><dd>{patientName(selectedInvoice)}</dd></div>
+                    <div><dt>Patient ID</dt><dd>{String(selectedInvoice?.patientId || "-")}</dd></div>
+                    <div><dt>Visit Type</dt><dd>{String(selectedInvoice?.visit?.visitType || selectedInvoice?.sourceModule || "-")}</dd></div>
+                    <div><dt>Doctor</dt><dd>{`${selectedInvoice?.visit?.doctor?.firstName || ""} ${selectedInvoice?.visit?.doctor?.lastName || ""}`.trim() || "-"}</dd></div>
+                  </dl>
+                </article>
+                <article>
+                  <h3>Invoice Details</h3>
+                  <dl>
+                    <div><dt>Invoice No.</dt><dd>{invoiceNumber(selectedInvoice)}</dd></div>
+                    <div><dt>Created</dt><dd>{selectedInvoice?.createdAt ? new Date(selectedInvoice.createdAt).toLocaleString() : "-"}</dd></div>
+                    <div><dt>Visit ID</dt><dd>{String(selectedInvoice?.visit?.id || selectedInvoice?.visitId || "-")}</dd></div>
+                    <div><dt>Payment Status</dt><dd>{String(selectedInvoice?.status || "-")}</dd></div>
+                  </dl>
+                </article>
+              </section>
+
+              <section className="billing-pdf-services">
+                <h3>Services & Charges</h3>
+                <table className="billing-pdf-table">
+                  <thead><tr><th>#</th><th>Service / Item</th><th>Qty</th><th>Unit Price</th><th>Total</th></tr></thead>
+                  <tbody>
+                    {Array.isArray(selectedInvoice?.items) && selectedInvoice.items.length > 0 ? (
+                      selectedInvoice.items.map((item: any, index: number) => (
+                        <tr key={String(item?.id || index)}>
+                          <td>{index + 1}</td>
+                          <td><strong>{String(item?.description || item?.serviceName || "Service")}</strong><span>{String(item?.chargeType || item?.type || selectedInvoice?.sourceModule || "-")}</span></td>
+                          <td>{asNumber(item?.quantity) || 1}</td>
+                          <td>{formatKes(item?.unitPrice)}</td>
+                          <td>{formatKes(invoiceLineTotal(item))}</td>
+                        </tr>
+                      ))
+                    ) : (
+                      <tr><td colSpan={5} className="pv-empty">No line items recorded.</td></tr>
+                    )}
+                  </tbody>
+                </table>
+              </section>
+
+              <section className="billing-pdf-total-panel">
+                <div><span>Subtotal</span><strong>{formatKes(selectedInvoice?.subtotal ?? selectedInvoice?.totalAmount)}</strong></div>
+                <div><span>Tax</span><strong>{formatKes(selectedInvoice?.taxAmount)}</strong></div>
+                <div><span>Discount</span><strong>{formatKes(selectedInvoice?.discountAmount)}</strong></div>
+                <div><span>Insurance Cover</span><strong>{formatKes(selectedInvoice?.insuranceCover)}</strong></div>
+                <div><span>Total Paid</span><strong>{formatKes(paidAmount(selectedInvoice))}</strong></div>
+                <div className="is-grand"><span>Outstanding</span><strong>{formatKes(outstandingAmount(selectedInvoice))}</strong></div>
+              </section>
+
+              <section className="billing-pdf-payments">
+                <h3>Payments & Receipts</h3>
+                <table className="billing-pdf-table">
+                  <thead><tr><th>Date</th><th>Method</th><th>Reference</th><th>Amount</th></tr></thead>
+                  <tbody>
+                    {invoicePayments(selectedInvoice).length > 0 ? (
+                      invoicePayments(selectedInvoice).map((payment: any, index: number) => (
+                        <tr key={String(payment?.id || index)}>
+                          <td>{payment?.createdAt ? new Date(payment.createdAt).toLocaleString() : "-"}</td>
+                          <td>{String(payment?.method || payment?.paymentMethod || "-")}</td>
+                          <td>{String(payment?.transactionRef || payment?.transactionId || payment?.reference || payment?.receiptNumber || "-")}</td>
+                          <td>{formatKes(payment?.amount)}</td>
+                        </tr>
+                      ))
+                    ) : (
+                      <tr><td colSpan={4} className="pv-empty">No payments posted.</td></tr>
+                    )}
+                  </tbody>
+                </table>
+              </section>
+              <footer className="billing-pdf-footer">
+                This invoice was generated by Medilink HMIS. Please quote invoice number <strong>{invoiceNumber(selectedInvoice)}</strong> when making payment or requesting support.
+              </footer>
+            </article>
+          </section>
         </div>
-      )}
+      ) : null}
+
+      {activeForm ? (
+        <div className="billing-form-overlay" onClick={() => setActiveForm(null)}>
+          <section className={`billing-form-panel ${getFormMode(activeForm.title)}`} onClick={(event) => event.stopPropagation()}>
+            <header className="billing-form-header">
+              <div className="billing-form-heading">
+                <span className="billing-form-icon">{getFormIconText(activeForm.title)}</span>
+                <div>
+                  <span className="billing-form-kicker">Billing & Payments</span>
+                  <h2>{cleanFormName(activeForm.title)}</h2>
+                  <p>{activeForm.purpose}</p>
+                </div>
+              </div>
+              <button type="button" onClick={() => setActiveForm(null)}>x</button>
+            </header>
+            <form className="billing-form-body" onSubmit={submitBillingForm}>
+              <div className="billing-form-grid">
+                {activeForm.fields.map((field) => (
+                  <label key={field.key} className={`billing-form-field ${field.type === "textarea" || /line_items|reason/i.test(field.key) ? "is-wide" : ""}`}>
+                    <span className="billing-form-label">{field.label}{field.required ? <i>*</i> : null}</span>
+                    {field.note ? <small>{field.note}</small> : null}
+                    {renderFormInput(field)}
+                  </label>
+                ))}
+              </div>
+              <footer className="billing-form-footer">
+                <button type="button" className="billing-form-cancel" onClick={() => setActiveForm(null)}>Cancel</button>
+                <button type="submit" className="billing-form-submit" disabled={submittingForm}>
+                  {submittingForm ? "Saving..." : getSubmitLabel(activeForm.title)}
+                </button>
+              </footer>
+            </form>
+          </section>
+        </div>
+      ) : null}
     </div>
   );
 }
 
 function InsuranceView() {
-  const [claims] = useState([
-    { id: "1", provider: "NHIF", status: "SUBMITTED", amount: 12000 },
-    { id: "2", provider: "AON", status: "PAID", amount: 45000 },
-  ]);
+  const [claims, setClaims] = useState<any[]>([]);
+  const [dashboard, setDashboard] = useState<any | null>(null);
+  const [preAuthorizations, setPreAuthorizations] = useState<any[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [insuranceError, setInsuranceError] = useState("");
+  const [search, setSearch] = useState("");
+  const [status, setStatus] = useState("ALL");
+  const [activeForm, setActiveForm] = useState<WorkflowForm | null>(null);
+  const [formValues, setFormValues] = useState<Record<string, string | boolean>>({});
+  const [submittingForm, setSubmittingForm] = useState(false);
+  const [notice, setNotice] = useState("");
+
+  const insuranceForms = useMemo(() => WORKFLOW_MODULE_BY_ID[14]?.forms || [], []);
+  const actionPalette = ["#16a34a", "#2563eb", "#7c3aed", "#0891b2", "#f59e0b"];
+
+  const cleanFormName = (value: string) => String(value || "").replace(/\s+Form$/i, "").trim();
+  const asNumber = (value: unknown) => {
+    const next = Number(value || 0);
+    return Number.isFinite(next) ? next : 0;
+  };
+  const formatKes = (value: unknown) =>
+    `KES ${asNumber(value).toLocaleString("en-KE", { maximumFractionDigits: 0 })}`;
+
+  const getClaimNumber = (claim: any) =>
+    String(claim?.claimNumber || claim?.claimNo || claim?.id || "-");
+  const getClaimPayer = (claim: any) =>
+    String(claim?.provider || claim?.payer || claim?.insuranceProvider || claim?.schemeName || "-");
+  const getClaimAmount = (claim: any) =>
+    asNumber(claim?.claimAmount ?? claim?.amount ?? claim?.totalAmount ?? claim?.approvedAmount);
+  const getClaimStatus = (claim: any) =>
+    String(claim?.status || "SUBMITTED").toUpperCase();
+
+  const getInsuranceIconText = (name: string) => {
+    const normalized = name.toLowerCase();
+    if (normalized.includes("pre")) return "PRE";
+    if (normalized.includes("submission")) return "CLM";
+    if (normalized.includes("status")) return "STS";
+    if (normalized.includes("payment") || normalized.includes("reconciliation")) return "PAY";
+    return "POL";
+  };
+
+  const loadInsurance = async () => {
+    setLoading(true);
+    setInsuranceError("");
+    try {
+      const [dashboardRes, claimsRes, preAuthRes] = await Promise.allSettled([
+        fetchInsuranceDashboard(),
+        fetchInsuranceClaims({
+          ...(status !== "ALL" ? { status } : {}),
+          ...(search.trim() ? { search: search.trim() } : {}),
+          limit: 100,
+        }),
+        fetchInsurancePreAuthorizations(),
+      ]);
+      setDashboard(dashboardRes.status === "fulfilled" ? dashboardRes.value || null : null);
+      setClaims(claimsRes.status === "fulfilled" && Array.isArray(claimsRes.value) ? claimsRes.value : []);
+      setPreAuthorizations(preAuthRes.status === "fulfilled" && Array.isArray(preAuthRes.value) ? preAuthRes.value : []);
+      if (![dashboardRes, claimsRes, preAuthRes].some((result) => result.status === "fulfilled")) {
+        setInsuranceError("Unable to load insurance claims.");
+      }
+    } catch (error: any) {
+      setInsuranceError(String(error?.message || "Failed to load insurance claims."));
+      setClaims([]);
+      setPreAuthorizations([]);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    void loadInsurance();
+  }, [status]);
+
+  useEffect(() => {
+    const handleSidebarFormOpen = (event: Event) => {
+      const detail = (event as CustomEvent<{ moduleId?: number; formId?: string }>).detail;
+      if (Number(detail?.moduleId) !== 14) return;
+      const form = insuranceForms.find((item) => item.id === detail?.formId);
+      if (form) {
+        setFormValues({});
+        setActiveForm(form);
+      }
+    };
+    window.addEventListener("hmis:open-workflow-form", handleSidebarFormOpen);
+    return () => window.removeEventListener("hmis:open-workflow-form", handleSidebarFormOpen);
+  }, [insuranceForms]);
+
+  const filteredClaims = useMemo(() => {
+    const needle = search.trim().toLowerCase();
+    return claims.filter((claim) => {
+      const statusMatch = status === "ALL" || getClaimStatus(claim) === status;
+      const searchMatch =
+        !needle ||
+        [getClaimNumber(claim), getClaimPayer(claim), getClaimStatus(claim), claim?.patientName, claim?.memberId]
+          .join(" ")
+          .toLowerCase()
+          .includes(needle);
+      return statusMatch && searchMatch;
+    });
+  }, [claims, search, status]);
+
+  const stats = useMemo(() => {
+    const pending = filteredClaims.filter((claim) =>
+      ["SUBMITTED", "PENDING", "UNDER_REVIEW", "PENDING_PREAUTH"].includes(getClaimStatus(claim)),
+    ).length;
+    const approved =
+      asNumber(dashboard?.approvedClaims) ||
+      filteredClaims.filter((claim) => ["APPROVED", "PAID", "PARTIAL_PAYMENT"].includes(getClaimStatus(claim))).length;
+    const denials =
+      asNumber(dashboard?.deniedClaims) ||
+      filteredClaims.filter((claim) => ["REJECTED", "DENIED"].includes(getClaimStatus(claim))).length;
+    return [
+      { label: "Claims Pending", value: loading ? "..." : pending, color: "#dc2626" },
+      { label: "Approved", value: loading ? "..." : approved, color: "#0d9488" },
+      { label: "Denials", value: loading ? "..." : denials, color: "#1e3a8a" },
+      { label: "Pre-Auths", value: loading ? "..." : preAuthorizations.length, color: "#7c3aed" },
+    ];
+  }, [dashboard, filteredClaims, loading, preAuthorizations]);
+
+  const handleFormChange = (name: string, value: string | boolean) => {
+    setFormValues((prev) => ({ ...prev, [name]: value }));
+  };
+
+  const renderFormInput = (field: WorkflowField) => {
+    const value = formValues[field.key];
+    const baseClass = "insurance-form-input";
+    if (field.type === "textarea") {
+      return (
+        <textarea
+          className={baseClass}
+          value={typeof value === "string" ? value : ""}
+          onChange={(event) => handleFormChange(field.key, event.target.value)}
+          placeholder={field.note}
+          required={field.required}
+        />
+      );
+    }
+    if (field.type === "checkbox") {
+      return (
+        <label className="insurance-checkbox-row">
+          <input
+            type="checkbox"
+            checked={Boolean(value)}
+            onChange={(event) => handleFormChange(field.key, event.target.checked)}
+          />
+          <span>Confirmed</span>
+        </label>
+      );
+    }
+    if (field.type === "select") {
+      return (
+        <select
+          className={baseClass}
+          value={typeof value === "string" ? value : ""}
+          onChange={(event) => handleFormChange(field.key, event.target.value)}
+          required={field.required}
+        >
+          <option value="">Select an option</option>
+          {(field.options || []).map((option) => (
+            <option key={option} value={option}>{option}</option>
+          ))}
+        </select>
+      );
+    }
+    return (
+      <input
+        className={baseClass}
+        type={
+          field.type === "number"
+            ? "number"
+            : field.type === "date"
+              ? "date"
+              : field.type === "file"
+                ? "file"
+                : "text"
+        }
+        value={field.type === "file" ? undefined : typeof value === "string" ? value : ""}
+        onChange={(event) => {
+          if (field.type === "file") {
+            handleFormChange(field.key, event.target.files?.[0]?.name || "");
+          } else {
+            handleFormChange(field.key, event.target.value);
+          }
+        }}
+        placeholder={field.note}
+        required={field.required}
+      />
+    );
+  };
+
+  const submitInsuranceForm = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!activeForm) return;
+    setSubmittingForm(true);
+    try {
+      await submitModuleRecord({
+        moduleId: 14,
+        formId: activeForm.id,
+        patientName: String(formValues.search_name || formValues.patient || formValues.member_id || ""),
+        formData: Object.fromEntries(
+          Object.entries(formValues).map(([key, value]) => [key, String(value)]),
+        ),
+      });
+      setNotice(`${cleanFormName(activeForm.title)} saved successfully.`);
+      setActiveForm(null);
+      setFormValues({});
+      void loadInsurance();
+      window.setTimeout(() => setNotice(""), 2600);
+    } catch (error: any) {
+      setInsuranceError(String(error?.message || "Failed to save insurance form."));
+    } finally {
+      setSubmittingForm(false);
+    }
+  };
 
   return (
-    <div className="insurance-view">
+    <div className="insurance-view insurance-web-view">
       <div className="pv-header">
         <div>
-          <h2 className="pv-title">Claims Registry</h2>
-          <p className="pv-subtitle">
-            Track insurance provider payouts and pre-auths
-          </p>
+          <h2 className="pv-title"><span className="insurance-title-icon">INS</span> Insurance Claims</h2>
+          <p className="pv-subtitle">Pre-authorisations, claims, and remittances</p>
+        </div>
+        <div className="insurance-action-bar">
+          {insuranceForms.map((form, index) => {
+            const color = actionPalette[index % actionPalette.length];
+            return (
+              <button
+                key={form.id}
+                type="button"
+                className="insurance-action-btn"
+                style={{
+                  backgroundColor: color,
+                  borderColor: color,
+                  boxShadow: `0 10px 20px ${color}30`,
+                }}
+                onClick={() => {
+                  setFormValues({});
+                  setActiveForm(form);
+                }}
+              >
+                <span>{getInsuranceIconText(form.title)}</span>
+                {cleanFormName(form.title)}
+              </button>
+            );
+          })}
         </div>
       </div>
-      <div className="pv-table-wrap">
+      {notice ? <div className="workflow-notice is-success">{notice}</div> : null}
+      {insuranceError ? <div className="auth-error">{insuranceError}</div> : null}
+
+      <div className="pv-stats insurance-stats-grid">
+        {stats.map((stat) => (
+          <article key={stat.label} className="pv-stat-card" style={{ borderLeftColor: stat.color }}>
+            <p className="pv-stat-label">{stat.label}</p>
+            <p className="pv-stat-value">{stat.value}</p>
+          </article>
+        ))}
+      </div>
+
+      <section className="module-filter-panel insurance-filter-panel">
+        <div className="module-filter-grid insurance-filter-grid">
+          <label className="module-filter-field is-wide insurance-search-field">
+            <span>Search Claims</span>
+            <input
+              type="search"
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+              placeholder="Search claims"
+            />
+          </label>
+          <label className="module-filter-field">
+            <span>Status</span>
+            <select value={status} onChange={(event) => setStatus(event.target.value)}>
+              <option value="ALL">All</option>
+              <option value="SUBMITTED">Submitted</option>
+              <option value="PENDING">Pending</option>
+              <option value="UNDER_REVIEW">Under Review</option>
+              <option value="APPROVED">Approved</option>
+              <option value="REJECTED">Rejected</option>
+              <option value="PAID">Paid</option>
+            </select>
+          </label>
+        </div>
+      </section>
+
+      <div className="pv-table-meta insurance-table-meta">
+        <h3 className="pv-table-title">Claims Registry</h3>
+        <span className="pv-table-count">{filteredClaims.length} claims</span>
+      </div>
+
+      <div className="pv-table-wrap insurance-table-wrap">
         <table className="pv-table">
           <thead>
             <tr>
-              <th>Provider</th>
+              <th>Claim</th>
+              <th>Payer</th>
               <th>Amount</th>
               <th>Status</th>
               <th>Actions</th>
             </tr>
           </thead>
           <tbody>
-            {claims.map((c) => (
-              <tr key={c.id}>
-                <td className="pv-name">{c.provider}</td>
-                <td className="font-bold">{c.amount.toLocaleString()}</td>
+            {loading ? (
+              <tr>
+                <td colSpan={5} className="pv-empty">Loading insurance claims...</td>
+              </tr>
+            ) : filteredClaims.length > 0 ? (
+              filteredClaims.map((claim) => (
+              <tr key={String(claim?.id || getClaimNumber(claim))}>
+                <td className="pv-name">{getClaimNumber(claim)}</td>
+                <td>{getClaimPayer(claim)}</td>
+                <td className="font-bold">{formatKes(getClaimAmount(claim))}</td>
                 <td>
-                  <span
-                    className={`pv-badge ${c.status === "SUBMITTED" ? "badge-female" : "badge-male"}`}
-                  >
-                    {c.status}
+                  <span className={`insurance-status insurance-status-${getClaimStatus(claim).toLowerCase()}`}>
+                    {getClaimStatus(claim).replace(/_/g, " ")}
                   </span>
                 </td>
                 <td>
-                  <button className="pv-del">Details</button>
+                  <button
+                    type="button"
+                    className="insurance-detail-btn"
+                    onClick={() => {
+                      setFormValues({
+                        claim_id: String(claim?.id || ""),
+                        status: getClaimStatus(claim),
+                        approved_amount: String(claim?.approvedAmount || ""),
+                        denied_amount: String(claim?.deniedAmount || ""),
+                        provider_reference: String(claim?.providerReference || ""),
+                      });
+                      setActiveForm(insuranceForms.find((form) => form.id === "claim_status_update") || null);
+                    }}
+                  >
+                    Details
+                  </button>
                 </td>
               </tr>
-            ))}
+              ))
+            ) : (
+              <tr>
+                <td colSpan={5} className="pv-empty">No insurance claims found.</td>
+              </tr>
+            )}
           </tbody>
         </table>
       </div>
+
+      {activeForm ? (
+        <div className="insurance-form-overlay" onClick={() => setActiveForm(null)}>
+          <section className="insurance-form-panel" onClick={(event) => event.stopPropagation()}>
+            <header
+              className="insurance-form-header"
+              style={{ background: actionPalette[Math.max(0, insuranceForms.findIndex((form) => form.id === activeForm.id)) % actionPalette.length] }}
+            >
+              <div className="insurance-form-heading">
+                <span className="insurance-form-icon">{getInsuranceIconText(activeForm.title)}</span>
+                <div>
+                  <span className="insurance-form-kicker">Insurance Claims</span>
+                  <h2>{cleanFormName(activeForm.title)}</h2>
+                  <p>{activeForm.purpose}</p>
+                </div>
+              </div>
+              <button type="button" onClick={() => setActiveForm(null)}>x</button>
+            </header>
+            <form className="insurance-form-body" onSubmit={submitInsuranceForm}>
+              <div className="insurance-form-grid">
+                {activeForm.fields.map((field) => (
+                  <label key={field.key} className={`insurance-form-field ${field.type === "textarea" || field.type === "file" ? "is-wide" : ""}`}>
+                    <span className="insurance-form-label">{field.label}{field.required ? <i>*</i> : null}</span>
+                    {field.note ? <small>{field.note}</small> : null}
+                    {renderFormInput(field)}
+                  </label>
+                ))}
+              </div>
+              <footer className="insurance-form-footer">
+                <button type="button" className="insurance-form-cancel" onClick={() => setActiveForm(null)}>Cancel</button>
+                <button type="submit" className="insurance-form-submit" disabled={submittingForm}>
+                  {submittingForm ? "Saving..." : `Save ${cleanFormName(activeForm.title)}`}
+                </button>
+              </footer>
+            </form>
+          </section>
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -7236,10 +12129,10 @@ export default function App() {
     allowedNavSet.add(1);
   }
   const effectiveAllowedModules =
-    dynamicAllowedModuleIds !== null
-      ? dynamicAllowedModuleIds
-      : roleKey === "super_admin" || roleKey === "hospital_admin"
-        ? ROLE_ALLOWED_MODULES[roleKey]
+    roleKey === "super_admin" || roleKey === "hospital_admin"
+      ? ROLE_ALLOWED_MODULES[roleKey]
+      : dynamicAllowedModuleIds !== null
+        ? dynamicAllowedModuleIds
         : [];
   const allowedModuleSet = new Set<number>(effectiveAllowedModules);
   const getNavLabel = useCallback(
@@ -7398,8 +12291,7 @@ export default function App() {
       .trim()
       .toLowerCase();
     if (!normalizedRole) return;
-    const isPlatformAdminRole =
-      normalizedRole === "super_admin" || normalizedRole === "hospital_admin";
+    const isPlatformAdminRole = isAdminLikeRole(normalizedRole);
     let cancelled = false;
 
     const loadAccess = async () => {
@@ -7430,14 +12322,14 @@ export default function App() {
           roleModuleIds.length > 0
             ? roleModuleIds
             : isPlatformAdminRole
-              ? ROLE_ALLOWED_MODULES[normalizedRole as "super_admin" | "hospital_admin"]
+              ? getAdminAllowedModules(normalizedRole)
               : [],
         );
       } catch {
         if (cancelled) return;
         setDynamicAllowedModuleIds(
           isPlatformAdminRole
-            ? ROLE_ALLOWED_MODULES[normalizedRole as "super_admin" | "hospital_admin"]
+            ? getAdminAllowedModules(normalizedRole)
             : [],
         );
       }
@@ -7457,8 +12349,19 @@ export default function App() {
   );
   const roleFilteredModules = filtered.filter((m) => allowedModuleSet.has(m.id));
   const moduleSearchResults = roleFilteredModules.slice(0, 8);
-  const activeWorkflowModule = activeWorkflowModuleId
-    ? WORKFLOW_MODULE_BY_ID[activeWorkflowModuleId]
+  const activeSidebarModuleId =
+    activeWorkflowModuleId ??
+    (activeNav === 11
+      ? 15
+      : activeNav === 16
+        ? 16
+        : activeNav === 17
+          ? 17
+          : activeNav === 18
+            ? 18
+            : null);
+  const activeWorkflowModule = activeSidebarModuleId
+    ? WORKFLOW_MODULE_BY_ID[activeSidebarModuleId]
     : null;
   const activeSidebarForms = activeWorkflowModule?.forms || [];
   const activeSidebarTitle = activeWorkflowModule?.name || "Current Module";
@@ -7482,10 +12385,10 @@ export default function App() {
       status: String(patient.queueStatus || "Queued"),
     }));
   const openSidebarForm = (formId: string) => {
-    if (!activeWorkflowModuleId) return;
+    if (!activeSidebarModuleId) return;
     window.dispatchEvent(
       new CustomEvent("hmis:open-workflow-form", {
-        detail: { moduleId: activeWorkflowModuleId, formId },
+        detail: { moduleId: activeSidebarModuleId, formId },
       }),
     );
   };
@@ -7494,6 +12397,13 @@ export default function App() {
     setModuleSearchFocused(false);
     setActiveWorkflowModuleId(moduleId);
     setActiveNav(99);
+  };
+  const handleModuleSearchSubmit = (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const firstMatch = moduleSearchResults[0];
+    if (firstMatch) {
+      openModuleFromSearch(firstMatch.id);
+    }
   };
 
   const toggleSidebar = () => {
@@ -7708,8 +12618,7 @@ export default function App() {
       const role = claims?.role ? String(claims.role) : "hospital_admin";
       const normalizedRole = role.toLowerCase().trim();
       const resolvedRoleKey = resolveRoleKeyForUi(normalizedRole);
-      const isPlatformAdminRole =
-        normalizedRole === "super_admin" || normalizedRole === "hospital_admin";
+      const isPlatformAdminRole = isAdminLikeRole(normalizedRole);
       const tenantId = String(claims?.tenantId || saved?.backendFacilityId || "").trim();
 
       const setupFacilityName = getSetupFacilityNameFallback();
@@ -7799,14 +12708,14 @@ export default function App() {
             fallbackModuleIds.length > 0
               ? fallbackModuleIds
               : isPlatformAdminRole
-                ? ROLE_ALLOWED_MODULES[normalizedRole as "super_admin" | "hospital_admin"]
+                ? getAdminAllowedModules(normalizedRole)
                 : [],
           );
         }
       } catch {
         setDynamicAllowedModuleIds(
           isPlatformAdminRole
-            ? ROLE_ALLOWED_MODULES[normalizedRole as "super_admin" | "hospital_admin"]
+            ? getAdminAllowedModules(normalizedRole)
             : [],
         );
       }
@@ -7857,8 +12766,7 @@ export default function App() {
       const claims = token ? decodeJwtPayload(token) : null;
       const role = claims?.role ? String(claims.role) : "staff";
       const normalizedRole = role.toLowerCase().trim();
-      const isPlatformAdminRole =
-        normalizedRole === "super_admin" || normalizedRole === "hospital_admin";
+      const isPlatformAdminRole = isAdminLikeRole(normalizedRole);
       const savedRaw = localStorage.getItem(ACCOUNT_STORAGE_KEY);
       let savedFacilityName = "Hospital Facility";
       const setupFacilityName = getSetupFacilityNameFallback();
@@ -7935,7 +12843,7 @@ export default function App() {
             fallbackModuleIds.length > 0
               ? fallbackModuleIds
               : isPlatformAdminRole
-                ? ROLE_ALLOWED_MODULES[normalizedRole as "super_admin" | "hospital_admin"]
+                ? getAdminAllowedModules(normalizedRole)
                 : [],
           );
         }
@@ -7954,13 +12862,13 @@ export default function App() {
             moduleIds.length > 0
               ? moduleIds
               : isPlatformAdminRole
-                ? ROLE_ALLOWED_MODULES[normalizedRole as "super_admin" | "hospital_admin"]
+                ? getAdminAllowedModules(normalizedRole)
                 : [],
           );
         } catch {
           setDynamicAllowedModuleIds(
             isPlatformAdminRole
-              ? ROLE_ALLOWED_MODULES[normalizedRole as "super_admin" | "hospital_admin"]
+              ? getAdminAllowedModules(normalizedRole)
               : [],
           );
         }
@@ -8242,10 +13150,20 @@ export default function App() {
         return <BillingView />;
       case 10:
         return <PharmacyView />;
-      case 11:
-        return <InventoryView />;
-      case 26:
-        return <OTView />;
+      case 11: {
+        const inventoryModule = WORKFLOW_MODULE_BY_ID[15];
+        return inventoryModule ? (
+          <React.Suspense fallback={<div className="p-4">Loading module...</div>}>
+            <LazyWorkflowModuleView
+              module={inventoryModule}
+              patients={patients}
+              onPatientsRefresh={refreshPatientsFromBackend}
+            />
+          </React.Suspense>
+        ) : (
+          <InventoryView />
+        );
+      }
       case 12:
         return (
           <SettingsView
@@ -8277,12 +13195,48 @@ export default function App() {
         return <InsuranceView />;
       case 15:
         return <ProcurementView />;
-      case 16:
-        return <HRView />;
-      case 17:
-        return <DoctorView />;
-      case 18:
-        return <FacilityView />;
+      case 16: {
+        const hrModule = WORKFLOW_MODULE_BY_ID[16];
+        return hrModule ? (
+          <React.Suspense fallback={<div className="p-4">Loading module...</div>}>
+            <LazyWorkflowModuleView
+              module={hrModule}
+              patients={patients}
+              onPatientsRefresh={refreshPatientsFromBackend}
+            />
+          </React.Suspense>
+        ) : (
+          <HRView />
+        );
+      }
+      case 17: {
+        const doctorModule = WORKFLOW_MODULE_BY_ID[17];
+        return doctorModule ? (
+          <React.Suspense fallback={<div className="p-4">Loading module...</div>}>
+            <LazyWorkflowModuleView
+              module={doctorModule}
+              patients={patients}
+              onPatientsRefresh={refreshPatientsFromBackend}
+            />
+          </React.Suspense>
+        ) : (
+          <DoctorView />
+        );
+      }
+      case 18: {
+        const facilityModule = WORKFLOW_MODULE_BY_ID[18];
+        return facilityModule ? (
+          <React.Suspense fallback={<div className="p-4">Loading module...</div>}>
+            <LazyWorkflowModuleView
+              module={facilityModule}
+              patients={patients}
+              onPatientsRefresh={refreshPatientsFromBackend}
+            />
+          </React.Suspense>
+        ) : (
+          <FacilityView />
+        );
+      }
       case 19:
         return <AnalyticsView />;
       case 20:
@@ -8290,13 +13244,29 @@ export default function App() {
       case 21:
         return <TelemedicineView />;
       case 22:
-        return <AISuiteView />;
-      case 23:
         return <BlockchainView />;
+      case 23:
+        return <AISuiteView />;
       case 24:
-        return <BloodBankView />;
+        return <PatientPortalView />;
       case 25:
-        return <ClinicianView />;
+        return <EmergencyView />;
+      case 26:
+        return <AmbulanceView />;
+      case 27:
+        return <MortuaryView />;
+      case 28:
+        return <QueueManagementView />;
+      case 29:
+        return <HelpdeskView />;
+      case 30:
+        return <CanteenView />;
+      case 31:
+        return <PatientFeedbackView />;
+      case 33:
+        return <QualityAssuranceView />;
+      case 34:
+        return <ExternalIntegrationsView />;
       case 40:
         return roleKey === "hospital_admin" || roleKey === "super_admin" ? (
           <SubscriptionPlansView />
@@ -8325,6 +13295,78 @@ export default function App() {
 
         if (module.id === 1) {
           return <PatientsView />;
+        }
+
+        if (module.id === 13) {
+          return <BillingView />;
+        }
+
+        if (module.id === 14) {
+          return <InsuranceView />;
+        }
+
+        if (module.id === 20) {
+          return <UserManagementView />;
+        }
+
+        if (module.id === 21) {
+          return <TelemedicineView />;
+        }
+
+        if (module.id === 22) {
+          return <BlockchainView />;
+        }
+
+        if (module.id === 23) {
+          return <AISuiteView />;
+        }
+
+        if (module.id === 24) {
+          return <PatientPortalView />;
+        }
+
+        if (module.id === 25) {
+          return <EmergencyView />;
+        }
+
+        if (module.id === 26) {
+          return <AmbulanceView />;
+        }
+
+        if (module.id === 27) {
+          return <MortuaryView />;
+        }
+
+        if (module.id === 28) {
+          return <QueueManagementView />;
+        }
+
+        if (module.id === 29) {
+          return <HelpdeskView />;
+        }
+
+        if (module.id === 30) {
+          return <CanteenView />;
+        }
+
+        if (module.id === 31) {
+          return <PatientFeedbackView />;
+        }
+
+        if (module.id === 33) {
+          return <QualityAssuranceView />;
+        }
+
+        if (module.id === 34) {
+          return <ExternalIntegrationsView />;
+        }
+
+        if (module.id === 64) {
+          return roleKey === "hospital_admin" || roleKey === "super_admin" ? (
+            <MigrationCenterView />
+          ) : (
+            <div className="p-4">Migration Center is available for Hospital Admin only.</div>
+          );
         }
 
         return (
@@ -8370,7 +13412,7 @@ export default function App() {
             aria-label={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
             title={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
           >
-            {sidebarCollapsed ? "›" : "‹"}
+            <Icon type={sidebarCollapsed ? "panel_open" : "panel_close"} size={18} />
           </button>
         </div>
 
@@ -8449,16 +13491,16 @@ export default function App() {
             {activeNav !== 0 && (
               <div className="topbar-module-title">
                 <button className="topbar-back-btn" onClick={goToDashboard}>
-                  ← Back
+                  <Icon type="arrow_back" size={16} />
+                  Back
                 </button>
-                <span
-                  style={{ fontWeight: 600, color: "#ffffff", fontSize: "1rem" }}
-                >
-                  {getNavLabel(activeNav)}
-                </span>
               </div>
             )}
-              <div className="search-wrap">
+              <form
+                className={`search-wrap ${moduleSearch.trim() ? "has-value" : "is-empty"}`}
+                onSubmit={handleModuleSearchSubmit}
+                data-placeholder="Search modules..."
+              >
                 <svg
                   width="16"
                   height="16"
@@ -8480,11 +13522,15 @@ export default function App() {
                   className="search-input"
                   type="text"
                   placeholder="Search modules..."
+                  aria-label="Search modules"
                   value={moduleSearch}
                   onChange={(e) => setModuleSearch(e.target.value)}
                   onFocus={() => setModuleSearchFocused(true)}
                   onBlur={() => window.setTimeout(() => setModuleSearchFocused(false), 140)}
                 />
+                {!moduleSearch && (
+                  <span className="search-placeholder-overlay">Search modules...</span>
+                )}
                 {moduleSearchFocused && moduleSearch.trim() && (
                   <div className="module-search-panel">
                     {moduleSearchResults.length > 0 ? (
@@ -8508,7 +13554,7 @@ export default function App() {
                     )}
                   </div>
                 )}
-              </div>
+              </form>
           </div>
           <div className="topbar-right">
             <button
@@ -8572,27 +13618,30 @@ export default function App() {
                 setNotificationsOpen(false);
               }}
             >
-              <div className="avatar">A</div>
+              <div className="avatar">{(user?.name || "Hospital Admin").charAt(0).toUpperCase()}</div>
               <div>
                 <div className="user-name">{user?.name || "Hospital Admin"}</div>
-                <div className="user-role">{user?.role || "Hospital Admin"}</div>
               </div>
             </button>
             {profileOpen && (
               <div className="topbar-panel profile-panel">
-                <div className="topbar-panel-header">
-                  <div>
-                    <strong>User Profile</strong>
-                    <span>Logged-in HMIS user</span>
+                <div className="profile-hero">
+                  <div className="profile-hero-main">
+                    <div className="profile-panel-avatar">
+                      <Icon type="person" size={38} />
+                    </div>
+                    <div className="profile-hero-copy">
+                      <span className="profile-kicker">Logged-in HMIS user</span>
+                      <strong>{user?.name || "Hospital Admin"}</strong>
+                      <small>{user?.email || "No email available"}</small>
+                    </div>
                   </div>
-                  <button type="button" onClick={() => setProfileOpen(false)}>×</button>
+                  <button type="button" className="profile-close-btn" onClick={() => setProfileOpen(false)}>×</button>
                 </div>
-                <div className="profile-panel-card">
-                  <div className="profile-panel-avatar">{(user?.name || "U").charAt(0).toUpperCase()}</div>
-                  <div>
-                    <strong>{user?.name || "Hospital Admin"}</strong>
-                    <span>{user?.email || "No email available"}</span>
-                  </div>
+                <div className="profile-status-row">
+                  <span className="profile-status-dot" />
+                  <strong>Active session</strong>
+                  <small>{dashboardFacilityName || "Current facility"}</small>
                 </div>
                 <dl className="profile-details">
                   <div>
@@ -8600,8 +13649,8 @@ export default function App() {
                     <dd>{user?.role || "Hospital Admin"}</dd>
                   </div>
                   <div>
-                    <dt>Facility</dt>
-                    <dd>{dashboardFacilityName}</dd>
+                    <dt>Facility ID</dt>
+                    <dd>{facility?.id || dashboardFacilityName || "Current facility"}</dd>
                   </div>
                   <div>
                     <dt>Status</dt>
@@ -8680,6 +13729,7 @@ export default function App() {
 const ClinicianView = () => (
   <div className="p-4">Medical Consultation (Functional)</div>
 );
+void ClinicianView;
 const DiagnosticsView = ({ type }: { type: string }) => (
   <div className="p-4">{type} Terminal</div>
 );
