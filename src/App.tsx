@@ -54,7 +54,11 @@ import {
   fetchLicenseStatus,
   fetchFacilityBranding,
   fetchWards,
+  apiFetch,
+  fetchTenantPatientById,
+  fetchTenantPatientDuplicateCheck,
   fetchTenantPatients,
+  updateTenantPatient,
   fetchTenantRoles,
   fetchTenantUsers,
   API_BASE_URL,
@@ -63,6 +67,7 @@ import {
   loginHospitalAdmin,
   loginStaff,
   normalizeBaseUrl,
+  parseJsonSafe,
   refreshAccessToken,
   recordBillingPayment,
   resetTenantUserPassword,
@@ -863,6 +868,34 @@ function ageFromDob(dob?: string | null) {
   return Math.max(0, Math.floor(diff / (365.25 * 24 * 60 * 60 * 1000)));
 }
 
+const patientRegistrationDateValue = (patient: any) =>
+  patient?.registeredAt ||
+  patient?.registered_at ||
+  patient?.registrationDate ||
+  patient?.registeredOn ||
+  patient?.createdAt ||
+  patient?.created_at ||
+  patient?.visitDate ||
+  patient?.updatedAt ||
+  patient?.updated_at ||
+  "";
+
+const isSameLocalDate = (value: unknown, expected: Date) => {
+  const date = value instanceof Date ? value : new Date(String(value || ""));
+  return (
+    Number.isFinite(date.getTime()) &&
+    date.getFullYear() === expected.getFullYear() &&
+    date.getMonth() === expected.getMonth() &&
+    date.getDate() === expected.getDate()
+  );
+};
+
+const formatPatientRegistrationDate = (patient: any) => {
+  const value = patientRegistrationDateValue(patient);
+  const date = new Date(String(value || ""));
+  return Number.isFinite(date.getTime()) ? date.toLocaleDateString() : "Today";
+};
+
 function dobFromAge(age: number) {
   if (!Number.isFinite(age) || age <= 0) return new Date().toISOString().slice(0, 10);
   const now = new Date();
@@ -880,13 +913,21 @@ function formatRoleLabel(role: string) {
 }
 
 function toFrontendPatient(raw: any): Patient {
-  const firstName = raw.firstName || "";
-  const lastName = raw.lastName || "";
-  const fullName = `${firstName} ${lastName}`.trim() || raw.name || "Unnamed Patient";
-  const genderRaw = String(raw.gender || "").toUpperCase();
+  const nested = raw?.patient && typeof raw.patient === "object" ? raw.patient : {};
+  const pick = (...values: any[]) =>
+    values.find((value) => value !== undefined && value !== null && String(value).trim() !== "");
+  const firstName = pick(raw.firstName, nested.firstName, raw.patientFirstName) || "";
+  const middleName = pick(raw.middleName, nested.middleName, raw.patientMiddleName) || "";
+  const lastName = pick(raw.lastName, nested.lastName, raw.patientLastName) || "";
+  const fullName =
+    [firstName, middleName, lastName].filter(Boolean).join(" ").trim() ||
+    pick(raw.name, nested.name, raw.fullName, nested.fullName, raw.patientName) ||
+    "Unnamed Patient";
+  const genderRaw = String(pick(raw.gender, nested.gender, raw.patientGender) || "").toUpperCase();
   const gender: Patient["gender"] = genderRaw === "FEMALE" ? "Female" : "Male";
-  const latestVisitStatus = raw?.visits?.[0]?.status
-    ? String(raw.visits[0].status)
+  const visits = Array.isArray(raw.visits) ? raw.visits : Array.isArray(nested.visits) ? nested.visits : [];
+  const latestVisitStatus = visits?.[0]?.status
+    ? String(visits[0].status)
     : "";
   const moduleMatch = latestVisitStatus.match(/^MODULE_(\d+)$/i);
   const queueModuleId = moduleMatch ? Number(moduleMatch[1]) : undefined;
@@ -901,8 +942,8 @@ function toFrontendPatient(raw: any): Patient {
   };
 
   const queueRaw = String(
-    raw.queueStatus ||
-      raw.status ||
+    pick(raw.queueStatus, nested.queueStatus) ||
+      pick(raw.status, nested.status) ||
       (queueModuleId ? queueFromModule[queueModuleId] || "WAITING" : "") ||
       latestVisitStatus ||
       "WAITING",
@@ -920,27 +961,43 @@ function toFrontendPatient(raw: any): Patient {
     ? queueRaw
     : "WAITING") as Patient["queueStatus"];
 
-  const visitDateValue = raw.visitDate || raw.createdAt || new Date().toISOString();
+  const registrationSource = { ...nested, ...raw };
+  const visitDateValue = patientRegistrationDateValue(registrationSource) || new Date().toISOString();
   const visitDate = String(visitDateValue).slice(0, 10);
-  const dob = raw.dateOfBirth ? String(raw.dateOfBirth).slice(0, 10) : "";
+  const dobValue = pick(raw.dateOfBirth, nested.dateOfBirth, raw.dob, nested.dob);
+  const dob = dobValue ? String(dobValue).slice(0, 10) : "";
+  const patientId = pick(raw.id, nested.id, raw.patientId, raw.patient_id);
+  const phone = pick(raw.phone, nested.phone, raw.phonePrimary, nested.phonePrimary, raw.patientPhone);
+  const nationalId = pick(raw.nationalId, nested.nationalId, raw.idNumber, nested.idNumber, raw.patientNationalId);
+  const patientCode = pick(raw.patientCode, nested.patientCode, raw.mrn, nested.mrn, raw.regNo, nested.regNo);
+  const bloodGroup = pick(raw.bloodGroup, nested.bloodGroup);
 
   return {
-    id: String(raw.id),
-    regNo: raw.patientCode || raw.regNo || "",
-    nationalId: raw.nationalId || "",
+    ...nested,
+    ...raw,
+    id: String(patientId || ""),
+    patientCode,
+    mrn: patientCode,
+    regNo: patientCode || "",
+    nationalId: nationalId || "",
     name: fullName,
-    phone: raw.phone || "",
+    firstName,
+    middleName,
+    lastName,
+    phone: phone || "",
     gender,
-    age: raw.age || ageFromDob(dob),
+    age: pick(raw.age, nested.age) || ageFromDob(dob),
+    bloodGroup,
     queueStatus,
     queueModuleId,
     visitDate,
-    vitals: raw.vitals
+    registeredAt: visitDateValue,
+    vitals: (raw.vitals || nested.vitals)
       ? {
-          bp: raw.vitals.bp || "",
-          temp: raw.vitals.temp || "",
-          weight: raw.vitals.weight || "",
-          pulse: raw.vitals.pulse || "",
+          bp: (raw.vitals || nested.vitals).bp || "",
+          temp: (raw.vitals || nested.vitals).temp || "",
+          weight: (raw.vitals || nested.vitals).weight || "",
+          pulse: (raw.vitals || nested.vitals).pulse || "",
         }
       : undefined,
   };
@@ -964,28 +1021,114 @@ type HelpAssistantContext = {
 /* ── Patients View ── */
 
 function PatientsView() {
-  const { patients, removePatient, setPatients } = useAppStore();
+  const createEmptyPatientForm = () => ({
+    firstName: "",
+    middleName: "",
+    lastName: "",
+    dateOfBirth: "",
+    gender: "MALE" as "MALE" | "FEMALE" | "OTHER",
+    maritalStatus: "",
+    nationality: "",
+    idType: "",
+    idNumber: "",
+    shaNumber: "",
+    phonePrimary: "",
+    phoneSecondary: "",
+    email: "",
+    county: "",
+    subCounty: "",
+    villageEstate: "",
+    addressLine1: "",
+    age: "",
+    bloodGroup: "" as any,
+    religion: "",
+    occupation: "",
+    educationLevel: "",
+    photoUrl: "",
+    allergies: "",
+    medicalHistory: "",
+    nextOfKinName: "",
+    nextOfKinRelationship: "",
+    nextOfKinPhone: "",
+    nextOfKinEmail: "",
+    nextOfKinAddress: "",
+    nextOfKinIsPrimary: false,
+    nextOfKinConsent: false,
+    insuranceScheme: "",
+    policyNumber: "",
+    memberName: "",
+    isPrincipal: true,
+    principalIdNumber: "",
+    policyStartDate: "",
+    policyExpiryDate: "",
+    annualBenefitLimit: "",
+    portalPhone: "",
+    vulnerabilityFlags: [] as string[],
+    hasInsurance: false,
+  });
+  const { patients, removePatient, setPatients, facility } = useAppStore();
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [formOpen, setFormOpen] = useState(false);
   const [formTab, setFormTab] = useState<"personal" | "medical" | "kin" | "insurance">("personal");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [exportingCsv, setExportingCsv] = useState(false);
   const [error, setError] = useState("");
-  const [form, setForm] = useState({
-    firstName: "",
-    lastName: "",
-    gender: "Male" as "Male" | "Female",
-    nationalId: "",
-    phone: "",
-    age: "",
-    nextOfKin: "",
-    nextOfKinPhone: "",
-    address: "",
-    allergies: "",
-    bloodGroup: "" as any,
-    dob: "",
-  });
+  const [workspaceAction, setWorkspaceAction] = useState<
+    "duplicates" | "insurance" | "portal" | "photo" | "vulnerability" | "merge" | null
+  >(null);
+  const [workspaceQuery, setWorkspaceQuery] = useState("");
+  const [workspacePrimaryId, setWorkspacePrimaryId] = useState("");
+  const [workspaceSecondaryId, setWorkspaceSecondaryId] = useState("");
+  const [workspacePhotoUrl, setWorkspacePhotoUrl] = useState("");
+  const [workspaceFlags, setWorkspaceFlags] = useState<string[]>([]);
+  const [workspaceStatus, setWorkspaceStatus] = useState("");
+  const [checkedInPatientId, setCheckedInPatientId] = useState("");
+  const [pendingCheckInPatient, setPendingCheckInPatient] = useState<Patient | null>(null);
+  const [checkInMode, setCheckInMode] = useState<"today" | "date">("today");
+  const [checkInDate, setCheckInDate] = useState(new Date().toISOString().slice(0, 10));
+  const [checkInStatus, setCheckInStatus] = useState("");
+  const [actionNotice, setActionNotice] = useState("");
+  const actionNoticeTimer = useRef<number | null>(null);
+  const [todayPage, setTodayPage] = useState(0);
+  const [recentRegisteredIds, setRecentRegisteredIds] = useState<Set<string>>(new Set());
+  const [selectedPatient, setSelectedPatient] = useState<Patient | null>(null);
+  const [editingPatient, setEditingPatient] = useState<Patient | null>(null);
+  const [form, setForm] = useState(createEmptyPatientForm);
+  const [duplicatePatient, setDuplicatePatient] = useState<Patient | null>(null);
+  const [duplicateWarning, setDuplicateWarning] = useState("");
+  const [duplicateDetailsOpen, setDuplicateDetailsOpen] = useState(false);
+  const [duplicateMergeStatus, setDuplicateMergeStatus] = useState("");
+  const dobPickerRef = useRef<HTMLInputElement | null>(null);
+
+  const showActionNotice = useCallback((message: string) => {
+    setActionNotice(message);
+    if (actionNoticeTimer.current) {
+      window.clearTimeout(actionNoticeTimer.current);
+    }
+    actionNoticeTimer.current = window.setTimeout(() => setActionNotice(""), 2600);
+  }, []);
+
+  const openDateOfBirthPicker = () => {
+    const picker = dobPickerRef.current;
+    if (!picker) return;
+    if (typeof picker.showPicker === "function") {
+      picker.showPicker();
+      return;
+    }
+    picker.focus();
+    picker.click();
+  };
+
+  useEffect(
+    () => () => {
+      if (actionNoticeTimer.current) {
+        window.clearTimeout(actionNoticeTimer.current);
+      }
+    },
+    [],
+  );
 
   const filtered = patients.filter((p) =>
     `${p.name} ${p.regNo} ${p.phone} ${p.nationalId}`
@@ -994,11 +1137,137 @@ function PatientsView() {
   );
 
   useEffect(() => {
+    const firstName = form.firstName.trim().toLowerCase();
+    const lastName = form.lastName.trim().toLowerCase();
+    const fullName = [firstName, lastName].filter(Boolean).join(" ");
+    const phone = form.phonePrimary.trim();
+    const nationalId = form.idNumber.trim();
+    const dateOfBirth = form.dateOfBirth.trim();
+    const hasEnoughData = nationalId.length >= 4 || phone.length >= 6 || (firstName && lastName) || (firstName && dateOfBirth);
+
+    if (!formOpen || !hasEnoughData) {
+      setDuplicatePatient(null);
+      setDuplicateWarning("");
+      return;
+    }
+
+    let cancelled = false;
+    const localMatch = patients.find((patient) => {
+      if (editingPatient?.id && patient.id === editingPatient.id) return false;
+      const patientName = patient.name.toLowerCase();
+      const sameId = Boolean(nationalId && patient.nationalId === nationalId);
+      const samePhone = Boolean(phone && patient.phone === phone);
+      const sameName = Boolean(fullName && patientName.includes(fullName));
+      const sameDob = Boolean(dateOfBirth && String((patient as any).dateOfBirth || "").slice(0, 10) === dateOfBirth);
+      return sameId || samePhone || (sameName && sameDob);
+    });
+
+    if (localMatch) {
+      setDuplicatePatient(localMatch);
+      setDuplicateWarning(
+        `This patient may already exist: ${localMatch.name} · ${localMatch.regNo || localMatch.phone || localMatch.nationalId || localMatch.id}`,
+      );
+    } else {
+      setDuplicatePatient(null);
+      setDuplicateWarning("");
+    }
+
+    const timer = window.setTimeout(async () => {
+      try {
+        const result = await fetchTenantPatientDuplicateCheck({
+          firstName: form.firstName,
+          lastName: form.lastName,
+          dateOfBirth: form.dateOfBirth,
+          nationalId: form.idNumber,
+          phone: form.phonePrimary,
+          email: form.email,
+        });
+        if (cancelled) return;
+        const matches = Array.isArray((result as any)?.matches)
+          ? (result as any).matches
+          : Array.isArray(result)
+            ? result
+            : [];
+        const bestRaw = matches[0]?.patient || matches[0];
+        if (bestRaw?.id && bestRaw.id !== editingPatient?.id) {
+          const best = toFrontendPatient(bestRaw);
+          setDuplicatePatient(best);
+          setDuplicateWarning(
+            `This patient may already exist: ${best.name} · ${best.regNo || best.phone || best.nationalId || best.id}`,
+          );
+        } else if (!localMatch) {
+          setDuplicatePatient(null);
+          setDuplicateWarning("");
+        }
+      } catch {
+        if (!cancelled && !localMatch) {
+          setDuplicatePatient(null);
+          setDuplicateWarning("");
+        }
+      }
+    }, 250);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [
+    form.firstName,
+    form.lastName,
+    form.dateOfBirth,
+    form.phonePrimary,
+    form.idNumber,
+    form.email,
+    formOpen,
+    patients,
+    editingPatient?.id,
+  ]);
+
+  const autofillDuplicatePatient = () => {
+    if (!duplicatePatient) return;
+    const parts = duplicatePatient.name.split(" ");
+    setForm((current) => ({
+      ...current,
+      firstName: parts[0] || current.firstName,
+      middleName: (duplicatePatient as any).middleName || current.middleName,
+      lastName: parts.slice(1).join(" ") || current.lastName,
+      gender:
+        duplicatePatient.gender === "Female"
+          ? "FEMALE"
+          : duplicatePatient.gender === "Male"
+            ? "MALE"
+            : "OTHER",
+      idNumber: duplicatePatient.nationalId || current.idNumber,
+      phonePrimary: duplicatePatient.phone || current.phonePrimary,
+      age: duplicatePatient.age ? String(duplicatePatient.age) : current.age,
+      bloodGroup: (duplicatePatient as any).bloodGroup || current.bloodGroup,
+      addressLine1: (duplicatePatient as any).address || current.addressLine1,
+      allergies: (duplicatePatient as any).allergies || current.allergies,
+    }));
+    setDuplicateWarning("Existing patient details copied into the form. Review before saving.");
+  };
+
+  const refreshPatients = useCallback(
+    async (query = search.trim(), showLoader = false) => {
+      if (showLoader) setLoading(true);
+      try {
+        const backendPatients = await fetchTenantPatients(query || undefined, facility?.id);
+        setPatients(backendPatients.map(toFrontendPatient));
+      } catch {
+        // keep local data fallback
+      } finally {
+        if (showLoader) setLoading(false);
+      }
+    },
+    [facility?.id, search, setPatients],
+  );
+
+  useEffect(() => {
     let cancelled = false;
     const load = async () => {
       setLoading(true);
       try {
-        const backendPatients = await fetchTenantPatients(search.trim() || undefined);
+        const backendPatients = await fetchTenantPatients(search.trim() || undefined, facility?.id);
         if (!cancelled) {
           setPatients(backendPatients.map(toFrontendPatient));
         }
@@ -1014,7 +1283,19 @@ function PatientsView() {
     return () => {
       cancelled = true;
     };
-  }, [setPatients]);
+  }, [facility?.id, search, setPatients]);
+
+  useEffect(() => {
+    const refreshSilently = () => {
+      void refreshPatients("", false);
+    };
+    window.addEventListener("focus", refreshSilently);
+    const interval = window.setInterval(refreshSilently, 15000);
+    return () => {
+      window.removeEventListener("focus", refreshSilently);
+      window.clearInterval(interval);
+    };
+  }, [refreshPatients]);
 
   useEffect(() => {
     const handleSidebarFormOpen = (event: Event) => {
@@ -1035,22 +1316,83 @@ function PatientsView() {
     return () => window.removeEventListener("hmis:open-workflow-form", handleSidebarFormOpen);
   }, []);
 
+  useEffect(() => {
+    const handleWorkspaceAction = (event: Event) => {
+      const action = (event as CustomEvent<{ action?: typeof workspaceAction }>).detail?.action;
+      if (!action) return;
+      setWorkspaceAction(action);
+      setWorkspaceQuery("");
+      setWorkspacePrimaryId("");
+      setWorkspaceSecondaryId("");
+      setWorkspacePhotoUrl("");
+      setWorkspaceFlags([]);
+      setWorkspaceStatus("");
+    };
+
+    window.addEventListener("hmis:patient-workspace-action", handleWorkspaceAction);
+    return () => window.removeEventListener("hmis:patient-workspace-action", handleWorkspaceAction);
+  }, []);
+
   const handleResetForm = () => {
     setFormTab("personal");
-    setForm({
-      firstName: "",
-      lastName: "",
-      gender: "Male" as "Male" | "Female",
-      nationalId: "",
-      phone: "",
-      age: "",
-      nextOfKin: "",
-      nextOfKinPhone: "",
-      address: "",
-      allergies: "",
-      bloodGroup: "" as any,
-      dob: "",
-    });
+    setForm(createEmptyPatientForm());
+    setDuplicatePatient(null);
+    setDuplicateWarning("");
+    setDuplicateDetailsOpen(false);
+    setDuplicateMergeStatus("");
+    setEditingPatient(null);
+  };
+
+  const fillFormFromPatient = (patient: Patient, details?: any) => {
+    const source = { ...(patient as any), ...(details || {}) };
+    const sourceName = source.name || [source.firstName, source.middleName, source.lastName].filter(Boolean).join(" ") || patient.name;
+    const parts = String(sourceName || "").split(" ");
+    setForm((current) => ({
+      ...current,
+      firstName: source.firstName || parts[0] || "",
+      middleName: source.middleName || "",
+      lastName: source.lastName || parts.slice(1).join(" "),
+      gender: String(source.gender || patient.gender).toUpperCase() === "FEMALE" ? "FEMALE" : String(source.gender || patient.gender).toUpperCase() === "MALE" ? "MALE" : "OTHER",
+      dateOfBirth: String(source.dateOfBirth || "").slice(0, 10),
+      maritalStatus: source.maritalStatus || "",
+      nationality: source.nationality || "",
+      idType: source.idType || "",
+      idNumber: source.nationalId || source.idNumber || "",
+      shaNumber: source.shaNumber || "",
+      phonePrimary: source.phonePrimary || source.phone || "",
+      phoneSecondary: source.phoneSecondary || "",
+      email: source.email || "",
+      county: source.county || "",
+      subCounty: source.subCounty || "",
+      villageEstate: source.villageEstate || "",
+      age: String(source.age || ageFromDob(source.dateOfBirth) || ""),
+      addressLine1: source.addressLine1 || source.address || "",
+      bloodGroup: source.bloodGroup || "",
+      religion: source.religion || "",
+      occupation: source.occupation || "",
+      educationLevel: source.educationLevel || "",
+      photoUrl: source.photoUrl || "",
+      allergies: source.allergies || "",
+      medicalHistory: source.medicalHistory || source.pastMedicalHistory || "",
+      nextOfKinName: source.nextOfKinName || source.emergencyContactName || "",
+      nextOfKinPhone: source.nextOfKinPhone || source.emergencyContactPhone || "",
+      nextOfKinRelationship: source.nextOfKinRelationship || source.emergencyContactRelationship || "",
+      nextOfKinEmail: source.nextOfKinEmail || "",
+      nextOfKinAddress: source.nextOfKinAddress || "",
+      nextOfKinIsPrimary: Boolean(source.nextOfKinIsPrimary),
+      nextOfKinConsent: Boolean(source.nextOfKinConsent),
+      hasInsurance: Boolean(source.hasInsurance || source.insuranceProvider || source.insuranceNumber || source.insuranceScheme || source.policyNumber),
+      insuranceScheme: source.insuranceProvider || source.insuranceScheme || "",
+      policyNumber: source.insuranceNumber || source.policyNumber || "",
+      memberName: source.memberName || source.insuranceMemberName || "",
+      isPrincipal: source.isPrincipal ?? source.insuranceIsPrincipal ?? true,
+      principalIdNumber: source.principalIdNumber || source.insurancePrincipalId || "",
+      policyStartDate: String(source.policyStartDate || source.insuranceValidFrom || "").slice(0, 10),
+      policyExpiryDate: String(source.policyExpiryDate || source.insuranceValidTo || source.insuranceExpiry || "").slice(0, 10),
+      annualBenefitLimit: source.annualBenefitLimit || source.insuranceBenefitLimit ? String(source.annualBenefitLimit || source.insuranceBenefitLimit) : "",
+      portalPhone: source.portalPhone || source.phone || "",
+      vulnerabilityFlags: Array.isArray(source.vulnerabilityFlags) ? source.vulnerabilityFlags : [],
+    }));
   };
 
   const handleRegister = async (e: React.FormEvent) => {
@@ -1058,26 +1400,82 @@ function PatientsView() {
     setSaving(true);
     setError("");
     try {
-      await createTenantPatient({
+      const payload = {
         firstName: form.firstName.trim(),
+        middleName: form.middleName.trim() || undefined,
         lastName: form.lastName.trim(),
-        gender:
-          form.gender === "Female"
-            ? "FEMALE"
-            : form.gender === "Male"
-              ? "MALE"
-              : "OTHER",
-        dateOfBirth: form.dob || dobFromAge(parseInt(form.age || "0", 10)),
-        nationalId: form.nationalId.trim() || undefined,
-        phone: form.phone.trim() || undefined,
-        address: form.address.trim() || undefined,
+        gender: form.gender,
+        dateOfBirth: form.dateOfBirth || dobFromAge(parseInt(form.age || "0", 10)),
+        nationalId: form.idNumber.trim() || undefined,
+        idType: form.idType || undefined,
+        idNumber: form.idNumber.trim() || undefined,
+        nationality: form.nationality.trim() || undefined,
+        shaNumber: form.shaNumber.trim() || undefined,
+        phone: form.phonePrimary.trim() || undefined,
+        phonePrimary: form.phonePrimary.trim() || undefined,
+        phoneSecondary: form.phoneSecondary.trim() || undefined,
+        email: form.email.trim() || undefined,
+        address: form.addressLine1.trim() || undefined,
+        addressLine1: form.addressLine1.trim() || undefined,
+        county: form.county.trim() || undefined,
+        subCounty: form.subCounty.trim() || undefined,
+        villageEstate: form.villageEstate.trim() || undefined,
+        religion: form.religion.trim() || undefined,
+        occupation: form.occupation.trim() || undefined,
+        educationLevel: form.educationLevel.trim() || undefined,
+        photoUrl: form.photoUrl.trim() || undefined,
         allergies: form.allergies.trim() || undefined,
+        medicalHistory: form.medicalHistory.trim() || undefined,
         bloodGroup: form.bloodGroup || undefined,
-        nextOfKinName: form.nextOfKin.trim() || undefined,
+        vulnerabilityFlags: form.vulnerabilityFlags,
+        nextOfKinName: form.nextOfKinName.trim() || undefined,
+        nextOfKinRelationship: form.nextOfKinRelationship || undefined,
         nextOfKinPhone: form.nextOfKinPhone.trim() || undefined,
-      });
-      const latest = await fetchTenantPatients();
-      setPatients(latest.map(toFrontendPatient));
+        nextOfKinEmail: form.nextOfKinEmail.trim() || undefined,
+        nextOfKinAddress: form.nextOfKinAddress.trim() || undefined,
+        nextOfKinIsPrimary: form.nextOfKinIsPrimary,
+        nextOfKinConsent: form.nextOfKinConsent,
+        insuranceProvider: form.hasInsurance ? form.insuranceScheme.trim() || undefined : undefined,
+        insuranceNumber: form.hasInsurance ? form.policyNumber.trim() || undefined : undefined,
+        insuranceScheme: form.hasInsurance ? form.insuranceScheme.trim() || undefined : undefined,
+        policyNumber: form.hasInsurance ? form.policyNumber.trim() || undefined : undefined,
+        memberName: form.hasInsurance ? form.memberName.trim() || undefined : undefined,
+        isPrincipal: form.hasInsurance ? form.isPrincipal : undefined,
+        principalIdNumber: form.hasInsurance ? form.principalIdNumber.trim() || undefined : undefined,
+        policyStartDate: form.hasInsurance && form.policyStartDate ? new Date(form.policyStartDate).toISOString() : undefined,
+        policyExpiryDate: form.hasInsurance && form.policyExpiryDate ? new Date(form.policyExpiryDate).toISOString() : undefined,
+        annualBenefitLimit: form.hasInsurance && form.annualBenefitLimit ? Number(form.annualBenefitLimit) : undefined,
+        portalAccessEnabled: true,
+        portalPhone: form.portalPhone.trim() || form.phonePrimary.trim() || undefined,
+        primaryFacilityId: facility?.id || undefined,
+        orgId: facility?.id || undefined,
+      } as any;
+      const created = editingPatient
+        ? await updateTenantPatient(editingPatient.id, payload)
+        : await createTenantPatient(payload);
+      const latest = await fetchTenantPatients(undefined, facility?.id);
+      const mapped: Patient[] = latest.map(toFrontendPatient);
+      setPatients(mapped);
+      const createdPatient =
+        mapped.find((patient: Patient) => patient.id === String((created as any)?.id || (created as any)?.data?.id || editingPatient?.id || "")) ||
+        mapped.find((patient: Patient) => patient.phone === form.phonePrimary.trim() && patient.nationalId === form.idNumber.trim()) ||
+        mapped[0];
+      if (createdPatient) {
+        setCheckedInPatientId(createdPatient.id);
+        setRecentRegisteredIds((current) => new Set([...Array.from(current), createdPatient.id]));
+        setSearch("");
+        setCheckInStatus(
+          editingPatient
+            ? `${createdPatient.name} updated successfully.`
+            : `${createdPatient.name} has been registered and checked in automatically.`,
+        );
+        showActionNotice(
+          editingPatient
+            ? `${createdPatient.name} updated successfully.`
+            : `${createdPatient.name} registered successfully.`,
+        );
+        setTodayPage(0);
+      }
       setFormOpen(false);
       handleResetForm();
     } catch (err: any) {
@@ -1090,7 +1488,7 @@ function PatientsView() {
   const patientStats = {
     total: patients.length,
     thisMonth: patients.filter((patient) => {
-      const date = new Date(patient.visitDate);
+      const date = new Date(String(patientRegistrationDateValue(patient) || ""));
       const now = new Date();
       return (
         Number.isFinite(date.getTime()) &&
@@ -1102,7 +1500,38 @@ function PatientsView() {
     female: patients.filter((patient) => patient.gender === "Female").length,
   };
 
-  const exportCSV = () => {
+  const exportCSV = async () => {
+    setExportingCsv(true);
+    try {
+      let exportPatients = todayPatients;
+      try {
+        const latest = await fetchTenantPatients(undefined, facility?.id);
+        const mapped = latest.map(toFrontendPatient);
+        setPatients(mapped);
+        const latestTodayPatients = mapped
+          .filter((patient) => {
+            const registrationDate = patientRegistrationDateValue(patient);
+            return (
+              recentRegisteredIds.has(patient.id) ||
+              !registrationDate ||
+              isSameLocalDate(registrationDate, new Date())
+            );
+          })
+          .sort((a, b) => {
+            const left = new Date(String(patientRegistrationDateValue(a) || 0)).getTime();
+            const right = new Date(String(patientRegistrationDateValue(b) || 0)).getTime();
+            return right - left;
+          });
+        exportPatients = latestTodayPatients.length > 0 ? latestTodayPatients : mapped;
+      } catch {
+        exportPatients = todayPatients;
+      }
+
+      if (exportPatients.length === 0) {
+        showActionNotice("No patients available to export.");
+        return;
+      }
+
     const headers = [
       "Patient ID",
       "Name",
@@ -1112,25 +1541,239 @@ function PatientsView() {
       "National ID",
       "Registered",
     ];
-    const rows = filtered.map((patient) => [
+    const rows = exportPatients.map((patient) => [
       patient.regNo,
       patient.name,
       patient.gender,
       (patient as any).bloodGroup || "",
       patient.phone || "",
       patient.nationalId || "",
-      patient.visitDate || "",
+      formatPatientRegistrationDate(patient),
     ]);
     const csv = [headers, ...rows]
       .map((row) => row.map((cell) => `"${String(cell).replace(/"/g, '""')}"`).join(","))
       .join("\n");
-    const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+    const blob = new Blob([`\uFEFF${csv}`], { type: "text/csv;charset=utf-8" });
     const url = URL.createObjectURL(blob);
     const anchor = document.createElement("a");
     anchor.href = url;
-    anchor.download = "patients.csv";
+    anchor.download = `patient-registration-${new Date().toISOString().slice(0, 10)}.csv`;
+    document.body.appendChild(anchor);
     anchor.click();
+    anchor.remove();
     URL.revokeObjectURL(url);
+      showActionNotice(`${exportPatients.length} patient record${exportPatients.length === 1 ? "" : "s"} exported.`);
+    } catch (err: any) {
+      setError(err?.message || "Failed to export patient CSV.");
+      showActionNotice("Patient export failed.");
+    } finally {
+      setExportingCsv(false);
+    }
+  };
+
+  const workspaceTitles: Record<NonNullable<typeof workspaceAction>, string> = {
+    duplicates: "Duplicate Patient Detection",
+    insurance: "Insurance Eligibility Verification",
+    portal: "Patient Portal Account",
+    photo: "Patient Photo Capture",
+    vulnerability: "Vulnerability Flagging",
+    merge: "Patient Merge",
+  };
+  const vulnerabilityOptions = [
+    "Elderly 70+",
+    "Pregnant",
+    "Disability",
+    "Requires interpreter",
+    "Requires wheelchair",
+    "Visual impairment",
+    "Hearing impairment",
+    "Latex allergy",
+  ];
+  const patientLabel = (patient: Patient) => `${patient.name} · ${patient.regNo || patient.id}`;
+  const workspaceMatches = filtered
+    .filter((patient) => {
+      const query = workspaceQuery.trim().toLowerCase();
+      if (!query) return true;
+      return `${patient.name} ${patient.regNo} ${patient.phone} ${patient.nationalId}`.toLowerCase().includes(query);
+    })
+    .slice(0, 8);
+  const checkedInPatient = patients.find((patient) => patient.id === checkedInPatientId);
+  const datedTodayPatients = patients
+    .filter((patient) => {
+      const registrationDate = patientRegistrationDateValue(patient);
+      return recentRegisteredIds.has(patient.id) || !registrationDate || isSameLocalDate(registrationDate, new Date());
+    })
+    .sort((a, b) => {
+      const left = new Date(String(patientRegistrationDateValue(a) || 0)).getTime();
+      const right = new Date(String(patientRegistrationDateValue(b) || 0)).getTime();
+      return right - left;
+    });
+  const todayPatients = datedTodayPatients.length > 0 ? datedTodayPatients : patients;
+  const todayTotalPages = Math.max(1, Math.ceil(todayPatients.length / 10));
+  const todayPatientsPage = todayPatients.slice(todayPage * 10, todayPage * 10 + 10);
+  const searchPopupPatients = search.trim() && !checkedInPatientId ? filtered.slice(0, 6) : [];
+  const duplicateCandidates = patients
+    .flatMap((patient, index) =>
+      patients.slice(index + 1).flatMap((other) => {
+        const sameId = patient.nationalId && patient.nationalId === other.nationalId;
+        const samePhone = patient.phone && patient.phone === other.phone;
+        const sameName = patient.name.toLowerCase() === other.name.toLowerCase();
+        const score = Number(Boolean(sameId)) * 60 + Number(Boolean(samePhone)) * 30 + Number(Boolean(sameName)) * 20;
+        return score >= 50 ? [{ patient, other, score: Math.min(score, 100) }] : [];
+      }),
+    )
+    .slice(0, 6);
+  const selectedWorkspacePatient = patients.find((patient) => patient.id === workspacePrimaryId);
+  const secondaryWorkspacePatient = patients.find((patient) => patient.id === workspaceSecondaryId);
+
+  const recordWorkspaceAction = async (action: string, data: Record<string, any>) => {
+    const response = await apiFetch("/module-actions", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        module: "patients",
+        action,
+        data,
+        context: { title: "Patient Registry" },
+      }),
+    });
+    await parseJsonSafe(response);
+  };
+
+  const handleWorkspaceSubmit = async () => {
+    if (!workspaceAction) return;
+    const patient = selectedWorkspacePatient;
+    if (!patient && workspaceAction !== "duplicates") {
+      setWorkspaceStatus("Select a patient first.");
+      return;
+    }
+
+    if (workspaceAction === "insurance" && patient) {
+      const active = Boolean((patient as any).insuranceProvider || (patient as any).insuranceNumber);
+      await recordWorkspaceAction("Insurance Eligibility Verification", {
+        patientId: patient.id,
+        eligibilityStatus: active ? "CONFIRMED" : "MISSING_INSURANCE_DETAILS",
+      });
+      setWorkspaceStatus(active ? "Eligibility confirmed." : "Capture insurance provider and policy number first.");
+      return;
+    }
+
+    if (workspaceAction === "portal" && patient) {
+      await recordWorkspaceAction("Patient Portal Account Creation", {
+        patientId: patient.id,
+        phone: patient.phone,
+        temporaryPinIssued: true,
+      });
+      setWorkspaceStatus(`Portal access prepared. Temporary PIN: ${Math.floor(100000 + Math.random() * 900000)}`);
+      return;
+    }
+
+    if (workspaceAction === "photo" && patient) {
+      if (!workspacePhotoUrl.trim()) {
+        setWorkspaceStatus("Add a photo URL or uploaded file reference first.");
+        return;
+      }
+      await updateTenantPatient(patient.id, { photoUrl: workspacePhotoUrl.trim() } as any);
+      const latest = await fetchTenantPatients(undefined, facility?.id);
+      setPatients(latest.map(toFrontendPatient));
+      setWorkspaceStatus("Patient photo updated and attached to the MRN.");
+      return;
+    }
+
+    if (workspaceAction === "vulnerability" && patient) {
+      await recordWorkspaceAction("Patient Vulnerability Flags", {
+        patientId: patient.id,
+        patientName: patient.name,
+        flags: workspaceFlags,
+      });
+      setWorkspaceStatus("Vulnerability flags saved to the patient workflow audit trail.");
+      return;
+    }
+
+    if (workspaceAction === "merge") {
+      if (!selectedWorkspacePatient || !secondaryWorkspacePatient || workspacePrimaryId === workspaceSecondaryId) {
+        setWorkspaceStatus("Select two different records before merging.");
+        return;
+      }
+      await recordWorkspaceAction("Patient Merge", {
+        primaryPatientId: selectedWorkspacePatient.id,
+        primaryMrn: selectedWorkspacePatient.regNo,
+        retiredPatientId: secondaryWorkspacePatient.id,
+        retiredMrn: secondaryWorkspacePatient.regNo,
+        reversible: true,
+      });
+      setWorkspaceStatus("Patient merge request recorded for authorised review and audit.");
+    }
+  };
+
+  const requestDuplicateMerge = async () => {
+    if (!duplicatePatient) return;
+    setDuplicateMergeStatus("Submitting merge request...");
+    try {
+      await recordWorkspaceAction("Patient Merge", {
+        primaryPatientId: duplicatePatient.id,
+        primaryMrn: duplicatePatient.regNo,
+        incomingDraft: form,
+        facilityId: facility?.id,
+        reversible: true,
+        status: "PENDING_REVIEW",
+      });
+      setDuplicateMergeStatus("Merge request submitted for authorised review.");
+      showActionNotice("Duplicate merge request submitted.");
+    } catch {
+      setDuplicateMergeStatus("Merge request could not be submitted.");
+      showActionNotice("Merge request failed.");
+    }
+  };
+
+  const confirmSearchCheckIn = async () => {
+    if (!pendingCheckInPatient) return;
+    const visitDate =
+      checkInMode === "today" ? new Date().toISOString().slice(0, 10) : checkInDate;
+    await recordWorkspaceAction("Returning Patient Check-In", {
+      patientId: pendingCheckInPatient.id,
+      mrn: pendingCheckInPatient.regNo,
+      patientName: pendingCheckInPatient.name,
+      visitDate,
+      visitTiming: checkInMode === "today" ? "TODAY" : "BACKDATED",
+      checkedInAt: new Date().toISOString(),
+    });
+    setCheckedInPatientId(pendingCheckInPatient.id);
+    setRecentRegisteredIds((current) => new Set([...Array.from(current), pendingCheckInPatient.id]));
+    setCheckInStatus(
+      `${pendingCheckInPatient.name} checked in for ${checkInMode === "today" ? "today" : visitDate}. Patient data is now visible.`,
+    );
+    showActionNotice(`${pendingCheckInPatient.name} checked in successfully.`);
+    setPendingCheckInPatient(null);
+  };
+
+  const openPatientForEdit = async (patient: Patient) => {
+    if (patient.id !== checkedInPatientId) return;
+    let fullPatient: any = patient;
+    try {
+      fullPatient = await fetchTenantPatientById(patient.id);
+    } catch {
+      fullPatient = patient;
+    }
+    const mergedPatient = toFrontendPatient({ ...patient, ...(fullPatient || {}) });
+    setEditingPatient(mergedPatient);
+    fillFormFromPatient(mergedPatient, fullPatient);
+    setFormTab("personal");
+    setFormOpen(true);
+  };
+
+  const handleCheckoutPatient = (patient: Patient | undefined = checkedInPatient) => {
+    if (!patient) return;
+    void recordWorkspaceAction("Patient Check-Out", {
+      patientId: patient.id,
+      mrn: patient.regNo,
+      patientName: patient.name,
+      checkedOutAt: new Date().toISOString(),
+    });
+    setCheckedInPatientId("");
+    setPendingCheckInPatient(null);
+    setCheckInStatus(`${patient.name} checked out successfully.`);
+    showActionNotice(`${patient.name} checked out successfully.`);
   };
 
   return (
@@ -1143,10 +1786,22 @@ function PatientsView() {
           <div className="pv-subtitle">Register and manage all facility patients</div>
         </div>
         <div className="pv-header-actions">
-          <button type="button" onClick={exportCSV} className="topbar-logout-btn pv-export-btn">
-            <Icon type="chart" size={15} /> Export CSV
+          <button
+            type="button"
+            onClick={exportCSV}
+            title="Export today's registered patients"
+            className="topbar-logout-btn pv-export-btn"
+            disabled={exportingCsv}
+          >
+            <Icon type="chart" size={15} /> {exportingCsv ? "Exporting..." : "Export CSV"}
           </button>
-          <button className="pv-primary-btn" onClick={() => setFormOpen(true)}>
+          <button
+            className="pv-primary-btn"
+            title="Register Patient"
+            onClick={() => {
+              setFormOpen(true);
+            }}
+          >
             <svg
               width="14"
               height="14"
@@ -1162,6 +1817,106 @@ function PatientsView() {
           </button>
         </div>
       </div>
+
+      <div className="pv-search-bar patient-checkin-search">
+        <div className="pv-search-wrap">
+          <svg
+            width="16"
+            height="16"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="#94a3b8"
+            strokeWidth="2"
+            style={{
+              position: "absolute",
+              left: 12,
+              top: "50%",
+              transform: "translateY(-50%)",
+            }}
+          >
+            <circle cx="11" cy="11" r="8" />
+            <path d="M21 21l-4.35-4.35" />
+          </svg>
+          <input
+            className="pv-search"
+            placeholder="Search patient to check in by name, ID, phone, or MRN..."
+            value={search}
+            onChange={(e) => {
+              setSearch(e.target.value);
+              setCheckInStatus("");
+              setPendingCheckInPatient(null);
+              setCheckedInPatientId("");
+            }}
+          />
+        </div>
+        {checkedInPatient ? (
+          <button
+            type="button"
+            className="patient-search-checkout"
+            onClick={() => handleCheckoutPatient(checkedInPatient)}
+          >
+            Check Out
+          </button>
+        ) : null}
+        {searchPopupPatients.length > 0 && (
+          <div className="patient-search-popup">
+            {searchPopupPatients.map((patient) => (
+              <div key={patient.id} className="patient-search-result">
+                <div>
+                  <strong>{patient.name}</strong>
+                  <small>{patient.regNo || patient.id} · {patient.phone || "No phone"} · {patient.nationalId || "No ID"}</small>
+                </div>
+                <div className="patient-search-actions">
+                  <button type="button" className="patient-search-cancel" onClick={() => setSearch("")}>
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    className="patient-search-checkin"
+                    onClick={() => {
+                      setPendingCheckInPatient(patient);
+                      setCheckInMode("today");
+                      setCheckInDate(new Date().toISOString().slice(0, 10));
+                      setSearch("");
+                      setCheckInStatus("");
+                    }}
+                  >
+                    Check In
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+        {pendingCheckInPatient && (
+          <div className="patient-checkin-picker">
+            <div>
+              <strong>Check in {pendingCheckInPatient.name}</strong>
+              <small>Choose Today for current visit, or Date for a previous visit update.</small>
+            </div>
+            <select value={checkInMode} onChange={(event) => setCheckInMode(event.target.value as "today" | "date")}>
+              <option value="today">Today</option>
+              <option value="date">Choose Date</option>
+            </select>
+            {checkInMode === "date" ? (
+              <input type="date" value={checkInDate} onChange={(event) => setCheckInDate(event.target.value)} />
+            ) : null}
+            <button type="button" className="patient-search-checkin" onClick={confirmSearchCheckIn}>
+              Confirm Check-In
+            </button>
+            <button type="button" className="patient-search-cancel" onClick={() => setPendingCheckInPatient(null)}>
+              Cancel
+            </button>
+          </div>
+        )}
+        {checkInStatus ? <div className="patient-checkin-status">{checkInStatus}</div> : null}
+      </div>
+
+      {actionNotice ? (
+        <div className="module-toast patient-action-toast" role="status" aria-live="polite">
+          {actionNotice}
+        </div>
+      ) : null}
 
       <div className="pv-stats">
         {(
@@ -1199,38 +1954,147 @@ function PatientsView() {
         ))}
       </div>
 
-      <div className="pv-search-bar">
-        <div className="pv-search-wrap">
-          <svg
-            width="16"
-            height="16"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="#94a3b8"
-            strokeWidth="2"
-            style={{
-              position: "absolute",
-              left: 12,
-              top: "50%",
-              transform: "translateY(-50%)",
-            }}
-          >
-            <circle cx="11" cy="11" r="8" />
-            <path d="M21 21l-4.35-4.35" />
-          </svg>
-          <input
-            className="pv-search"
-            placeholder="Search by name, ID, phone..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-          />
+      {workspaceAction && (
+        <div className="patient-workspace-backdrop" onClick={() => setWorkspaceAction(null)}>
+        <section className="patient-workspace-panel patient-workspace-slide" onClick={(event) => event.stopPropagation()}>
+          <div className="patient-workspace-head">
+            <div>
+              <h3>{workspaceTitles[workspaceAction]}</h3>
+              <p>Use this tool without changing the main registration form fields.</p>
+            </div>
+            <button type="button" className="patient-workspace-close" onClick={() => setWorkspaceAction(null)}>
+              ×
+            </button>
+          </div>
+
+          {workspaceAction === "duplicates" ? (
+            <div className="patient-workspace-list">
+              {duplicateCandidates.length === 0 ? (
+                <div className="patient-workspace-empty">
+                  No high-confidence duplicate records found in the current patient list.
+                </div>
+              ) : (
+                duplicateCandidates.map((pair) => (
+                  <div key={`${pair.patient.id}-${pair.other.id}`} className="patient-workspace-row">
+                    <Icon type="manage_search" size={18} />
+                    <div>
+                      <strong>{pair.patient.name} ↔ {pair.other.name}</strong>
+                      <small>
+                        Confidence {pair.score}% · {pair.patient.regNo || pair.patient.id} / {pair.other.regNo || pair.other.id}
+                      </small>
+                    </div>
+                    <button
+                      type="button"
+                      className="patient-workspace-action"
+                      onClick={() => {
+                        setWorkspaceAction("merge");
+                        setWorkspacePrimaryId(pair.patient.id);
+                        setWorkspaceSecondaryId(pair.other.id);
+                      }}
+                    >
+                      Review Merge
+                    </button>
+                  </div>
+                ))
+              )}
+            </div>
+          ) : (
+            <div className="patient-workspace-grid">
+              <label className="patient-workspace-field patient-workspace-span">
+                <span>Search patient by name, phone, national ID, or MRN</span>
+                <input
+                  value={workspaceQuery}
+                  onChange={(event) => setWorkspaceQuery(event.target.value)}
+                  placeholder="Start typing to find a registered patient..."
+                />
+              </label>
+              <label className="patient-workspace-field">
+                <span>Primary patient</span>
+                <select value={workspacePrimaryId} onChange={(event) => setWorkspacePrimaryId(event.target.value)}>
+                  <option value="">Select patient</option>
+                  {workspaceMatches.map((patient) => (
+                    <option key={patient.id} value={patient.id}>
+                      {patientLabel(patient)}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              {workspaceAction === "merge" && (
+                <label className="patient-workspace-field">
+                  <span>Duplicate record to retire</span>
+                  <select value={workspaceSecondaryId} onChange={(event) => setWorkspaceSecondaryId(event.target.value)}>
+                    <option value="">Select duplicate</option>
+                    {patients
+                      .filter((patient) => patient.id !== workspacePrimaryId)
+                      .map((patient) => (
+                        <option key={patient.id} value={patient.id}>
+                          {patientLabel(patient)}
+                        </option>
+                      ))}
+                  </select>
+                </label>
+              )}
+
+              {workspaceAction === "photo" && (
+                <label className="patient-workspace-field">
+                  <span>Captured photo reference</span>
+                  <input
+                    value={workspacePhotoUrl}
+                    onChange={(event) => setWorkspacePhotoUrl(event.target.value)}
+                    placeholder="Paste uploaded image URL or file reference"
+                  />
+                </label>
+              )}
+
+              {workspaceAction === "vulnerability" && (
+                <div className="patient-workspace-field patient-workspace-span">
+                  <span>Special handling flags</span>
+                  <div className="patient-flag-grid">
+                    {vulnerabilityOptions.map((flag) => (
+                      <label key={flag}>
+                        <input
+                          type="checkbox"
+                          checked={workspaceFlags.includes(flag)}
+                          onChange={(event) =>
+                            setWorkspaceFlags((current) =>
+                              event.target.checked
+                                ? [...current, flag]
+                                : current.filter((item) => item !== flag),
+                            )
+                          }
+                        />
+                        {flag}
+                      </label>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              <div className="patient-workspace-footer patient-workspace-span">
+                <button type="button" className="patient-workspace-submit" onClick={handleWorkspaceSubmit}>
+                  {workspaceAction === "insurance"
+                    ? "Verify Eligibility"
+                    : workspaceAction === "portal"
+                      ? "Create Portal Access"
+                      : workspaceAction === "photo"
+                        ? "Save Patient Photo"
+                        : workspaceAction === "vulnerability"
+                          ? "Save Vulnerability Flags"
+                          : "Record Merge Review"}
+                </button>
+                {workspaceStatus ? <strong>{workspaceStatus}</strong> : null}
+              </div>
+            </div>
+          )}
+        </section>
         </div>
-      </div>
+      )}
 
       <div className="pv-table-meta">
-        <div className="pv-title pv-table-title">Patient Records</div>
+        <div className="pv-title pv-table-title">Today Registered Patients</div>
         <span className="pv-badge">
-          {filtered.length} record{filtered.length !== 1 ? "s" : ""}
+          {todayPatients.length} today
         </span>
       </div>
 
@@ -1254,17 +2118,20 @@ function PatientsView() {
                   Loading patients...
                 </td>
               </tr>
-            ) : filtered.length === 0 ? (
+            ) : todayPatientsPage.length === 0 ? (
               <tr>
                 <td colSpan={7} className="pv-empty">
-                  No patients found.
+                  No patients registered today.
                 </td>
               </tr>
-            ) : filtered.map((p) => (
-                  <tr key={p.id}>
-                <td className="pv-code">{p.regNo}</td>
+            ) : todayPatientsPage.map((p) => (
+                  <tr key={p.id} className="patient-row-clickable" onClick={() => setSelectedPatient(p)}>
+                <td className="pv-code">#{p.regNo || p.id.slice(0, 8).toUpperCase()}</td>
                 <td className="pv-name">
-                  <div className="pv-avatar">{p.name[0]}</div>
+                  <div className="pv-avatar">
+                    {String((p as any).firstName || p.name).trim()[0] || "P"}
+                    {String((p as any).lastName || "").trim()[0] || ""}
+                  </div>
                   <span>{p.name}</span>
                 </td>
                 <td>
@@ -1279,33 +2146,38 @@ function PatientsView() {
                   <div>{p.phone || "—"}</div>
                   <small className="pv-muted">{p.nationalId || "No ID"}</small>
                 </td>
-                <td>{p.visitDate ? new Date(p.visitDate).toLocaleDateString() : "—"}</td>
-                <td>
+                <td>{formatPatientRegistrationDate(p)}</td>
+                <td onClick={(event) => event.stopPropagation()}>
                   <div className="pv-row-actions">
                   <button
                     type="button"
-                    className="pv-del"
-                    title="Edit patient"
-                    onClick={() => {
-                      const parts = p.name.split(" ");
-                      setForm((current) => ({
-                        ...current,
-                        firstName: parts[0] || "",
-                        lastName: parts.slice(1).join(" "),
-                        gender: p.gender,
-                        nationalId: p.nationalId || "",
-                        phone: p.phone || "",
-                        age: String(p.age || ""),
-                      }));
-                      setFormOpen(true);
-                    }}
+                    className="pv-table-action pv-table-edit"
+                    title={p.id === checkedInPatientId ? "Edit checked-in patient" : "Check in patient before editing"}
+                    aria-label={p.id === checkedInPatientId ? "Edit patient" : "Check in before editing"}
+                    data-tooltip={p.id === checkedInPatientId ? "Edit" : "Check in first"}
+                    disabled={p.id !== checkedInPatientId}
+                    onClick={() => void openPatientForEdit(p)}
                   >
                     <Icon type="ehr" size={16} />
                   </button>
+                  {p.id === checkedInPatientId ? (
+                    <button
+                      type="button"
+                      className="pv-table-action pv-table-checkout"
+                      title="Check out patient"
+                      aria-label="Check out patient"
+                      data-tooltip="Check out"
+                      onClick={() => handleCheckoutPatient(p)}
+                    >
+                      →
+                    </button>
+                  ) : null}
                   <button
                     type="button"
-                    className="pv-del"
+                    className="pv-table-action pv-table-delete"
                     title="Delete patient"
+                    aria-label="Delete patient"
+                    data-tooltip="Delete"
                     onClick={() => setDeleteId(p.id)}
                   >
                     ×
@@ -1317,7 +2189,19 @@ function PatientsView() {
           </tbody>
         </table>
         <div className="pv-table-footer">
-          Showing {filtered.length} of {patients.length} patients
+          <span>
+            Showing {todayPatients.length === 0 ? 0 : todayPage * 10 + 1}-
+            {Math.min(todayPatients.length, todayPage * 10 + todayPatientsPage.length)} of {todayPatients.length}
+          </span>
+          <div className="patient-table-pager">
+            <button type="button" disabled={todayPage === 0} onClick={() => setTodayPage((page) => Math.max(0, page - 1))}>
+              Back
+            </button>
+            <span>Page {todayPage + 1} of {todayTotalPages}</span>
+            <button type="button" disabled={todayPage >= todayTotalPages - 1} onClick={() => setTodayPage((page) => Math.min(todayTotalPages - 1, page + 1))}>
+              Next
+            </button>
+          </div>
         </div>
       </div>
 
@@ -1330,7 +2214,7 @@ function PatientsView() {
                   <Icon type="person" size={20} />
                 </div>
                 <div>
-                  <h2 className="form-title">Register New Patient</h2>
+                  <h2 className="form-title">{editingPatient ? "Edit Patient" : "Register New Patient"}</h2>
                   <p className="form-title-note">Capture complete demographic, clinical, and insurance details</p>
                 </div>
               </div>
@@ -1344,10 +2228,10 @@ function PatientsView() {
 
             <div className="patient-form-tabs">
               {[
-                ["personal", "👤 Personal"],
-                ["medical", "🩺 Medical"],
-                ["kin", "📞 Next of Kin"],
-                ["insurance", "🧾 Insurance"],
+                ["personal", "Personal"],
+                ["medical", "Medical"],
+                ["kin", "Next of Kin"],
+                ["insurance", "Insurance"],
               ].map(([key, label]) => (
                 <button
                   key={key}
@@ -1369,16 +2253,84 @@ function PatientsView() {
                     <h3 className="form-section-title">Patient Registration</h3>
                     <p className="form-section-note">Basic demographic details used to identify and register the patient.</p>
                   </div>
+                  {duplicateWarning ? (
+                    <div className="form-info-banner patient-form-alert patient-duplicate-banner">
+                      <Icon type="manage_search" size={18} />
+                      <div className="patient-duplicate-notice">
+                        <p>{duplicateWarning}</p>
+                        {duplicatePatient ? (
+                          <div className="patient-duplicate-actions">
+                            <button type="button" onClick={autofillDuplicatePatient}>
+                              Auto Fill Existing Details
+                            </button>
+                            <button type="button" onClick={() => setDuplicateDetailsOpen(true)}>
+                              View Details
+                            </button>
+                            <button type="button" onClick={requestDuplicateMerge}>
+                              Request Merge
+                            </button>
+                          </div>
+                        ) : null}
+                        {duplicateMergeStatus ? <small>{duplicateMergeStatus}</small> : null}
+                      </div>
+                    </div>
+                  ) : null}
                   <div className="patient-form-grid three">
                     <label>First Name *<input required className="form-input" value={form.firstName} onChange={(e) => setForm((f) => ({ ...f, firstName: e.target.value }))} placeholder="John" /></label>
-                    <label>Middle Name<input className="form-input" placeholder="Omondi" /></label>
+                    <label>Middle Name<input className="form-input" value={form.middleName} onChange={(e) => setForm((f) => ({ ...f, middleName: e.target.value }))} placeholder="Omondi" /></label>
                     <label>Last Name *<input required className="form-input" value={form.lastName} onChange={(e) => setForm((f: any) => ({ ...f, lastName: e.target.value }))} placeholder="Doe" /></label>
-                    <label>National ID *<input required className="form-input" value={form.nationalId} onChange={(e) => setForm((f: any) => ({ ...f, nationalId: e.target.value }))} placeholder="12345678" /></label>
-                    <label>Date of Birth<input type="date" className="form-input" value={form.dob} onChange={(e) => setForm((f) => ({ ...f, dob: e.target.value }))} /></label>
-                    <label>Gender *<select required className="form-input" value={form.gender} onChange={(e) => setForm((f) => ({ ...f, gender: e.target.value as any }))}><option value="Male">Male</option><option value="Female">Female</option><option value="OTHER">Other</option></select></label>
-                    <label>Phone<input type="tel" className="form-input" value={form.phone} onChange={(e) => setForm((f) => ({ ...f, phone: e.target.value }))} placeholder="+254..." /></label>
-                    <label>Email<input type="email" className="form-input" placeholder="patient@example.com" /></label>
-                    <label>Address<input className="form-input" value={form.address} onChange={(e) => setForm((f) => ({ ...f, address: e.target.value }))} placeholder="Nairobi, Kenya" /></label>
+                    <label>
+                      Date of Birth *
+                      <div className="patient-date-field">
+                        <input
+                          required
+                          type="text"
+                          inputMode="numeric"
+                          className="form-input patient-date-text"
+                          value={form.dateOfBirth}
+                          onChange={(e) => setForm((f) => ({ ...f, dateOfBirth: e.target.value }))}
+                          placeholder="YYYY-MM-DD"
+                          pattern="\d{4}-\d{2}-\d{2}"
+                          title="Type date as YYYY-MM-DD or use the calendar picker."
+                        />
+                        <button
+                          type="button"
+                          className="patient-date-picker-button"
+                          onClick={openDateOfBirthPicker}
+                          aria-label="Pick date of birth"
+                          title="Pick date"
+                        >
+                          <Icon type="calendar" size={16} />
+                        </button>
+                        <input
+                          ref={dobPickerRef}
+                          type="date"
+                          className="patient-date-picker-native"
+                          tabIndex={-1}
+                          value={form.dateOfBirth}
+                          onChange={(e) => setForm((f) => ({ ...f, dateOfBirth: e.target.value }))}
+                          aria-hidden="true"
+                        />
+                      </div>
+                    </label>
+                    <label>Gender *<select required className="form-input" value={form.gender} onChange={(e) => setForm((f) => ({ ...f, gender: e.target.value as any }))}><option value="MALE">Male</option><option value="FEMALE">Female</option><option value="OTHER">Other</option></select></label>
+                    <label>Marital Status<select className="form-input" value={form.maritalStatus} onChange={(e) => setForm((f) => ({ ...f, maritalStatus: e.target.value }))}><option value="">Select</option><option>Single</option><option>Married</option><option>Divorced</option><option>Widowed</option></select></label>
+                    <label>Nationality<input className="form-input" value={form.nationality} onChange={(e) => setForm((f) => ({ ...f, nationality: e.target.value }))} placeholder="Kenyan" /></label>
+                    <label>ID Type<select className="form-input" value={form.idType} onChange={(e) => setForm((f) => ({ ...f, idType: e.target.value }))}><option value="">Select</option><option>National ID</option><option>Passport</option><option>Alien ID</option><option>Birth Certificate</option></select></label>
+                    <label>ID Number *<input required className="form-input" value={form.idNumber} onChange={(e) => setForm((f) => ({ ...f, idNumber: e.target.value }))} placeholder="12345678" /></label>
+                    <label>SHA Number<input className="form-input" value={form.shaNumber} onChange={(e) => setForm((f) => ({ ...f, shaNumber: e.target.value }))} placeholder="SHA member number" /></label>
+                    <label>Blood Group<select className="form-input" value={form.bloodGroup} onChange={(e) => setForm((f) => ({ ...f, bloodGroup: e.target.value }))}><option value="">Unknown</option>{["A+", "A-", "B+", "B-", "AB+", "AB-", "O+", "O-"].map((g) => <option key={g} value={g}>{g}</option>)}</select></label>
+                    <label>Primary Phone<input type="tel" className="form-input" value={form.phonePrimary} onChange={(e) => setForm((f) => ({ ...f, phonePrimary: e.target.value }))} placeholder="+254..." /></label>
+                    <label>Secondary Phone<input type="tel" className="form-input" value={form.phoneSecondary} onChange={(e) => setForm((f) => ({ ...f, phoneSecondary: e.target.value }))} placeholder="+254..." /></label>
+                    <label>Email<input type="email" className="form-input" value={form.email} onChange={(e) => setForm((f) => ({ ...f, email: e.target.value }))} placeholder="patient@example.com" /></label>
+                    <label>County<input className="form-input" value={form.county} onChange={(e) => setForm((f) => ({ ...f, county: e.target.value }))} placeholder="Nairobi" /></label>
+                    <label>Sub County<input className="form-input" value={form.subCounty} onChange={(e) => setForm((f) => ({ ...f, subCounty: e.target.value }))} placeholder="Westlands" /></label>
+                    <label>Village / Estate<input className="form-input" value={form.villageEstate} onChange={(e) => setForm((f) => ({ ...f, villageEstate: e.target.value }))} placeholder="Kilimani" /></label>
+                    <label className="patient-form-span">Address Line<input className="form-input" value={form.addressLine1} onChange={(e) => setForm((f) => ({ ...f, addressLine1: e.target.value }))} placeholder="Street, building, or plot number" /></label>
+                    <label>Religion<input className="form-input" value={form.religion} onChange={(e) => setForm((f) => ({ ...f, religion: e.target.value }))} placeholder="Optional" /></label>
+                    <label>Occupation<input className="form-input" value={form.occupation} onChange={(e) => setForm((f) => ({ ...f, occupation: e.target.value }))} placeholder="Teacher" /></label>
+                    <label>Education Level<select className="form-input" value={form.educationLevel} onChange={(e) => setForm((f) => ({ ...f, educationLevel: e.target.value }))}><option value="">Select</option><option>None</option><option>Primary</option><option>Secondary</option><option>College</option><option>University</option></select></label>
+                    <label className="patient-form-span">Patient Photo URL (Optional)<input className="form-input" value={form.photoUrl} onChange={(e) => setForm((f) => ({ ...f, photoUrl: e.target.value }))} placeholder="Optional uploaded photo URL" /></label>
                   </div>
                 </div>
               )}
@@ -1390,9 +2342,27 @@ function PatientsView() {
                     <p className="form-section-note">Clinical defaults and risk markers used during encounters.</p>
                   </div>
                   <div className="patient-form-grid two">
-                    <label>Blood Group<select className="form-input" value={form.bloodGroup} onChange={(e) => setForm((f) => ({ ...f, bloodGroup: e.target.value }))}><option value="">Unknown</option>{["A+", "A-", "B+", "B-", "AB+", "AB-", "O+", "O-"].map((g) => <option key={g} value={g}>{g}</option>)}</select></label>
-                    <label>Age<input required type="number" className="form-input" value={form.age} onChange={(e) => setForm((f: any) => ({ ...f, age: e.target.value }))} placeholder="25" /></label>
                     <label className="patient-form-span">Known Allergies<input className="form-input" value={form.allergies} onChange={(e) => setForm((f) => ({ ...f, allergies: e.target.value }))} placeholder="e.g. Penicillin" /></label>
+                    <label className="patient-form-span">Medical History<textarea className="form-input" value={form.medicalHistory} onChange={(e) => setForm((f) => ({ ...f, medicalHistory: e.target.value }))} placeholder="Relevant chronic illnesses, surgeries, or long-term medication" /></label>
+                    <div className="patient-form-span patient-check-grid">
+                      {vulnerabilityOptions.map((flag) => (
+                        <label key={flag} className="patient-form-check">
+                          <input
+                            type="checkbox"
+                            checked={form.vulnerabilityFlags.includes(flag)}
+                            onChange={(e) =>
+                              setForm((f) => ({
+                                ...f,
+                                vulnerabilityFlags: e.target.checked
+                                  ? [...f.vulnerabilityFlags, flag]
+                                  : f.vulnerabilityFlags.filter((item) => item !== flag),
+                              }))
+                            }
+                          />
+                          {flag}
+                        </label>
+                      ))}
+                    </div>
                   </div>
                 </div>
               )}
@@ -1404,8 +2374,14 @@ function PatientsView() {
                     <p className="form-section-note">Emergency contact details for communication and consent workflows.</p>
                   </div>
                   <div className="patient-form-grid two">
-                    <label>Next of Kin<input className="form-input" value={form.nextOfKin} onChange={(e) => setForm((f) => ({ ...f, nextOfKin: e.target.value }))} placeholder="Full name" /></label>
+                    <label>Next of Kin Name<input className="form-input" value={form.nextOfKinName} onChange={(e) => setForm((f) => ({ ...f, nextOfKinName: e.target.value }))} placeholder="Full name" /></label>
+                    <label>Relationship<select className="form-input" value={form.nextOfKinRelationship} onChange={(e) => setForm((f) => ({ ...f, nextOfKinRelationship: e.target.value }))}><option value="">Select</option><option>Spouse</option><option>Parent</option><option>Child</option><option>Sibling</option><option>Guardian</option><option>Other</option></select></label>
                     <label>NOK Phone<input type="tel" className="form-input" value={form.nextOfKinPhone} onChange={(e) => setForm((f) => ({ ...f, nextOfKinPhone: e.target.value }))} placeholder="+254..." /></label>
+                    <label>NOK Email<input type="email" className="form-input" value={form.nextOfKinEmail} onChange={(e) => setForm((f) => ({ ...f, nextOfKinEmail: e.target.value }))} placeholder="relative@example.com" /></label>
+                    <label className="patient-form-span">NOK Address<input className="form-input" value={form.nextOfKinAddress} onChange={(e) => setForm((f) => ({ ...f, nextOfKinAddress: e.target.value }))} placeholder="Emergency contact address" /></label>
+                    <label className="patient-form-check"><input type="checkbox" checked={form.nextOfKinIsPrimary} onChange={(e) => setForm((f) => ({ ...f, nextOfKinIsPrimary: e.target.checked }))} /> Primary emergency contact</label>
+                    <label className="patient-form-check"><input type="checkbox" checked={form.nextOfKinConsent} onChange={(e) => setForm((f) => ({ ...f, nextOfKinConsent: e.target.checked }))} /> Consent to contact next of kin</label>
+                    <label className="patient-form-check patient-form-span"><input type="checkbox" checked={form.hasInsurance} onChange={(e) => setForm((f) => ({ ...f, hasInsurance: e.target.checked }))} /> Has Insurance</label>
                   </div>
                 </div>
               )}
@@ -1417,9 +2393,23 @@ function PatientsView() {
                     <p className="form-section-note">Optional cover details used for eligibility and billing workflows.</p>
                   </div>
                   <div className="patient-form-grid two">
-                    <label>Insurance Scheme<input className="form-input" placeholder="SHA / Private / Corporate" /></label>
-                    <label>Policy Number<input className="form-input" placeholder="Policy or member number" /></label>
-                    <label className="patient-form-check"><input type="checkbox" /> Request eligibility check after registration</label>
+                    <label>Insurance Scheme<input required={form.hasInsurance} className="form-input" value={form.insuranceScheme} onChange={(e) => setForm((f) => ({ ...f, insuranceScheme: e.target.value }))} placeholder="SHA / Private / Corporate" /></label>
+                    <label>Policy Number<input required={form.hasInsurance} className="form-input" value={form.policyNumber} onChange={(e) => setForm((f) => ({ ...f, policyNumber: e.target.value }))} placeholder="Policy or member number" /></label>
+                    <label>Member Name<input className="form-input" value={form.memberName} onChange={(e) => setForm((f) => ({ ...f, memberName: e.target.value }))} placeholder="Name on card" /></label>
+                    <label className="patient-form-check"><input type="checkbox" checked={form.isPrincipal} onChange={(e) => setForm((f) => ({ ...f, isPrincipal: e.target.checked }))} /> Patient is principal member</label>
+                    {!form.isPrincipal && (
+                      <label>Principal ID Number<input className="form-input" value={form.principalIdNumber} onChange={(e) => setForm((f) => ({ ...f, principalIdNumber: e.target.value }))} placeholder="Principal member ID" /></label>
+                    )}
+                    <label>Annual Benefit Limit<input type="number" className="form-input" value={form.annualBenefitLimit} onChange={(e) => setForm((f) => ({ ...f, annualBenefitLimit: e.target.value }))} placeholder="0" /></label>
+                    <label>Policy Start Date<input type="date" className="form-input" value={form.policyStartDate} onChange={(e) => setForm((f) => ({ ...f, policyStartDate: e.target.value }))} /></label>
+                    <label>Policy Expiry Date<input type="date" className="form-input" value={form.policyExpiryDate} onChange={(e) => setForm((f) => ({ ...f, policyExpiryDate: e.target.value }))} /></label>
+                    <div className="form-info-banner patient-form-span">
+                      Insurance eligibility is checked automatically after these fields are captured.
+                    </div>
+                    <div className="form-info-banner patient-form-span">
+                      Patient portal account is created automatically after registration.
+                    </div>
+                    <label className="patient-form-span">Portal Phone<input type="tel" className="form-input" value={form.portalPhone} onChange={(e) => setForm((f) => ({ ...f, portalPhone: e.target.value }))} placeholder="Defaults to primary phone if left empty" /></label>
                   </div>
                 </div>
               )}
@@ -1432,16 +2422,151 @@ function PatientsView() {
                 )}
               </div>
               <div className="patient-form-footer-actions">
-                <button type="button" className="form-btn form-btn-cancel" onClick={() => setFormOpen(false)}>Cancel</button>
-                {formTab !== "insurance" ? (
+                <button type="button" className="form-btn form-btn-cancel" onClick={() => { setFormOpen(false); handleResetForm(); }}>Cancel</button>
+                {formTab === "kin" && !form.hasInsurance ? (
+                  <button type="submit" form="patient-registration-form" className="form-btn form-btn-primary" disabled={saving}>{saving ? "Saving..." : editingPatient ? "Update Patient" : "Register Patient"}</button>
+                ) : formTab !== "insurance" ? (
                   <button type="button" className="form-btn form-btn-primary" onClick={() => setFormTab(formTab === "personal" ? "medical" : formTab === "medical" ? "kin" : "insurance")}>Next →</button>
                 ) : (
-                  <button type="submit" form="patient-registration-form" className="form-btn form-btn-primary" disabled={saving}>{saving ? "Saving..." : "Register Patient"}</button>
+                  <button type="submit" form="patient-registration-form" className="form-btn form-btn-primary" disabled={saving}>{saving ? "Saving..." : editingPatient ? "Update Patient" : "Register Patient"}</button>
                 )}
               </div>
             </div>
           </div>
         </div>
+      )}
+
+      {duplicateDetailsOpen && duplicatePatient ? (
+        <div className="patient-duplicate-modal" onClick={() => setDuplicateDetailsOpen(false)}>
+          <div className="patient-duplicate-panel" onClick={(event) => event.stopPropagation()}>
+            <div className="patient-duplicate-panel-head">
+              <h3>Possible Duplicate Patient</h3>
+              <button type="button" onClick={() => setDuplicateDetailsOpen(false)}>×</button>
+            </div>
+            <div className="patient-duplicate-detail-grid">
+              <span>Name</span><strong>{duplicatePatient.name || "—"}</strong>
+              <span>MRN</span><strong>{duplicatePatient.regNo || duplicatePatient.id}</strong>
+              <span>Phone</span><strong>{duplicatePatient.phone || "—"}</strong>
+              <span>National ID</span><strong>{duplicatePatient.nationalId || "—"}</strong>
+              <span>Date of Birth</span><strong>{String((duplicatePatient as any).dateOfBirth || "").slice(0, 10) || "—"}</strong>
+              <span>Gender</span><strong>{duplicatePatient.gender || "—"}</strong>
+            </div>
+            <div className="patient-duplicate-panel-actions">
+              <button type="button" onClick={autofillDuplicatePatient}>Auto Fill</button>
+              <button type="button" onClick={requestDuplicateMerge}>Request Merge</button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {selectedPatient && (
+        <>
+          <div className="patient-drawer-backdrop" onClick={() => setSelectedPatient(null)} />
+          <aside className="patient-drawer-shell">
+            <div className="patient-drawer-header">
+              <div className="patient-drawer-head-row">
+                <div className="patient-drawer-identity">
+                  <div className="patient-drawer-avatar">
+                    {selectedPatient.name.split(" ")[0]?.[0] || "P"}
+                    {selectedPatient.name.split(" ").slice(-1)[0]?.[0] || ""}
+                  </div>
+                  <div>
+                    <p className="patient-drawer-kicker">Patient Profile</p>
+                    <h2>{selectedPatient.name}</h2>
+                    <p className="patient-drawer-mrn">#{selectedPatient.regNo || selectedPatient.id}</p>
+                    <div className="patient-drawer-tags">
+                      <span className={`patient-drawer-tag ${selectedPatient.gender === "Male" ? "is-male" : "is-female"}`}>
+                        {selectedPatient.gender}
+                      </span>
+                      {(selectedPatient as any).bloodGroup ? (
+                        <span className="patient-drawer-tag is-blood">{(selectedPatient as any).bloodGroup}</span>
+                      ) : null}
+                      <span className={`patient-drawer-tag ${selectedPatient.id === checkedInPatientId ? "is-checked-in" : "is-not-checked-in"}`}>
+                        {selectedPatient.id === checkedInPatientId ? "Checked in" : "Not checked in"}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+                <button className="patient-drawer-close" onClick={() => setSelectedPatient(null)}>
+                  ×
+                </button>
+              </div>
+            </div>
+
+            <div className="patient-drawer-body">
+              <section className="patient-drawer-card">
+                <h3><Icon type="person" size={15} /> Personal Information</h3>
+                <div className="patient-drawer-info-list">
+                  <div className="patient-drawer-info-row"><span>Age</span><strong>{selectedPatient.age || "—"} years</strong></div>
+                  <div className="patient-drawer-info-row"><span>Date of Birth</span><strong>{(selectedPatient as any).dateOfBirth ? new Date((selectedPatient as any).dateOfBirth).toLocaleDateString() : "—"}</strong></div>
+                  <div className="patient-drawer-info-row"><span>Phone</span><strong>{selectedPatient.phone || "—"}</strong></div>
+                  <div className="patient-drawer-info-row"><span>Email</span><strong>{(selectedPatient as any).email || "—"}</strong></div>
+                  <div className="patient-drawer-info-row"><span>National ID</span><strong>{selectedPatient.nationalId || (selectedPatient as any).idNumber || "—"}</strong></div>
+                  <div className="patient-drawer-info-row"><span>Address</span><strong>{(selectedPatient as any).address || (selectedPatient as any).addressLine1 || "—"}</strong></div>
+                </div>
+              </section>
+
+              <section className="patient-drawer-summary">
+                <div><Icon type="shield" size={17} /><span>ID</span><strong>{selectedPatient.nationalId || "Not captured"}</strong></div>
+                <div><Icon type="users" size={17} /><span>Phone</span><strong>{selectedPatient.phone || "Not captured"}</strong></div>
+                <div><Icon type="calendar" size={17} /><span>County</span><strong>{(selectedPatient as any).county || "Not captured"}</strong></div>
+              </section>
+
+              <section className="patient-drawer-card">
+                <h3><Icon type="ehr" size={15} /> Medical Details</h3>
+                <div className="patient-drawer-info-list">
+                  <div className="patient-drawer-info-row"><span>Blood Group</span><strong>{(selectedPatient as any).bloodGroup || "—"}</strong></div>
+                  <div className="patient-drawer-info-row"><span>Allergies</span><strong>{(selectedPatient as any).allergies || "—"}</strong></div>
+                  <div className="patient-drawer-info-row"><span>Insurance Provider</span><strong>{(selectedPatient as any).insuranceProvider || "—"}</strong></div>
+                  <div className="patient-drawer-info-row"><span>SHA / Insurance No.</span><strong>{(selectedPatient as any).insuranceNumber || (selectedPatient as any).shaNumber || "—"}</strong></div>
+                </div>
+              </section>
+
+              <section className="patient-drawer-card">
+                <h3><Icon type="users" size={15} /> Next of Kin</h3>
+                <div className="patient-drawer-info-list">
+                  <div className="patient-drawer-info-row"><span>Name</span><strong>{(selectedPatient as any).nextOfKinName || "—"}</strong></div>
+                  <div className="patient-drawer-info-row"><span>Phone</span><strong>{(selectedPatient as any).nextOfKinPhone || "—"}</strong></div>
+                  <div className="patient-drawer-info-row"><span>Relationship</span><strong>{(selectedPatient as any).nextOfKinRelationship || "—"}</strong></div>
+                </div>
+              </section>
+
+              <section className="patient-drawer-card">
+                <h3><Icon type="calendar" size={15} /> Recent Visits</h3>
+                {(selectedPatient as any).visits?.length ? (
+                  <div className="patient-drawer-visit-list">
+                    {(selectedPatient as any).visits.slice(0, 5).map((visit: any) => (
+                      <div className="patient-drawer-visit" key={visit.id}>
+                        <div>
+                          <p>{visit.visitType || visit.type || "General Visit"}</p>
+                          <small>{visit.createdAt ? new Date(visit.createdAt).toLocaleDateString() : "—"}</small>
+                        </div>
+                        <span>{visit.status || "ACTIVE"}</span>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="patient-drawer-empty"><p>No visits recorded yet.</p></div>
+                )}
+              </section>
+            </div>
+
+            <div className="patient-drawer-footer">
+              <button
+                className="patient-drawer-edit-btn"
+                disabled={selectedPatient.id !== checkedInPatientId}
+                title={selectedPatient.id === checkedInPatientId ? "Edit checked-in patient" : "Check in this patient before editing"}
+                onClick={() => {
+                  void openPatientForEdit(selectedPatient);
+                  setSelectedPatient(null);
+                }}
+              >
+                Edit Patient
+              </button>
+              <button className="patient-drawer-secondary-btn" onClick={() => setSelectedPatient(null)}>Close</button>
+            </div>
+          </aside>
+        </>
       )}
 
       {deleteId && (
@@ -1486,47 +2611,273 @@ function PatientsView() {
 }
 
 function AppointmentsView() {
-  const [appointments] = useState([
-    {
-      id: "1",
-      patient: "Jane Doe",
-      doctor: "Dr. House",
-      time: "10:30 AM",
-      status: "SCHEDULED",
-    },
-    {
-      id: "2",
-      patient: "Samuel Mwangi",
-      doctor: "Dr. House",
-      time: "11:45 AM",
-      status: "IN_PROGRESS",
-    },
-    {
-      id: "3",
-      patient: "Amina Hassan",
-      doctor: "Dr. Wilson",
-      time: "02:15 PM",
-      status: "SCHEDULED",
-    },
-  ]);
+  const { patients, facility } = useAppStore();
+  const [appointments, setAppointments] = useState<any[]>([]);
   const [search, setSearch] = useState("");
+  const [activeForm, setActiveForm] = useState<"booking" | "slots" | "cancel" | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [notice, setNotice] = useState("");
+  const [booking, setBooking] = useState({
+    patientId: "",
+    doctorName: "",
+    department: "OPD",
+    date: new Date().toISOString().slice(0, 10),
+    time: "08:00",
+    appointmentType: "New",
+    source: "Walk-in",
+    chiefComplaint: "",
+    notes: "",
+    durationMinutes: 30,
+    repeatEnabled: false,
+    repeatEvery: 6,
+    repeatUnit: "weeks",
+    repeatUntil: "",
+    reminder24Sms: true,
+    reminder2WhatsApp: true,
+    responseTracking: true,
+    waitingListAllowed: true,
+    requiredResources: "",
+    noShowPolicy: "Track only",
+    appBooking: false,
+  });
+  const [slotConfig, setSlotConfig] = useState({
+    doctorName: "",
+    department: "OPD",
+    date: new Date().toISOString().slice(0, 10),
+    startTime: "08:00",
+    endTime: "17:00",
+    slotDuration: 30,
+    slotType: "OPD",
+    maxPatients: 18,
+  });
+  const [cancelData, setCancelData] = useState({
+    appointmentId: "",
+    reason: "Patient request",
+    notes: "",
+    notifyPatient: true,
+    reschedule: false,
+  });
+
+  const loadAppointments = useCallback(async () => {
+    setLoading(true);
+    try {
+      const response = await apiFetch("/appointments");
+      const data = await parseJsonSafe(response);
+      setAppointments(Array.isArray(data) ? data : []);
+    } catch {
+      setAppointments([]);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadAppointments();
+  }, [loadAppointments]);
+
+  const patientName = (patientId: string) => {
+    const match = patients.find((patient) => patient.id === patientId);
+    return match?.name || "Patient";
+  };
+
+  const appointmentPatientName = (item: any) =>
+    item?.patient
+      ? [item.patient.firstName, item.patient.lastName].filter(Boolean).join(" ").trim() || "Patient"
+      : item?.patientName || patientName(item?.patientId);
+
+  const appointmentDoctorName = (item: any) =>
+    item?.doctor
+      ? `Dr. ${[item.doctor.firstName, item.doctor.lastName].filter(Boolean).join(" ")}`.trim()
+      : item?.doctorName || item?.notes?.match(/Doctor: ([^\n]+)/)?.[1] || "Doctor";
+
+  const toLocalDate = (value?: string) => {
+    if (!value) return "";
+    const date = new Date(value);
+    if (!Number.isFinite(date.getTime())) return "";
+    return date.toISOString().slice(0, 10);
+  };
+
+  const toLocalTime = (value?: string) => {
+    if (!value) return "";
+    const date = new Date(value);
+    if (!Number.isFinite(date.getTime())) return "";
+    return `${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
+  };
+
+  const selectedDateAppointments = appointments.filter((item) => toLocalDate(item?.dateTime || item?.scheduledDate) === booking.date);
+  const bookedTimes = new Set(
+    selectedDateAppointments
+      .filter((item) => !["CANCELLED", "NO_SHOW", "NOSHOW"].includes(String(item?.status || "").toUpperCase()))
+      .map((item) => toLocalTime(item?.dateTime || item?.scheduledTime)),
+  );
+  const slotDuration = Math.max(15, Number(booking.durationMinutes) || 30);
+  const calendarSlots = Array.from({ length: 20 }, (_, index) => {
+    const totalMinutes = 8 * 60 + index * slotDuration;
+    const hour = Math.floor(totalMinutes / 60);
+    const minute = totalMinutes % 60;
+    const time = `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
+    const blocked = hour === 12;
+    const booked = bookedTimes.has(time);
+    return { time, status: blocked ? "blocked" : booked ? "booked" : "available" };
+  }).filter((slot) => Number(slot.time.slice(0, 2)) < 18);
+
+  const recurrenceDates = () => {
+    if (!booking.repeatEnabled || !booking.repeatUntil) return [booking.date];
+    const dates = [booking.date];
+    const cursor = new Date(`${booking.date}T00:00:00`);
+    const end = new Date(`${booking.repeatUntil}T00:00:00`);
+    const step = Math.max(1, Number(booking.repeatEvery) || 1);
+    while (dates.length < 32) {
+      if (booking.repeatUnit === "months") cursor.setMonth(cursor.getMonth() + step);
+      else cursor.setDate(cursor.getDate() + step * 7);
+      if (cursor.getTime() > end.getTime()) break;
+      if (cursor.getDay() !== 0) dates.push(cursor.toISOString().slice(0, 10));
+    }
+    return dates;
+  };
+
+  const submitBooking = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!booking.patientId) {
+      setNotice("Select a patient before scheduling.");
+      return;
+    }
+    setLoading(true);
+    try {
+      const metadata = [
+        booking.notes,
+        booking.doctorName ? `Doctor: ${booking.doctorName}` : "",
+        `Reminder policy: ${booking.reminder24Sms ? "SMS 24h" : "SMS off"}; ${booking.reminder2WhatsApp ? "WhatsApp 2h" : "WhatsApp off"}`,
+        booking.responseTracking ? "Patient response tracking: CONFIRM/CANCEL enabled" : "Patient response tracking disabled",
+        booking.waitingListAllowed ? "Waiting list release enabled" : "Waiting list release disabled",
+        booking.requiredResources ? `Required resources: ${booking.requiredResources}` : "",
+        `No-show policy: ${booking.noShowPolicy}`,
+        booking.appBooking ? "Booked via Medilink App: one-click arrival check-in enabled" : "",
+        booking.repeatEnabled ? `Recurring series: every ${booking.repeatEvery} ${booking.repeatUnit} until ${booking.repeatUntil}` : "",
+      ].filter(Boolean).join("\n");
+      for (const date of recurrenceDates()) {
+        const dateTime = new Date(`${date}T${booking.time}:00`);
+        await apiFetch("/appointments", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            patientId: booking.patientId,
+            appointmentType: booking.appointmentType,
+            departmentId: booking.department,
+            scheduledDate: new Date(`${date}T00:00:00`).toISOString(),
+            scheduledTime: dateTime.toISOString(),
+            durationMinutes: Number(booking.durationMinutes) || 30,
+            source: booking.appBooking ? "Medilink App" : booking.source,
+            chiefComplaint: booking.chiefComplaint || undefined,
+            notes: metadata || undefined,
+            reminderSent: Boolean(booking.reminder24Sms || booking.reminder2WhatsApp),
+            dateTime: dateTime.toISOString(),
+            status: "SCHEDULED",
+            facilityId: facility?.id || undefined,
+          }),
+        });
+      }
+      setNotice("Appointment scheduled successfully.");
+      setActiveForm(null);
+      await loadAppointments();
+    } catch (error: any) {
+      setNotice(error?.message || "Appointment could not be scheduled.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const submitSlots = async (event: React.FormEvent) => {
+    event.preventDefault();
+    setLoading(true);
+    try {
+      await apiFetch("/module-actions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          facilityId: facility?.id,
+          module: "appointments",
+          action: "Appointment Slot Configuration Form",
+          data: slotConfig,
+          context: { title: "Appointments" },
+        }),
+      });
+      setNotice("Appointment slots configured.");
+      setActiveForm(null);
+    } catch {
+      setNotice("Slot configuration could not be saved.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const submitCancel = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!cancelData.appointmentId) return;
+    setLoading(true);
+    try {
+      await apiFetch(`/appointments/${cancelData.appointmentId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          status: "CANCELLED",
+          cancelledReason: cancelData.reason,
+          notes: `${cancelData.notes}\nNotify patient: ${cancelData.notifyPatient ? "Yes" : "No"}\nRelease to waiting list: Yes`,
+        }),
+      });
+      setNotice("Appointment cancelled and slot released.");
+      setActiveForm(cancelData.reschedule ? "booking" : null);
+      await loadAppointments();
+    } catch {
+      setNotice("Appointment could not be cancelled.");
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const filtered = appointments.filter(
     (a) =>
-      a.patient.toLowerCase().includes(search.toLowerCase()) ||
-      a.doctor.toLowerCase().includes(search.toLowerCase()),
+      appointmentPatientName(a).toLowerCase().includes(search.toLowerCase()) ||
+      appointmentDoctorName(a).toLowerCase().includes(search.toLowerCase()) ||
+      String(a.status || "").toLowerCase().includes(search.toLowerCase()),
   );
+  const today = new Date().toISOString().slice(0, 10);
+  const todayCount = appointments.filter((item) => toLocalDate(item?.dateTime || item?.scheduledDate) === today).length;
+  const bookedCount = appointments.filter((item) => !["CANCELLED", "NO_SHOW", "NOSHOW"].includes(String(item?.status || "").toUpperCase())).length;
+  const cancelledCount = appointments.filter((item) => String(item?.status || "").toUpperCase() === "CANCELLED").length;
+  const noShowCount = appointments.filter((item) => ["NO_SHOW", "NOSHOW"].includes(String(item?.status || "").toUpperCase())).length;
+  const appBookingCount = appointments.filter((item) => String(item?.source || "").toLowerCase().includes("app")).length;
 
   return (
     <div className="appointments-view">
       <div className="pv-header">
         <div>
-          <h2 className="pv-title">Appointments</h2>
+          <h2 className="pv-title"><Icon type="calendar" size={18} /> Appointments & Schedules</h2>
           <p className="pv-subtitle">
-            View and manage today's consultation schedule
+            Slot booking, reminders, waiting lists, no-show tracking, and app bookings.
           </p>
         </div>
-        <button className="btn-primary">Schedule Visit</button>
+        <div className="appointment-actions">
+          <button className="appointment-action-btn is-booking" onClick={() => setActiveForm("booking")}><Icon type="calendar" size={15} /> Appointment Booking</button>
+          <button className="appointment-action-btn is-slots" onClick={() => setActiveForm("slots")}><Icon type="settings" size={15} /> Appointment Slot Configuration</button>
+          <button className="appointment-action-btn is-cancel" onClick={() => setActiveForm("cancel")}><Icon type="cancel" size={15} /> Appointment Cancellation</button>
+        </div>
+      </div>
+      {notice ? <div className="module-toast appointment-toast">{notice}</div> : null}
+      <div className="pv-stats appointment-stats">
+        {[
+          ["Today's Visits", todayCount, "#1e3a8a"],
+          ["Booked Slots", bookedCount, "#16a34a"],
+          ["Cancelled", cancelledCount, "#7c3aed"],
+          ["No-Shows", noShowCount, "#dc2626"],
+          ["App Bookings", appBookingCount, "#0ea5e9"],
+          ["Waiting List", 0, "#f59e0b"],
+        ].map(([label, value, color]) => (
+          <div className="pv-stat-card" style={{ borderLeftColor: String(color) }} key={String(label)}>
+            <p>{label}</p>
+            <strong>{value}</strong>
+          </div>
+        ))}
       </div>
       <div className="pv-search-wrap">
         <svg
@@ -1560,6 +2911,7 @@ function AppointmentsView() {
               <th>Time</th>
               <th>Patient</th>
               <th>Doctor</th>
+              <th>Source</th>
               <th>Status</th>
               <th>Actions</th>
             </tr>
@@ -1567,24 +2919,100 @@ function AppointmentsView() {
           <tbody>
             {filtered.map((a) => (
               <tr key={a.id}>
-                <td className="pv-code">{a.time}</td>
-                <td className="pv-name">{a.patient}</td>
-                <td>{a.doctor}</td>
+                <td className="pv-code">{new Date(a.dateTime || a.scheduledTime || Date.now()).toLocaleString()}</td>
+                <td className="pv-name">{appointmentPatientName(a)}</td>
+                <td>{appointmentDoctorName(a)}</td>
+                <td>{a.source || "Walk-in"}</td>
                 <td>
                   <span
-                    className={`pv-badge ${a.status === "SCHEDULED" ? "badge-male" : "badge-female"}`}
+                    className={`pv-badge ${String(a.status).toUpperCase() === "SCHEDULED" ? "badge-male" : "badge-female"}`}
                   >
                     {a.status}
                   </span>
                 </td>
                 <td>
-                  <button className="pv-del">View</button>
+                  <button className="pv-del" onClick={() => {
+                    setCancelData((current) => ({ ...current, appointmentId: a.id }));
+                    setActiveForm("cancel");
+                  }}>Cancel</button>
                 </td>
               </tr>
             ))}
+            {filtered.length === 0 ? (
+              <tr><td colSpan={6}>No appointments found.</td></tr>
+            ) : null}
           </tbody>
         </table>
       </div>
+      {activeForm ? (
+        <div className="module-form-overlay appointment-form-overlay">
+          <div className={`module-form-panel appointment-form-panel appointment-mode-${activeForm}`}>
+            <div className="module-form-header appointment-form-header">
+              <div className="module-form-heading">
+                <div className="module-form-icon"><Icon type={activeForm === "booking" ? "calendar" : activeForm === "slots" ? "settings" : "cancel"} size={20} /></div>
+                <div>
+                  <div className="module-form-kicker">Appointments & Schedules</div>
+                  <h2 className="module-form-title">{activeForm === "booking" ? "Appointment Booking" : activeForm === "slots" ? "Appointment Slot Configuration" : "Appointment Cancellation"}</h2>
+                </div>
+              </div>
+              <button className="modal-close-btn" onClick={() => setActiveForm(null)}>×</button>
+            </div>
+            {activeForm === "booking" ? (
+              <form className="appointment-form-body" onSubmit={submitBooking}>
+                <div><label className="form-label">Patient *</label><select required className="form-input" value={booking.patientId} onChange={(e) => setBooking({ ...booking, patientId: e.target.value })}><option value="">Select patient</option>{patients.map((patient) => <option key={patient.id} value={patient.id}>{patient.name} ({patient.regNo})</option>)}</select></div>
+                <div><label className="form-label">Doctor / Clinic</label><input className="form-input" value={booking.doctorName} onChange={(e) => setBooking({ ...booking, doctorName: e.target.value })} placeholder="Dr. Achieng / Diabetes Clinic" /></div>
+                <div><label className="form-label">Appointment Type</label><select className="form-input" value={booking.appointmentType} onChange={(e) => setBooking({ ...booking, appointmentType: e.target.value })}>{["New", "Follow-up", "Specialist", "Procedure", "Telemedicine"].map((item) => <option key={item}>{item}</option>)}</select></div>
+                <div><label className="form-label">Department</label><select className="form-input" value={booking.department} onChange={(e) => setBooking({ ...booking, department: e.target.value })}>{["OPD", "Specialist Clinic", "Procedure", "Telemedicine", "Diagnostics"].map((item) => <option key={item}>{item}</option>)}</select></div>
+                <div><label className="form-label">Date</label><input required type="date" className="form-input" value={booking.date} onChange={(e) => setBooking({ ...booking, date: e.target.value })} /></div>
+                <div><label className="form-label">Time</label><input required type="time" className="form-input" value={booking.time} onChange={(e) => setBooking({ ...booking, time: e.target.value })} /></div>
+                <div className="appointment-slot-calendar">
+                  <div className="appointment-slot-calendar-head"><strong>Slot-Based Calendar</strong><span>Green available, red booked, grey blocked.</span></div>
+                  <div className="appointment-slot-grid">{calendarSlots.map((slot) => <button key={slot.time} type="button" className={`appointment-slot-cell is-${slot.status} ${booking.time === slot.time ? "is-selected" : ""}`} disabled={slot.status !== "available"} onClick={() => setBooking({ ...booking, time: slot.time })}>{slot.time}</button>)}</div>
+                </div>
+                <div><label className="form-label">Source</label><select className="form-input" value={booking.source} onChange={(e) => setBooking({ ...booking, source: e.target.value })}>{["Walk-in", "Phone", "Portal", "Referral"].map((item) => <option key={item}>{item}</option>)}</select></div>
+                <div><label className="form-label">Duration Minutes</label><input type="number" className="form-input" value={booking.durationMinutes} onChange={(e) => setBooking({ ...booking, durationMinutes: Number(e.target.value) })} /></div>
+                <div><label className="form-label">Chief Complaint</label><input className="form-input" value={booking.chiefComplaint} onChange={(e) => setBooking({ ...booking, chiefComplaint: e.target.value })} /></div>
+                <div><label className="form-label">Required Resources</label><input className="form-input" value={booking.requiredResources} onChange={(e) => setBooking({ ...booking, requiredResources: e.target.value })} placeholder="Theatre, anaesthetist, ultrasound..." /></div>
+                <div className="appointment-feature-panel">
+                  {[
+                    ["repeatEnabled", "Recurring appointment series"],
+                    ["reminder24Sms", "SMS reminder 24 hours before"],
+                    ["reminder2WhatsApp", "WhatsApp reminder 2 hours before"],
+                    ["responseTracking", "Track CONFIRM / CANCEL replies"],
+                    ["waitingListAllowed", "Release cancelled slots to waiting list"],
+                    ["appBooking", "Booked via Medilink App"],
+                  ].map(([key, label]) => <label key={key} className="appointment-check-row"><input type="checkbox" checked={Boolean((booking as any)[key])} onChange={(e) => setBooking({ ...booking, [key]: e.target.checked } as any)} />{label}</label>)}
+                </div>
+                {booking.repeatEnabled ? <div className="appointment-repeat-grid"><label>Every<input type="number" className="form-input" value={booking.repeatEvery} onChange={(e) => setBooking({ ...booking, repeatEvery: Number(e.target.value) })} /></label><label>Unit<select className="form-input" value={booking.repeatUnit} onChange={(e) => setBooking({ ...booking, repeatUnit: e.target.value })}><option value="weeks">Weeks</option><option value="months">Months</option></select></label><label>Until<input type="date" className="form-input" value={booking.repeatUntil} onChange={(e) => setBooking({ ...booking, repeatUntil: e.target.value })} /></label></div> : null}
+                <div><label className="form-label">No-Show Policy</label><select className="form-input" value={booking.noShowPolicy} onChange={(e) => setBooking({ ...booking, noShowPolicy: e.target.value })}><option>Track only</option><option>Require deposit after 3 no-shows</option><option>Supervisor approval after repeat no-show</option></select></div>
+                <div><label className="form-label">Notes</label><textarea className="form-input" value={booking.notes} onChange={(e) => setBooking({ ...booking, notes: e.target.value })} /></div>
+                <div className="module-form-footer"><button type="button" className="form-btn form-btn-cancel" onClick={() => setActiveForm(null)}>Cancel</button><button className="form-btn form-btn-primary" disabled={loading}>{loading ? "Scheduling..." : "Schedule"}</button></div>
+              </form>
+            ) : activeForm === "slots" ? (
+              <form className="appointment-form-body" onSubmit={submitSlots}>
+                <div><label className="form-label">Doctor / Clinic</label><input required className="form-input" value={slotConfig.doctorName} onChange={(e) => setSlotConfig({ ...slotConfig, doctorName: e.target.value })} /></div>
+                <div><label className="form-label">Department</label><input required className="form-input" value={slotConfig.department} onChange={(e) => setSlotConfig({ ...slotConfig, department: e.target.value })} /></div>
+                <div><label className="form-label">Date</label><input required type="date" className="form-input" value={slotConfig.date} onChange={(e) => setSlotConfig({ ...slotConfig, date: e.target.value })} /></div>
+                <div><label className="form-label">Start Time</label><input required type="time" className="form-input" value={slotConfig.startTime} onChange={(e) => setSlotConfig({ ...slotConfig, startTime: e.target.value })} /></div>
+                <div><label className="form-label">End Time</label><input required type="time" className="form-input" value={slotConfig.endTime} onChange={(e) => setSlotConfig({ ...slotConfig, endTime: e.target.value })} /></div>
+                <div><label className="form-label">Slot Duration</label><input required type="number" className="form-input" value={slotConfig.slotDuration} onChange={(e) => setSlotConfig({ ...slotConfig, slotDuration: Number(e.target.value) })} /></div>
+                <div><label className="form-label">Slot Type</label><select className="form-input" value={slotConfig.slotType} onChange={(e) => setSlotConfig({ ...slotConfig, slotType: e.target.value })}><option>OPD</option><option>Telemedicine</option><option>Procedure</option></select></div>
+                <div><label className="form-label">Maximum Patients</label><input type="number" className="form-input" value={slotConfig.maxPatients} onChange={(e) => setSlotConfig({ ...slotConfig, maxPatients: Number(e.target.value) })} /></div>
+                <div className="module-form-footer"><button type="button" className="form-btn form-btn-cancel" onClick={() => setActiveForm(null)}>Cancel</button><button className="form-btn form-btn-primary" disabled={loading}>{loading ? "Saving..." : "Save Slots"}</button></div>
+              </form>
+            ) : (
+              <form className="appointment-form-body" onSubmit={submitCancel}>
+                <div><label className="form-label">Appointment</label><select required className="form-input" value={cancelData.appointmentId} onChange={(e) => setCancelData({ ...cancelData, appointmentId: e.target.value })}><option value="">Select appointment</option>{appointments.map((item) => <option key={item.id} value={item.id}>{appointmentPatientName(item)} - {new Date(item.dateTime || item.scheduledTime).toLocaleString()}</option>)}</select></div>
+                <div><label className="form-label">Reason</label><select className="form-input" value={cancelData.reason} onChange={(e) => setCancelData({ ...cancelData, reason: e.target.value })}>{["Patient request", "Doctor unavailable", "Emergency", "Other"].map((item) => <option key={item}>{item}</option>)}</select></div>
+                <label className="appointment-check-row"><input type="checkbox" checked={cancelData.notifyPatient} onChange={(e) => setCancelData({ ...cancelData, notifyPatient: e.target.checked })} />Notify patient</label>
+                <label className="appointment-check-row"><input type="checkbox" checked={cancelData.reschedule} onChange={(e) => setCancelData({ ...cancelData, reschedule: e.target.checked })} />Reschedule immediately</label>
+                <div><label className="form-label">Notes</label><textarea className="form-input" value={cancelData.notes} onChange={(e) => setCancelData({ ...cancelData, notes: e.target.value })} /></div>
+                <div className="module-form-footer"><button type="button" className="form-btn form-btn-cancel" onClick={() => setActiveForm(null)}>Cancel</button><button className="form-btn form-btn-primary" disabled={loading}>{loading ? "Cancelling..." : "Cancel Appointment"}</button></div>
+              </form>
+            )}
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -4234,7 +5662,7 @@ function EmergencyView() {
       key: "triage",
       title: "Emergency Triage",
       description: "Capture emergency triage details.",
-      accent: "#dc2626",
+      accent: "#f59e0b",
       icon: "fact_check",
       submitLabel: "Save Emergency Triage",
       fields: [
@@ -5335,7 +6763,7 @@ function CanteenView() {
       key: "diet",
       title: "Patient Diet Order",
       description: "Capture patient diet order details.",
-      accent: "#dc2626",
+      accent: "#16a34a",
       icon: "restaurant",
       submitLabel: "Save Diet Order",
       fields: [
@@ -5529,7 +6957,7 @@ function PatientFeedbackView() {
       key: "complaint",
       title: "Complaint / Compliment",
       description: "Capture complaint / compliment details.",
-      accent: "#dc2626",
+      accent: "#9333ea",
       icon: "message",
       submitLabel: "Save Feedback Case",
       fields: [
@@ -5765,7 +7193,7 @@ function QualityAssuranceView() {
       key: "incident",
       title: "Incident Report",
       description: "Capture incident report details.",
-      accent: "#dc2626",
+      accent: "#f59e0b",
       icon: "shield",
       submitLabel: "Submit Incident Report",
       fields: [
@@ -7854,7 +9282,7 @@ function BillingView() {
 
   const trendRows = Array.isArray(report?.rows) ? report.rows : [];
   const trendPie = useMemo(() => {
-    const colors = ["#1e3a8a", "#16a34a", "#7c3aed", "#f59e0b", "#0891b2", "#be123c", "#475569", "#2563eb"];
+    const colors = ["#1e3a8a", "#16a34a", "#7c3aed", "#f59e0b", "#0891b2", "#9333ea", "#475569", "#2563eb"];
     const rows = trendRows
       .slice(-8)
       .map((row: any, index: number) => ({
@@ -9111,6 +10539,11 @@ function getSetupFacilityLogoFallback() {
 
 function SplashScreen() {
   const [progress, setProgress] = useState(0);
+  const splashChecks = [
+    { label: "License", value: progress > 18 ? "verified" : "checking" },
+    { label: "Facility", value: progress > 42 ? "synced" : "loading" },
+    { label: "Clinical APIs", value: progress > 68 ? "online" : "warming" },
+  ];
 
   useEffect(() => {
     setProgress(0);
@@ -9129,15 +10562,31 @@ function SplashScreen() {
 
   return (
     <div className="hmis-splash">
+      <div className="hmis-splash-aurora" aria-hidden />
       <div className="hmis-splash-grid" aria-hidden />
       <div className="hmis-splash-overlay" aria-hidden />
-      <div className="hmis-scan-dot dot-a" aria-hidden />
-      <div className="hmis-scan-dot dot-b" aria-hidden />
-      <div className="hmis-scan-dot dot-c" aria-hidden />
-      <div className="hmis-scan-line" aria-hidden />
+      <div className="hmis-splash-orbit orbit-a" aria-hidden />
+      <div className="hmis-splash-orbit orbit-b" aria-hidden />
+      <div className="hmis-splash-pulse" aria-hidden />
 
       <div className="hmis-splash-content">
-        <h1 className="hmis-splash-brand">Medilink Kenya</h1>
+        <div className="hmis-splash-logo-shell">
+          <span className="hmis-splash-logo-ring" aria-hidden />
+          <img src="/Loginlogo.png" alt="Medilink HMIS" className="hmis-splash-logo" />
+        </div>
+        <p className="hmis-splash-kicker">Medilink HMIS Desktop</p>
+        <h1 className="hmis-splash-brand">Hospital Command Center</h1>
+        <p className="hmis-splash-copy">
+          Preparing secure clinical workflows, facility licensing, and patient journey modules.
+        </p>
+        <div className="hmis-splash-status-grid">
+          {splashChecks.map((item) => (
+            <span key={item.label}>
+              <b>{item.label}</b>
+              <small>{item.value}</small>
+            </span>
+          ))}
+        </div>
         <div className="hmis-splash-progress-row">
           <div className="hmis-splash-progress-track">
             <div
@@ -9147,7 +10596,13 @@ function SplashScreen() {
           </div>
           <span className="hmis-splash-progress-value">{progress}%</span>
         </div>
-        <p className="hmis-splash-sub">Loading Hospital Command Center...</p>
+        <p className="hmis-splash-sub">
+          {progress < 35
+            ? "Validating desktop environment..."
+            : progress < 70
+              ? "Synchronising hospital services..."
+              : "Opening secure workspace..."}
+        </p>
       </div>
     </div>
   );
@@ -11959,7 +13414,7 @@ function SuperAdminDashboardView() {
                       disabled={supportStatusSavingId === ticket.id}
                       onClick={() => void handleSupportStatusUpdate(ticket.id)}
                     >
-                      {supportStatusSavingId === ticket.id ? "Saving..." : "Save"}
+                      {supportStatusSavingId === ticket.id ? "Saving..." : "Update Ticket Status"}
                     </button>
                   </td>
                 </tr>
@@ -12008,6 +13463,7 @@ export default function App() {
   const [moduleSearchFocused, setModuleSearchFocused] = useState(false);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
+  const [logoutConfirmOpen, setLogoutConfirmOpen] = useState(false);
   const [activeNav, setActiveNav] = useState(0);
   const [activeWorkflowModuleId, setActiveWorkflowModuleId] = useState<number | null>(
     null,
@@ -12057,6 +13513,7 @@ export default function App() {
       text: MEDILINK_AI_GREETING,
     },
   ]);
+
   const helpMessagesEndRef = useRef<HTMLDivElement | null>(null);
   const helpPromptReady = MEDILINK_AI_SYSTEM_PROMPT.length > 0;
 
@@ -12351,19 +13808,20 @@ export default function App() {
   const moduleSearchResults = roleFilteredModules.slice(0, 8);
   const activeSidebarModuleId =
     activeWorkflowModuleId ??
-    (activeNav === 11
-      ? 15
-      : activeNav === 16
-        ? 16
-        : activeNav === 17
-          ? 17
-          : activeNav === 18
-            ? 18
-            : null);
+    (activeNav === 1
+      ? 1
+      : activeNav === 11
+        ? 15
+        : activeNav === 16
+          ? 16
+          : activeNav === 17
+            ? 17
+            : activeNav === 18
+              ? 18
+              : null);
   const activeWorkflowModule = activeSidebarModuleId
     ? WORKFLOW_MODULE_BY_ID[activeSidebarModuleId]
     : null;
-  const activeSidebarForms = activeWorkflowModule?.forms || [];
   const activeSidebarTitle = activeWorkflowModule?.name || "Current Module";
   const setupFacilityNameFallback = getSetupFacilityNameFallback();
   const dashboardFacilityName = pickHospitalName(
@@ -12384,14 +13842,6 @@ export default function App() {
       token: patient.regNo,
       status: String(patient.queueStatus || "Queued"),
     }));
-  const openSidebarForm = (formId: string) => {
-    if (!activeSidebarModuleId) return;
-    window.dispatchEvent(
-      new CustomEvent("hmis:open-workflow-form", {
-        detail: { moduleId: activeSidebarModuleId, formId },
-      }),
-    );
-  };
   const openModuleFromSearch = (moduleId: number) => {
     setModuleSearch("");
     setModuleSearchFocused(false);
@@ -12416,6 +13866,7 @@ export default function App() {
   };
 
   const handleLogout = () => {
+    setLogoutConfirmOpen(false);
     clearTokens();
     sessionStorage.removeItem(SESSION_STORAGE_KEY);
     setAuthError("");
@@ -13396,6 +14847,45 @@ export default function App() {
       }
     >
       <DesktopUpdater />
+      {logoutConfirmOpen ? (
+        <div
+          className="logout-confirm-backdrop"
+          role="presentation"
+          onClick={() => setLogoutConfirmOpen(false)}
+        >
+          <section
+            className="logout-confirm-dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="logout-confirm-title"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="logout-confirm-icon">
+              <Icon type="logout" size={22} />
+            </div>
+            <div className="logout-confirm-copy">
+              <h3 id="logout-confirm-title">Confirm Logout</h3>
+              <p>Are you sure you want to end this HMIS session?</p>
+            </div>
+            <div className="logout-confirm-actions">
+              <button
+                type="button"
+                className="logout-confirm-cancel"
+                onClick={() => setLogoutConfirmOpen(false)}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="logout-confirm-submit"
+                onClick={handleLogout}
+              >
+                Logout
+              </button>
+            </div>
+          </section>
+        </div>
+      ) : null}
       <aside
         className={`sidebar ${sidebarCollapsed ? "sidebar-collapsed" : ""}`}
       >
@@ -13416,32 +14906,47 @@ export default function App() {
           </button>
         </div>
 
-        <nav className="sidebar-form-section" aria-label="Module forms">
+        <nav className="sidebar-form-section" aria-label="Module workspace">
           {!sidebarCollapsed && (
             <div className="sidebar-section-heading">
-              <span>Forms</span>
+              <span>Workspace</span>
               <small>{activeSidebarTitle}</small>
             </div>
           )}
-          {activeSidebarForms.length > 0 ? (
-            <div className="sidebar-form-list">
-              {activeSidebarForms.map((form) => (
+          {activeSidebarModuleId === 1 ? (
+            <div className="sidebar-workspace-tools">
+              {[
+                ["vulnerability", "Vulnerability Flags", "shield2"],
+                ["merge", "Patient Merge", "sync"],
+              ].map(([action, label, icon]) => (
                 <button
-                  key={form.id}
+                  key={action}
                   type="button"
-                  className="sidebar-form-btn"
-                  onClick={() => openSidebarForm(form.id)}
-                  title={form.title}
+                  className="sidebar-workspace-btn"
+                  title={label}
+                  onClick={() => {
+                    setActiveWorkflowModuleId(null);
+                    setActiveNav(1);
+                    window.setTimeout(() => {
+                      window.dispatchEvent(
+                        new CustomEvent("hmis:patient-workspace-action", {
+                          detail: { action },
+                        }),
+                      );
+                    }, 0);
+                  }}
                 >
-                  <Icon type="ehr" size={16} />
-                  {!sidebarCollapsed && <span>{form.title}</span>}
+                  <Icon type={icon} size={16} />
+                  {!sidebarCollapsed && <span>{label}</span>}
                 </button>
               ))}
             </div>
           ) : (
-            <div className="sidebar-empty-state" title="Open a module to see forms">
+            <div className="sidebar-empty-state" title="Module tools">
               <Icon type="briefcase" size={18} />
-              {!sidebarCollapsed && <p>Open a module to see the available forms here.</p>}
+              {!sidebarCollapsed && (
+                <p>{activeSidebarModuleId ? "Module tools will appear here." : "Open a module to use workspace tools here."}</p>
+              )}
             </div>
           )}
         </nav>
@@ -13499,7 +15004,6 @@ export default function App() {
               <form
                 className={`search-wrap ${moduleSearch.trim() ? "has-value" : "is-empty"}`}
                 onSubmit={handleModuleSearchSubmit}
-                data-placeholder="Search modules..."
               >
                 <svg
                   width="16"
@@ -13528,9 +15032,6 @@ export default function App() {
                   onFocus={() => setModuleSearchFocused(true)}
                   onBlur={() => window.setTimeout(() => setModuleSearchFocused(false), 140)}
                 />
-                {!moduleSearch && (
-                  <span className="search-placeholder-overlay">Search modules...</span>
-                )}
                 {moduleSearchFocused && moduleSearch.trim() && (
                   <div className="module-search-panel">
                     {moduleSearchResults.length > 0 ? (
@@ -13605,7 +15106,7 @@ export default function App() {
                 </div>
               )}
             </div>
-            <button className="topbar-logout-btn" onClick={handleLogout}>
+            <button className="topbar-logout-btn" onClick={() => setLogoutConfirmOpen(true)}>
               <Icon type="logout" size={15} />
               Logout
             </button>

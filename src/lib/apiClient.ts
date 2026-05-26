@@ -189,6 +189,19 @@ async function getCsrfToken(): Promise<string | null> {
   return null;
 }
 
+function clearCsrfToken() {
+  csrfTokenCache = null;
+}
+
+async function isBadCsrfResponse(response: Response) {
+  if (response.status !== 403) return false;
+  const clone = response.clone();
+  const body = await parseJsonSafe(clone);
+  const code = String(body?.code || "");
+  const message = String(body?.message || body?.error || "");
+  return code === "EBADCSRFTOKEN" || /csrf/i.test(message);
+}
+
 function toErrorMessage(payload: any, fallback: string) {
   if (typeof payload?.message === "string") {
     return payload.message;
@@ -387,6 +400,24 @@ export async function apiFetch(
     credentials: "include",
   });
 
+  if (needsCsrf && (await isBadCsrfResponse(first))) {
+    clearCsrfToken();
+    const retryHeaders = new Headers(init.headers || {});
+    const csrfToken = await getCsrfToken();
+    if (csrfToken) {
+      retryHeaders.set("X-CSRF-Token", csrfToken);
+    }
+    const token = getAccessToken();
+    if (token) {
+      retryHeaders.set("Authorization", `Bearer ${token}`);
+    }
+    return fetch(`${API_BASE_URL}${path}`, {
+      ...init,
+      headers: retryHeaders,
+      credentials: "include",
+    });
+  }
+
   if (first.status !== 401) {
     return first;
   }
@@ -415,21 +446,74 @@ export async function apiFetch(
   });
 }
 
+export async function fetchModuleDomainRecords(moduleKey: string, limit = 100) {
+  const params = new URLSearchParams({
+    module: moduleKey,
+    limit: String(limit),
+  });
+  const response = await apiFetch(`/module-actions/domain-records?${params.toString()}`);
+  const body = await parseJsonSafe(response);
+  if (!response.ok) {
+    throw new Error(toErrorMessage(body, "Module records could not be loaded"));
+  }
+  return Array.isArray(body) ? body : [];
+}
+
+export async function fetchModuleDomainSummary(moduleKey: string, limit = 500) {
+  const params = new URLSearchParams({
+    module: moduleKey,
+    limit: String(limit),
+  });
+  const response = await apiFetch(`/module-actions/domain-summary?${params.toString()}`);
+  const body = await parseJsonSafe(response);
+  if (!response.ok) {
+    throw new Error(toErrorMessage(body, "Module statistics could not be loaded"));
+  }
+  return body || null;
+}
+
 export type BackendPatientInput = {
   firstName: string;
+  middleName?: string;
   lastName: string;
   gender: "MALE" | "FEMALE" | "OTHER";
   dateOfBirth: string;
   bloodGroup?: string;
   nationalId?: string;
+  idType?: string;
+  idNumber?: string;
+  nationality?: string;
+  shaNumber?: string;
   phone?: string;
+  phonePrimary?: string;
+  phoneSecondary?: string;
   email?: string;
   address?: string;
+  addressLine1?: string;
+  subCounty?: string;
+  villageEstate?: string;
+  religion?: string;
+  educationLevel?: string;
+  photoUrl?: string;
   allergies?: string;
+  medicalHistory?: string;
   nextOfKinName?: string;
+  nextOfKinRelationship?: string;
   nextOfKinPhone?: string;
+  nextOfKinEmail?: string;
+  nextOfKinAddress?: string;
+  nextOfKinIsPrimary?: boolean;
+  nextOfKinConsent?: boolean;
   insuranceNumber?: string;
   insuranceProvider?: string;
+  insuranceScheme?: string;
+  policyNumber?: string;
+  memberName?: string;
+  isPrincipal?: boolean;
+  principalIdNumber?: string;
+  policyStartDate?: string;
+  policyExpiryDate?: string;
+  annualBenefitLimit?: number;
   registrationType?: "NEW" | "RETURNING" | "EMERGENCY" | "REFERRAL" | "CORPORATE";
   emergencyContactRelationship?: string;
   consultationFeePaid?: boolean;
@@ -445,6 +529,8 @@ export type BackendPatientInput = {
   consentVersion?: string;
   consentAcceptedAt?: string;
   portalAccessEnabled?: boolean;
+  portalPhone?: string;
+  vulnerabilityFlags?: string[];
   referralSource?: string;
   duplicateOverrideReason?: string;
   facilityLinkNote?: string;
@@ -457,21 +543,62 @@ export type BackendPatientInput = {
   county?: string;
 };
 
-export async function fetchTenantPatients(search?: string) {
-  const qs = search ? `?search=${encodeURIComponent(search)}` : "";
-  let res = await apiFetch(`/tenant/patients${qs}`);
-  if (!res.ok) {
-    // fallback for non-tenant backend mode
-    res = await apiFetch(`/patients${qs}`);
-  }
-  const body = await parseJsonSafe(res);
-  if (!res.ok) {
+export async function fetchTenantPatients(search?: string, facilityId?: string) {
+  const buildQuery = (params: Record<string, string | undefined>) => {
+    const query = new URLSearchParams();
+    Object.entries(params).forEach(([key, value]) => {
+      const normalized = String(value || "").trim();
+      if (normalized) query.set(key, normalized);
+    });
+    const value = query.toString();
+    return value ? `?${value}` : "";
+  };
+  const qs = buildQuery({ search, facilityId });
+  const todayQs = buildQuery({ today: "true", facilityId });
+  const extractRows = (body: any) => {
+    const unwrapRows = (rows: any[]) =>
+      rows.map((row) => (row?.patient && typeof row.patient === "object" ? { ...row.patient, ...row } : row));
+    if (Array.isArray(body)) return unwrapRows(body);
+    if (Array.isArray(body?.data)) return unwrapRows(body.data);
+    if (Array.isArray(body?.data?.data)) return unwrapRows(body.data.data);
+    if (Array.isArray(body?.data?.patients)) return unwrapRows(body.data.patients);
+    if (Array.isArray(body?.data?.items)) return unwrapRows(body.data.items);
+    if (Array.isArray(body?.patients)) return unwrapRows(body.patients);
+    if (Array.isArray(body?.items)) return unwrapRows(body.items);
+    if (Array.isArray(body?.results)) return unwrapRows(body.results);
+    if (Array.isArray(body?.rows)) return unwrapRows(body.rows);
+    return [];
+  };
+  const mergeRows = (...groups: any[][]) => {
+    const seen = new Set<string>();
+    return groups.flat().filter((row) => {
+      const key = String(row?.patient?.id || row?.patientId || row?.id || row?.patientCode || row?.mrn || "");
+      if (!key || seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  };
+  const [tenantResult, legacyResult, tenantTodayResult, legacyTodayResult] = await Promise.allSettled([
+    apiFetch(`/tenant/patients${qs}`),
+    apiFetch(`/patients${qs}`),
+    search ? Promise.reject(new Error("skip today search")) : apiFetch(`/tenant/patients${todayQs}`),
+    search ? Promise.reject(new Error("skip today search")) : apiFetch(`/patients${todayQs}`),
+  ]);
+
+  const resolved = await Promise.all(
+    [tenantResult, legacyResult, tenantTodayResult, legacyTodayResult].map(async (result) => {
+      if (result.status !== "fulfilled" || !result.value.ok) return [];
+      return extractRows(await parseJsonSafe(result.value));
+    }),
+  );
+  const rows = mergeRows(...resolved);
+  if (rows.length > 0) return rows;
+
+  const firstResponse = tenantResult.status === "fulfilled" ? tenantResult.value : null;
+  if (firstResponse && !firstResponse.ok) {
+    const body = await parseJsonSafe(firstResponse);
     throw new Error(toErrorMessage(body, "Failed to fetch patients"));
   }
-  if (Array.isArray(body)) return body;
-  if (Array.isArray((body as any)?.data)) return (body as any).data;
-  if (Array.isArray((body as any)?.items)) return (body as any).items;
-  if (Array.isArray((body as any)?.rows)) return (body as any).rows;
   return [];
 }
 
@@ -486,9 +613,12 @@ export async function fetchTenantPatientById(id: string) {
     throw new Error(toErrorMessage(body, "Failed to fetch patient details"));
   }
   const wrapped =
-    (body as any)?.data ??
-    (body as any)?.item ??
+    (body as any)?.data?.patient ??
+    (body as any)?.data?.data?.patient ??
+    (body as any)?.data?.data ??
     (body as any)?.patient ??
+    (body as any)?.item ??
+    (body as any)?.data ??
     body;
   return wrapped;
 }
@@ -2859,12 +2989,23 @@ export async function finalizeEmrVisit(visitId: string, payload?: { reason?: str
 }
 
 export async function createTenantPatient(payload: BackendPatientInput) {
+  if (!getAccessToken() && getRefreshToken()) {
+    await refreshAccessToken();
+  }
   let res = await apiFetch("/tenant/patients", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
   });
-  if (!res.ok) {
+  if (res.status === 401 && getRefreshToken()) {
+    await refreshAccessToken();
+    res = await apiFetch("/tenant/patients", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+  }
+  if (!res.ok && res.status !== 401) {
     // fallback for non-tenant backend mode
     res = await apiFetch("/patients", {
       method: "POST",

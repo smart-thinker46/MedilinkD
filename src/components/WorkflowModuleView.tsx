@@ -82,6 +82,8 @@ import {
   fetchSecurityPermissionsCatalog,
   fetchSecurityPosture,
   fetchSecurityRbacCatalog,
+  fetchModuleDomainRecords,
+  fetchModuleDomainSummary,
   fetchInpatientAdmissions,
   fetchInpatientDashboard,
   fetchLaboratoryDashboard,
@@ -1558,6 +1560,73 @@ export function WorkflowModuleView({
   const isSecurityModule = module.id === 20;
   const disablePatientSearch = MODULES_WITHOUT_PATIENT_SEARCH.has(module.id);
   const storageKey = `hmis_workflow_records_${module.id}`;
+  const moduleDomainKeyById: Record<number, string> = {
+    1: "patients",
+    2: "ipd",
+    3: "opd",
+    4: "appointments",
+    5: "wards",
+    6: "ehr",
+    7: "nursing",
+    8: "lab",
+    9: "radiology",
+    10: "pharmacy",
+    11: "ot",
+    12: "blood-bank",
+    13: "billing",
+    14: "insurance",
+    15: "inventory",
+    16: "hr",
+    17: "doctors",
+    18: "facility",
+    19: "reporting",
+    20: "security",
+    21: "telemedicine",
+    22: "blockchain",
+    23: "ai-analytics",
+    24: "patient-portal",
+    25: "emergency",
+    26: "ambulance",
+    27: "mortuary",
+    28: "queue",
+    29: "helpdesk",
+    30: "canteen",
+    31: "patient-feedback",
+    32: "clinical-research",
+    33: "quality-assurance",
+    34: "integrations",
+    35: "pharmacy-pos",
+    36: "opd",
+    37: "maternity",
+    38: "icu",
+    39: "accounting",
+    40: "workforce-planning",
+    41: "ict",
+    42: "nursing-admin",
+    43: "medical-director",
+    44: "revenue",
+    45: "cost-accounting",
+    46: "executive",
+    47: "orchestration",
+    48: "cdss",
+    49: "physiotherapy",
+    50: "nutrition",
+    51: "nicu",
+    52: "dental",
+    53: "infection-control",
+    54: "consent",
+    55: "referrals",
+    56: "community-health",
+    57: "documents",
+    58: "messaging",
+    59: "paediatrics",
+    60: "home-care",
+    61: "biomedical",
+    62: "governance",
+    63: "operations",
+    64: "migration",
+  };
+  const moduleDomainKey = moduleDomainKeyById[module.id] || "";
   const [search, setSearch] = useState("");
   const [activeStage, setActiveStage] = useState(module.stages[0]?.id || "stage_1");
   const [activeFormId, setActiveFormId] = useState(module.forms[0]?.id || "");
@@ -1565,6 +1634,8 @@ export function WorkflowModuleView({
   const [selectedPatientId, setSelectedPatientId] = useState<string>("");
   const [editingId, setEditingId] = useState<string | null>(null);
   const [records, setRecords] = useState<ModuleRecord[]>([]);
+  const [liveModuleSummary, setLiveModuleSummary] = useState<any>(null);
+  const [liveModuleLoading, setLiveModuleLoading] = useState(false);
   const [formError, setFormError] = useState("");
   const [formNotice, setFormNotice] = useState<{ type: "success" | "error"; message: string } | null>(null);
   const [labQueueOrderModalOpen, setLabQueueOrderModalOpen] = useState(false);
@@ -1593,6 +1664,49 @@ export function WorkflowModuleView({
   const [registrationDuplicateLoading, setRegistrationDuplicateLoading] = useState(false);
   const [profilePatient, setProfilePatient] = useState<Patient | null>(null);
   const [selectedPatientDetails, setSelectedPatientDetails] = useState<any | null>(null);
+
+  const normalizeBackendRecord = useCallback(
+    (row: any): ModuleRecord => {
+      const action = String(row?.action || row?.model || module.name || "Backend record");
+      const data: Record<string, string> = {};
+      Object.entries(row || {}).forEach(([key, value]) => {
+        if (value === null || value === undefined) return;
+        if (typeof value === "object") {
+          data[key] = JSON.stringify(value);
+          return;
+        }
+        data[key] = String(value);
+      });
+      return {
+        id: String(row?.id || `${module.id}-${Date.now()}`),
+        formId: action,
+        patientId: String(row?.patientId || row?.patient_id || row?.patient || ""),
+        stageId: String(row?.stageId || row?.status || "backend"),
+        createdAt: String(row?.createdAt || row?.updatedAt || new Date().toISOString()),
+        updatedAt: String(row?.updatedAt || row?.createdAt || new Date().toISOString()),
+        data,
+      };
+    },
+    [module.id, module.name],
+  );
+
+  const loadLiveModuleData = useCallback(async () => {
+    if (!moduleDomainKey) return;
+    setLiveModuleLoading(true);
+    try {
+      const [summary, rows] = await Promise.all([
+        fetchModuleDomainSummary(moduleDomainKey, 500),
+        fetchModuleDomainRecords(moduleDomainKey, 200),
+      ]);
+      const domainRows = Array.isArray(rows) ? rows : [];
+      setLiveModuleSummary(summary || null);
+      setRecords(domainRows.map(normalizeBackendRecord));
+    } catch {
+      setLiveModuleSummary(null);
+    } finally {
+      setLiveModuleLoading(false);
+    }
+  }, [moduleDomainKey, normalizeBackendRecord]);
   const [profilePatientDetails, setProfilePatientDetails] = useState<any | null>(null);
   const [detailsLoading, setDetailsLoading] = useState(false);
   const [patientCheckinMap, setPatientCheckinMap] = useState<Record<string, boolean>>(
@@ -2936,7 +3050,6 @@ export function WorkflowModuleView({
   };
   const getWorkflowSubmitLabel = (value: string, isEditing: boolean): string => {
     const normalized = String(value || "").toLowerCase();
-    const prefix = isEditing ? "Update" : "";
     if (isWardModule) {
       if (normalized.includes("configuration")) return isEditing ? "Update Ward Configuration" : "Save Ward Configuration";
       if (normalized.includes("status")) return isEditing ? "Update Bed Status" : "Update Bed Status";
@@ -3194,7 +3307,35 @@ export function WorkflowModuleView({
       if (normalized.includes("insurance")) return isEditing ? "Update Insurance Details" : "Save Insurance Details";
       return isEditing ? "Update Patient" : "Register Patient";
     }
-    return prefix ? `${prefix} Data` : "Save Data";
+    if (normalized.includes("registration")) return isEditing ? "Update Registration" : "Register Record";
+    if (normalized.includes("assessment")) return isEditing ? "Update Assessment" : "Save Assessment";
+    if (normalized.includes("visit")) return isEditing ? "Update Visit" : "Save Visit";
+    if (normalized.includes("booking") || normalized.includes("appointment")) {
+      return isEditing ? "Update Appointment" : "Schedule Appointment";
+    }
+    if (normalized.includes("slot") || normalized.includes("configuration")) {
+      return isEditing ? "Update Configuration" : "Save Configuration";
+    }
+    if (normalized.includes("cancel")) return isEditing ? "Update Cancellation" : "Cancel Appointment";
+    if (normalized.includes("request")) return isEditing ? "Update Request" : "Submit Request";
+    if (normalized.includes("order")) return isEditing ? "Update Order" : "Place Order";
+    if (normalized.includes("result")) return isEditing ? "Update Result" : "Enter Result";
+    if (normalized.includes("report")) return isEditing ? "Update Report" : "Submit Report";
+    if (normalized.includes("prescription")) return isEditing ? "Update Prescription" : "Save Prescription";
+    if (normalized.includes("dispense")) return isEditing ? "Update Dispensing" : "Confirm Dispensing";
+    if (normalized.includes("receipt") || normalized.includes("payment")) return isEditing ? "Update Payment" : "Post Payment";
+    if (normalized.includes("claim")) return isEditing ? "Update Claim" : "Submit Claim";
+    if (normalized.includes("supplier") || normalized.includes("vendor")) return isEditing ? "Update Supplier" : "Save Supplier";
+    if (normalized.includes("stock") || normalized.includes("inventory")) return isEditing ? "Update Stock Record" : "Save Stock Record";
+    if (normalized.includes("message") || normalized.includes("sms") || normalized.includes("whatsapp")) {
+      return isEditing ? "Update Message" : "Send Message";
+    }
+    if (normalized.includes("feedback") || normalized.includes("complaint")) return isEditing ? "Update Feedback" : "Submit Feedback";
+    if (normalized.includes("document") || normalized.includes("upload")) return isEditing ? "Update Document" : "Upload Document";
+    if (normalized.includes("consent")) return isEditing ? "Update Consent" : "Record Consent";
+    if (normalized.includes("referral")) return isEditing ? "Update Referral" : "Create Referral";
+    const cleanTitle = String(value || "Record").replace(/\s+Form$/i, "").trim();
+    return `${isEditing ? "Update" : "Save"} ${cleanTitle || "Record"}`;
   };
   const openWorkflowForm = (formId: string) => {
     const targetForm =
@@ -3488,7 +3629,8 @@ export function WorkflowModuleView({
     setForm(emptyForm(defaultForm?.fields || []));
     setEditingId(null);
     setActiveStage(module.stages[0]?.id || "stage_1");
-  }, [module.id, storageKey, module.forms, module.stages]);
+    void loadLiveModuleData();
+  }, [module.id, storageKey, module.forms, module.stages, loadLiveModuleData]);
 
   useEffect(() => {
     localStorage.setItem(storageKey, JSON.stringify(records));
@@ -9287,7 +9429,7 @@ export function WorkflowModuleView({
     [costMarginChartRows],
   );
   const costMarginPieRows = useMemo(() => {
-    const palette = ["#16a34a", "#2563eb", "#7c3aed", "#f59e0b", "#0d9488", "#e11d48"];
+    const palette = ["#16a34a", "#2563eb", "#7c3aed", "#f59e0b", "#0d9488", "#9333ea"];
     const sourceRows = costMarginChartRows.length > 0
       ? costMarginChartRows
       : [
@@ -9551,6 +9693,74 @@ export function WorkflowModuleView({
       currency: "KES",
       maximumFractionDigits: 0,
     }).format(Number.isFinite(value) ? value : 0);
+  const liveSummaryNumber = useCallback(
+    (key: string, fallback = 0) => {
+      const value = Number(liveModuleSummary?.[key]);
+      return Number.isFinite(value) ? value : fallback;
+    },
+    [liveModuleSummary],
+  );
+  const liveCardValue = useCallback(
+    (label: string, fallback: string | number = 0) => {
+      if (liveModuleLoading && !liveModuleSummary) return "...";
+      const normalized = label.toLowerCase();
+      let value: number | undefined;
+      if (/revenue|paid|collected|billed|amount|flow|profit|cost|expense|asset|liabilit|equity|cash|stock value/.test(normalized)) {
+        if (/expense|cost|liabilit/.test(normalized)) value = liveSummaryNumber("expense");
+        else if (/outstanding|receivable/.test(normalized)) value = liveSummaryNumber("outstanding");
+        else if (/profit|net/.test(normalized)) value = liveSummaryNumber("net");
+        else value = liveSummaryNumber("revenue");
+        return formatKes(value);
+      }
+      if (/percent|rate|ratio|occupancy|compliance|efficiency/.test(normalized)) {
+        value = liveSummaryNumber("total") > 0
+          ? (liveSummaryNumber("completed") / liveSummaryNumber("total")) * 100
+          : 0;
+        return `${value.toFixed(2)}%`;
+      }
+      if (/today|session|visit|upload|signed|sent|dispensed/.test(normalized)) value = liveSummaryNumber("today");
+      else if (/30d|month|recent/.test(normalized)) value = liveSummaryNumber("last30Days");
+      else if (/active|admission|device|rule|plan|account|household|order|patient|document|message|template|cycle|procedure|referral|consent|case|record|booking|donor|invoice|claim/.test(normalized)) {
+        value = liveSummaryNumber("total");
+      } else if (/open|pending|review|due|expir|failed|critical|alert|hard|risk|overdue|escalation|defaulter|withdrawn|recall/.test(normalized)) {
+        value = liveSummaryNumber(/critical|hard|alert|risk|overdue|failed|recall|escalation/.test(normalized) ? "critical" : "pending");
+      } else if (/completed|accepted|performed|reported|released/.test(normalized)) {
+        value = liveSummaryNumber("completed");
+      }
+      if (value === undefined) return fallback;
+      return value.toLocaleString();
+    },
+    [formatKes, liveModuleLoading, liveModuleSummary, liveSummaryNumber],
+  );
+  const liveModuleMixRows = useMemo(() => {
+    const charts = liveModuleSummary?.charts || {};
+    const source = Array.isArray(charts.statusMix) && charts.statusMix.length > 0
+      ? charts.statusMix
+      : Array.isArray(charts.actionMix) && charts.actionMix.length > 0
+        ? charts.actionMix
+        : Array.isArray(charts.modelMix)
+          ? charts.modelMix
+          : [];
+    return source
+      .map((row: any, index: number) => ({
+        label: String(row?.label || "Unclassified"),
+        value: Number(row?.value || 0),
+        color: ["#1e3a8a", "#0d9488", "#7c3aed", "#f59e0b", "#16a34a", "#dc2626"][index % 6],
+      }))
+      .filter((row: any) => row.value > 0);
+  }, [liveModuleSummary]);
+  const liveModulePieGradient = useMemo(() => {
+    const total = liveModuleMixRows.reduce((sum: number, row: any) => sum + row.value, 0);
+    if (total <= 0) return "conic-gradient(#e2e8f0 0 100%)";
+    let cursor = 0;
+    const stops = liveModuleMixRows.map((row: any) => {
+      const start = cursor;
+      const span = (row.value / total) * 100;
+      cursor += span;
+      return `${row.color} ${start.toFixed(2)}% ${cursor.toFixed(2)}%`;
+    });
+    return `conic-gradient(${stops.join(", ")})`;
+  }, [liveModuleMixRows]);
   const pharmacySummary = useMemo(() => {
     const totals = (rxDashboard as any)?.totals || {};
     return {
@@ -9624,11 +9834,7 @@ export function WorkflowModuleView({
           status: data.respiratory_support || data.admission_diagnosis || "Recorded",
         };
       });
-    return [
-      ...savedRows,
-      { neonate: "Baby N-14", gestAge: "32 wks", weight: "1.7 kg", status: "Stable" },
-      { neonate: "Baby N-09", gestAge: "28 wks", weight: "1.2 kg", status: "Critical" },
-    ];
+    return savedRows;
   }, [records]);
   const filteredNicuRows = useMemo(() => {
     const needle = search.trim().toLowerCase();
@@ -9653,11 +9859,7 @@ export function WorkflowModuleView({
           status: isSession ? "In Progress" : "Active Plan",
         };
       });
-    return [
-      ...savedRows,
-      { patient: "Faith Njeri", therapist: "A. Mwangi", session: "09:30 AM", status: "Booked" },
-      { patient: "Peter Odhiambo", therapist: "K. Wanjiru", session: "11:00 AM", status: "In Progress" },
-    ];
+    return savedRows;
   }, [records]);
   const filteredPhysioRows = useMemo(() => {
     const needle = search.trim().toLowerCase();
@@ -9690,11 +9892,7 @@ export function WorkflowModuleView({
           status: /screen/i.test(record.formId) ? String(data.risk_category || "Screened") : "Active",
         };
       });
-    return [
-      ...savedRows,
-      { patient: "Brian Kiplagat", plan: "Renal Diet", calories: "1800 kcal", status: "Active" },
-      { patient: "Susan Achieng", plan: "Diabetic Diet", calories: "1600 kcal", status: "Review" },
-    ];
+    return savedRows;
   }, [records]);
   const filteredNutritionRows = useMemo(() => {
     const needle = search.trim().toLowerCase();
@@ -9718,11 +9916,7 @@ export function WorkflowModuleView({
           status: /treatment/i.test(record.formId) ? "Completed" : "Recorded",
         };
       });
-    return [
-      ...savedRows,
-      { patient: "Mary Wanjiku", tooth: "36", procedure: "Extraction", status: "Completed" },
-      { patient: "Ali Hassan", tooth: "11", procedure: "Root Canal", status: "In Progress" },
-    ];
+    return savedRows;
   }, [records]);
   const filteredDentalRows = useMemo(() => {
     const needle = search.trim().toLowerCase();
@@ -9762,11 +9956,7 @@ export function WorkflowModuleView({
           action: "Audit",
         };
       });
-    return [
-      ...savedRows,
-      { type: "SSI Surveillance", unit: "Surgery", status: "Monitoring", action: "Audit" },
-      { type: "CSSD Cycle", unit: "Theatre", status: "Passed", action: "Released" },
-    ];
+    return savedRows;
   }, [records]);
   const filteredInfectionRows = useMemo(() => {
     const needle = search.trim().toLowerCase();
@@ -9806,11 +9996,7 @@ export function WorkflowModuleView({
           status: String(data.cadre || "Active"),
         };
       });
-    return [
-      ...savedRows,
-      { chw: "E. Wambui", household: "HH-0932", visit: "ANC Follow-up", status: "Completed" },
-      { chw: "P. Otieno", household: "HH-0144", visit: "Defaulter Trace", status: "Pending" },
-    ];
+    return savedRows;
   }, [records]);
   const filteredCommunityRows = useMemo(() => {
     const needle = search.trim().toLowerCase();
@@ -9834,11 +10020,7 @@ export function WorkflowModuleView({
           witness: String(data.witness_name || "Pending"),
         };
       });
-    return [
-      ...savedRows,
-      { patient: "Samuel Kariuki", consent: "Surgery", status: "Signed", witness: "Nurse W." },
-      { patient: "Diana Onyango", consent: "Blood Transfusion", status: "Pending", witness: "-" },
-    ];
+    return savedRows;
   }, [records]);
   const filteredConsentRows = useMemo(() => {
     const needle = search.trim().toLowerCase();
@@ -9870,11 +10052,7 @@ export function WorkflowModuleView({
           status: String(data.transport_mode || "Pending"),
         };
       });
-    return [
-      ...savedRows,
-      { patient: "Joseph Otieno", facility: "KNH", urgency: "High", status: "Accepted" },
-      { patient: "Amina Suleiman", facility: "Coast GH", urgency: "Routine", status: "Pending" },
-    ];
+    return savedRows;
   }, [records]);
   const filteredReferralRows = useMemo(() => {
     const needle = search.trim().toLowerCase();
@@ -9898,11 +10076,7 @@ export function WorkflowModuleView({
           status: String(data.access_level || "Indexed"),
         };
       });
-    return [
-      ...savedRows,
-      { document: "NHIF Pre-auth", type: "Insurance", owner: "Patient", status: "Indexed" },
-      { document: "Consent Scan", type: "Clinical", owner: "Ward", status: "Pending" },
-    ];
+    return savedRows;
   }, [records]);
   const filteredDocumentRows = useMemo(() => {
     const needle = search.trim().toLowerCase();
@@ -9934,11 +10108,7 @@ export function WorkflowModuleView({
           sent: String(data.scheduled_time || "Now"),
         };
       });
-    return [
-      ...savedRows,
-      { recipient: "2547****120", channel: "SMS", status: "Delivered", sent: "10:22 AM" },
-      { recipient: "2547****908", channel: "WhatsApp", status: "Queued", sent: "10:30 AM" },
-    ];
+    return savedRows;
   }, [records]);
   const filteredMessagingRows = useMemo(() => {
     const needle = search.trim().toLowerCase();
@@ -9970,11 +10140,7 @@ export function WorkflowModuleView({
           status: String(data.risk_classification || "Registered"),
         };
       });
-    return [
-      ...savedRows,
-      { device: "Ventilator V-12", dept: "ICU", nextService: "Apr 24", status: "Due" },
-      { device: "ECG Unit E-4", dept: "OPD", nextService: "May 02", status: "OK" },
-    ];
+    return savedRows;
   }, [records]);
   const filteredBiomedicalRows = useMemo(() => {
     const needle = search.trim().toLowerCase();
@@ -10075,11 +10241,7 @@ export function WorkflowModuleView({
           status: String(data.can_be_overridden || "").toLowerCase() === "false" ? "Hard Stop" : "Active",
         };
       });
-    return [
-      ...savedRows,
-      { rule: "Penicillin Allergy", trigger: "PRESCRIBE", severity: "HARD_STOP", status: "Active" },
-      { rule: "Sepsis SIRS", trigger: "VITAL_SIGN", severity: "CRITICAL", status: "Active" },
-    ];
+    return savedRows;
   }, [records]);
   const filteredCdssRows = useMemo(() => {
     const needle = search.trim().toLowerCase();
@@ -10799,17 +10961,27 @@ export function WorkflowModuleView({
       );
   }, [maternityPregnancies, search]);
   const workforceRows = useMemo(() => {
-    const rows = [
-      { department: "Emergency", required: "24", current: "19", gap: "-5" },
-      { department: "ICU", required: "18", current: "17", gap: "-1" },
-    ];
+    const rows = records
+      .filter((record) => /workforce|staff|shift|planning|coverage|roster/i.test(`${record.formId} ${JSON.stringify(record.data || {})}`))
+      .map((record) => {
+        const data = record.data || {};
+        const required = Number(data.required_staff || data.required || data.target_headcount || 0);
+        const current = Number(data.current_staff || data.current || data.actual_headcount || 0);
+        const gap = Number.isFinite(required) && Number.isFinite(current) ? current - required : 0;
+        return {
+          department: String(data.department || data.department_id || data.unit || record.formId || "-"),
+          required: Number.isFinite(required) && required > 0 ? String(required) : "-",
+          current: Number.isFinite(current) && current > 0 ? String(current) : "-",
+          gap: Number.isFinite(gap) && (required || current) ? String(gap) : "-",
+        };
+      });
     const term = search.trim().toLowerCase();
     return rows.filter((row) =>
       !term
         ? true
         : `${row.department} ${row.required} ${row.current} ${row.gap}`.toLowerCase().includes(term),
     );
-  }, [search]);
+  }, [records, search]);
   const ictRows = useMemo(() => {
     const formTitleFor = (formId: string) =>
       module.forms.find((candidate) => candidate.id === formId)?.title || formId;
@@ -10838,24 +11010,8 @@ export function WorkflowModuleView({
           logged: String(data.date_time_detected || data.change_window || data.implementation_time || "Today"),
         };
       });
-    const fallbackRows = [
-      {
-        event: "Failed login spike",
-        severity: "High",
-        status: "Investigating",
-        owner: "ICT Security Officer",
-        logged: "Today",
-      },
-      {
-        event: "Firewall policy change",
-        severity: "Medium",
-        status: "Pending approval",
-        owner: "Systems Administrator",
-        logged: "Yesterday",
-      },
-    ];
     const term = search.trim().toLowerCase();
-    return (savedRows.length > 0 ? savedRows : fallbackRows).filter((row) =>
+    return savedRows.filter((row) =>
       !term
         ? true
         : `${row.event} ${row.severity} ${row.status} ${row.owner} ${row.logged}`
@@ -10878,12 +11034,8 @@ export function WorkflowModuleView({
           date: String(data.shift_date || data.assessment_date || record.createdAt || "-"),
         };
       });
-    const fallbackRows = [
-      { nurse: "Night Duty Team", ward: "ICU", shift: "Night", status: "Pending", date: "Today" },
-      { nurse: "Ward A Roster", ward: "Medical Ward", shift: "Day", status: "Approved", date: "Today" },
-    ];
     const term = search.trim().toLowerCase();
-    return (savedRows.length > 0 ? savedRows : fallbackRows).filter((row) =>
+    return savedRows.filter((row) =>
       !term
         ? true
         : `${row.nurse} ${row.ward} ${row.shift} ${row.status} ${row.date}`.toLowerCase().includes(term),
@@ -10893,7 +11045,11 @@ export function WorkflowModuleView({
     const formTitleFor = (formId: string) =>
       module.forms.find((candidate) => candidate.id === formId)?.title || formId;
     const savedRows = records
-      .filter((record) => /medical_director/i.test(record.formId))
+      .filter((record) =>
+        /medical_director|doctor|clinical|protocol|mortality|complication|risk|restricted|drug|performance|outcome|critical|m&m/i.test(
+          `${record.formId || ""} ${formTitleFor(record.formId)}`,
+        ),
+      )
       .map((record) => {
         const data = record.data || {};
         return {
@@ -10903,12 +11059,8 @@ export function WorkflowModuleView({
           period: String(data.metric_period || data.metric_date || data.detected_at || data.createdAt || record.createdAt || "-"),
         };
       });
-    const fallbackRows = [
-      { doctor: "Medical Officer Review", score: "88.0", risk: "LOW", period: "Current Month" },
-      { doctor: "Surgical Team Scorecard", score: "79.5", risk: "MEDIUM", period: "Current Month" },
-    ];
     const term = search.trim().toLowerCase();
-    return (savedRows.length > 0 ? savedRows : fallbackRows).filter((row) =>
+    return savedRows.filter((row) =>
       !term
         ? true
         : `${row.doctor} ${row.score} ${row.risk} ${row.period}`.toLowerCase().includes(term),
@@ -10930,13 +11082,8 @@ export function WorkflowModuleView({
           date: String(record.createdAt || "Today"),
         };
       });
-    const fallbackRows = [
-      { claim: "CLM-2407-018", status: "Submitted", billed: 184500, outstanding: 42500, date: "2026-05-18" },
-      { claim: "CLM-2407-019", status: "Denied", billed: 93200, outstanding: 93200, date: "2026-05-19" },
-      { claim: "INV-2407-021", status: "Write-off review", billed: 37600, outstanding: 37600, date: "2026-05-20" },
-    ];
     const term = search.trim().toLowerCase();
-    return (savedRows.length > 0 ? savedRows : fallbackRows).filter((row) =>
+    return savedRows.filter((row) =>
       !term
         ? true
         : `${row.claim} ${row.status} ${row.billed} ${row.outstanding} ${row.date}`.toLowerCase().includes(term),
@@ -10969,7 +11116,7 @@ export function WorkflowModuleView({
       Denied: "#7c3aed",
       "Write-off": "#f59e0b",
     };
-    const trendPalette = ["#16a34a", "#2563eb", "#7c3aed", "#f59e0b", "#0891b2", "#e11d48"];
+    const trendPalette = ["#16a34a", "#2563eb", "#7c3aed", "#f59e0b", "#0891b2", "#9333ea"];
     const buildGradient = (entries: Array<[string, number]>, colorFor: (label: string, index: number) => string) => {
       const total = Math.max(1, entries.reduce((sum, [, value]) => sum + value, 0));
       let cursor = 0;
@@ -11606,6 +11753,7 @@ export function WorkflowModuleView({
     if (isRegistrationModule) {
       setRegistrationDuplicateCheck(null);
     }
+    void loadLiveModuleData();
   };
 
   const submitQueuedLabOrder = async (e: React.FormEvent) => {
@@ -23499,14 +23647,14 @@ export function WorkflowModuleView({
               ["medical_director_doctor_privilege", "Doctor Privilege Assignment", "consultation", "#2563eb"],
               ["medical_director_clinical_protocol", "Clinical Protocol", "settings", "#7c3aed"],
               ["medical_director_protocol_version", "Protocol Version", "settings", "#0d9488"],
-              ["medical_director_mortality_review", "Mortality Review", "triage", "#dc2626"],
+              ["medical_director_mortality_review", "Mortality Review", "triage", "#0d9488"],
               ["medical_director_complication_report", "Complication Report", "activity", "#f59e0b"],
-              ["medical_director_clinical_risk_alert", "Clinical Risk Alert", "activity", "#be123c"],
+              ["medical_director_clinical_risk_alert", "Clinical Risk Alert", "activity", "#9333ea"],
               ["medical_director_restricted_drug_approval", "Restricted Drug Approval", "admission", "#9333ea"],
               ["medical_director_mmr_meeting", "M&M Review Meeting", "triage", "#0891b2"],
               ["medical_director_performance_score", "Doctor Performance Score", "activity", "#1d4ed8"],
               ["medical_director_outcome_metric", "Clinical Outcome Metric", "activity", "#059669"],
-              ["medical_director_critical_case_alert", "Critical Case Alert", "activity", "#e11d48"],
+              ["medical_director_critical_case_alert", "Critical Case Alert", "activity", "#14b8a6"],
             ].map(([formId, label, iconType, color]) => (
               <button
                 key={formId}
@@ -23566,7 +23714,7 @@ export function WorkflowModuleView({
               ["strategic_facility_ranking", "Facility Ranking", "activity", "#0891b2"],
               ["strategic_forecasting_model", "Forecasting Model", "activity", "#f59e0b"],
               ["strategic_scenario_simulation", "Scenario Simulation", "transfer", "#0d9488"],
-              ["strategic_risk_alert", "Strategic Risk Alert", "triage", "#dc2626"],
+              ["strategic_risk_alert", "Strategic Risk Alert", "triage", "#0d9488"],
               ["executive_note", "Executive Note", "form", "#475569"],
             ].map(([formId, label, iconType, color]) => (
               <button
@@ -23608,24 +23756,49 @@ export function WorkflowModuleView({
         )}
       </div>
 
+      {moduleDomainKey && liveModuleMixRows.length > 0 && (
+        <section className="reporting-chart-grid" style={{ marginTop: 16, marginBottom: 16 }}>
+          <article className="reporting-chart-card">
+            <div className="reporting-chart-head">
+              <div>
+                <h3>Record Mix</h3>
+                <p>Live distribution from backend records for this module.</p>
+              </div>
+            </div>
+            <div className="reporting-pie-layout">
+              <div className="reporting-pie" style={{ background: liveModulePieGradient }} />
+              <div className="reporting-pie-legend">
+                {liveModuleMixRows.map((row: any) => (
+                  <div className="reporting-pie-legend-item" key={`${row.label}-${row.color}`}>
+                    <span className="reporting-pie-dot" style={{ background: row.color }} />
+                    <span>{row.label}</span>
+                    <strong>{row.value.toLocaleString()}</strong>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </article>
+        </section>
+      )}
+
       {isNicuModule && (
         <>
           <div className="pv-stats nicu-stat-grid">
             <article className="pv-stat-card" style={{ borderLeftColor: "#1e3a8a" }}>
               <p className="pv-stat-label">Admissions</p>
-              <strong>8</strong>
+              <strong>{liveCardValue("Admissions", filteredNicuRows.length)}</strong>
             </article>
             <article className="pv-stat-card" style={{ borderLeftColor: "#dc2626" }}>
               <p className="pv-stat-label">On CPAP</p>
-              <strong>3</strong>
+              <strong>{liveCardValue("Critical Alerts", 0)}</strong>
             </article>
             <article className="pv-stat-card" style={{ borderLeftColor: "#f59e0b" }}>
               <p className="pv-stat-label">Phototherapy</p>
-              <strong>2</strong>
+              <strong>{liveCardValue("Pending Reviews", 0)}</strong>
             </article>
             <article className="pv-stat-card" style={{ borderLeftColor: "#0d9488" }}>
               <p className="pv-stat-label">Avg LOS</p>
-              <strong>5.2 days</strong>
+              <strong>{liveCardValue("Completed", 0)}</strong>
             </article>
           </div>
 
@@ -23688,19 +23861,19 @@ export function WorkflowModuleView({
           <div className="pv-stats physio-stat-grid">
             <article className="pv-stat-card" style={{ borderLeftColor: "#1e3a8a" }}>
               <p className="pv-stat-label">Active Plans</p>
-              <strong>16</strong>
+              <strong>{liveCardValue("Active Plans", filteredPhysioRows.length)}</strong>
             </article>
             <article className="pv-stat-card" style={{ borderLeftColor: "#0d9488" }}>
               <p className="pv-stat-label">Sessions Today</p>
-              <strong>9</strong>
+              <strong>{liveCardValue("Sessions Today", 0)}</strong>
             </article>
             <article className="pv-stat-card" style={{ borderLeftColor: "#f59e0b" }}>
               <p className="pv-stat-label">Equipment Bookings</p>
-              <strong>5</strong>
+              <strong>{liveCardValue("Pending", 0)}</strong>
             </article>
             <article className="pv-stat-card" style={{ borderLeftColor: "#16a34a" }}>
               <p className="pv-stat-label">Discharge Ready</p>
-              <strong>3</strong>
+              <strong>{liveCardValue("Completed", 0)}</strong>
             </article>
           </div>
 
@@ -23763,19 +23936,19 @@ export function WorkflowModuleView({
           <div className="pv-stats nutrition-stat-grid">
             <article className="pv-stat-card" style={{ borderLeftColor: "#dc2626" }}>
               <p className="pv-stat-label">At-Risk Patients</p>
-              <strong>7</strong>
+              <strong>{liveCardValue("Critical Alerts", 0)}</strong>
             </article>
             <article className="pv-stat-card" style={{ borderLeftColor: "#1e3a8a" }}>
               <p className="pv-stat-label">Diet Plans</p>
-              <strong>24</strong>
+              <strong>{liveCardValue("Diet Plans", filteredNutritionRows.length)}</strong>
             </article>
             <article className="pv-stat-card" style={{ borderLeftColor: "#0d9488" }}>
               <p className="pv-stat-label">Enteral Orders</p>
-              <strong>6</strong>
+              <strong>{liveCardValue("Orders", 0)}</strong>
             </article>
             <article className="pv-stat-card" style={{ borderLeftColor: "#f59e0b" }}>
               <p className="pv-stat-label">Follow-ups</p>
-              <strong>5</strong>
+              <strong>{liveCardValue("Pending", 0)}</strong>
             </article>
           </div>
 
@@ -23838,19 +24011,19 @@ export function WorkflowModuleView({
           <div className="pv-stats dental-stat-grid">
             <article className="pv-stat-card" style={{ borderLeftColor: "#1e3a8a" }}>
               <p className="pv-stat-label">Patients Today</p>
-              <strong>12</strong>
+              <strong>{liveCardValue("Patients Today", 0)}</strong>
             </article>
             <article className="pv-stat-card" style={{ borderLeftColor: "#0d9488" }}>
               <p className="pv-stat-label">Procedures</p>
-              <strong>18</strong>
+              <strong>{liveCardValue("Procedures", filteredDentalRows.length)}</strong>
             </article>
             <article className="pv-stat-card" style={{ borderLeftColor: "#f59e0b" }}>
               <p className="pv-stat-label">Pending Approvals</p>
-              <strong>3</strong>
+              <strong>{liveCardValue("Pending Approvals", 0)}</strong>
             </article>
             <article className="pv-stat-card" style={{ borderLeftColor: "#16a34a" }}>
               <p className="pv-stat-label">Revenue</p>
-              <strong>KES 142k</strong>
+              <strong>{liveCardValue("Revenue", 0)}</strong>
             </article>
           </div>
 
@@ -23913,19 +24086,19 @@ export function WorkflowModuleView({
           <div className="pv-stats infection-stat-grid">
             <article className="pv-stat-card" style={{ borderLeftColor: "#dc2626" }}>
               <p className="pv-stat-label">HAI Alerts</p>
-              <strong>2</strong>
+              <strong>{liveCardValue("Critical Alerts", 0)}</strong>
             </article>
             <article className="pv-stat-card" style={{ borderLeftColor: "#f59e0b" }}>
               <p className="pv-stat-label">Open Incidents</p>
-              <strong>5</strong>
+              <strong>{liveCardValue("Open Incidents", 0)}</strong>
             </article>
             <article className="pv-stat-card" style={{ borderLeftColor: "#0d9488" }}>
               <p className="pv-stat-label">CSSD Cycles</p>
-              <strong>34</strong>
+              <strong>{liveCardValue("CSSD Cycles", filteredInfectionRows.length)}</strong>
             </article>
             <article className="pv-stat-card" style={{ borderLeftColor: "#16a34a" }}>
               <p className="pv-stat-label">Compliance</p>
-              <strong>91%</strong>
+              <strong>{liveCardValue("Compliance", "0.00%")}</strong>
             </article>
           </div>
 
@@ -23988,19 +24161,19 @@ export function WorkflowModuleView({
           <div className="pv-stats community-stat-grid">
             <article className="pv-stat-card" style={{ borderLeftColor: "#1e3a8a" }}>
               <p className="pv-stat-label">Households</p>
-              <strong>320</strong>
+              <strong>{liveCardValue("Households", filteredCommunityRows.length)}</strong>
             </article>
             <article className="pv-stat-card" style={{ borderLeftColor: "#0d9488" }}>
               <p className="pv-stat-label">Visits Today</p>
-              <strong>27</strong>
+              <strong>{liveCardValue("Visits Today", 0)}</strong>
             </article>
             <article className="pv-stat-card" style={{ borderLeftColor: "#dc2626" }}>
               <p className="pv-stat-label">Defaulters</p>
-              <strong>12</strong>
+              <strong>{liveCardValue("Critical Alerts", 0)}</strong>
             </article>
             <article className="pv-stat-card" style={{ borderLeftColor: "#f59e0b" }}>
               <p className="pv-stat-label">Referrals</p>
-              <strong>9</strong>
+              <strong>{liveCardValue("Referrals", filteredCommunityRows.length)}</strong>
             </article>
           </div>
 
@@ -24063,19 +24236,19 @@ export function WorkflowModuleView({
           <div className="pv-stats consent-stat-grid">
             <article className="pv-stat-card" style={{ borderLeftColor: "#dc2626" }}>
               <p className="pv-stat-label">Pending Consents</p>
-              <strong>11</strong>
+              <strong>{liveCardValue("Pending Consents", 0)}</strong>
             </article>
             <article className="pv-stat-card" style={{ borderLeftColor: "#0d9488" }}>
               <p className="pv-stat-label">Signed Today</p>
-              <strong>26</strong>
+              <strong>{liveCardValue("Signed Today", 0)}</strong>
             </article>
             <article className="pv-stat-card" style={{ borderLeftColor: "#f59e0b" }}>
               <p className="pv-stat-label">Withdrawn</p>
-              <strong>1</strong>
+              <strong>{liveCardValue("Critical Alerts", 0)}</strong>
             </article>
             <article className="pv-stat-card" style={{ borderLeftColor: "#1e3a8a" }}>
               <p className="pv-stat-label">Expiring</p>
-              <strong>4</strong>
+              <strong>{liveCardValue("Expiring", 0)}</strong>
             </article>
           </div>
 
@@ -24138,19 +24311,19 @@ export function WorkflowModuleView({
           <div className="pv-stats referral-stat-grid">
             <article className="pv-stat-card" style={{ borderLeftColor: "#1e3a8a" }}>
               <p className="pv-stat-label">Outgoing</p>
-              <strong>14</strong>
+              <strong>{liveCardValue("Outgoing Referrals", filteredReferralRows.length)}</strong>
             </article>
             <article className="pv-stat-card" style={{ borderLeftColor: "#0d9488" }}>
               <p className="pv-stat-label">Incoming</p>
-              <strong>6</strong>
+              <strong>{liveCardValue("Incoming", 0)}</strong>
             </article>
             <article className="pv-stat-card" style={{ borderLeftColor: "#16a34a" }}>
               <p className="pv-stat-label">Accepted</p>
-              <strong>8</strong>
+              <strong>{liveCardValue("Accepted", 0)}</strong>
             </article>
             <article className="pv-stat-card" style={{ borderLeftColor: "#f59e0b" }}>
               <p className="pv-stat-label">Pending</p>
-              <strong>5</strong>
+              <strong>{liveCardValue("Pending", 0)}</strong>
             </article>
           </div>
 
@@ -24213,19 +24386,19 @@ export function WorkflowModuleView({
           <div className="pv-stats document-stat-grid">
             <article className="pv-stat-card" style={{ borderLeftColor: "#1e3a8a" }}>
               <p className="pv-stat-label">Uploads Today</p>
-              <strong>18</strong>
+              <strong>{liveCardValue("Uploads Today", 0)}</strong>
             </article>
             <article className="pv-stat-card" style={{ borderLeftColor: "#f59e0b" }}>
               <p className="pv-stat-label">Pending Review</p>
-              <strong>7</strong>
+              <strong>{liveCardValue("Pending Review", 0)}</strong>
             </article>
             <article className="pv-stat-card" style={{ borderLeftColor: "#dc2626" }}>
               <p className="pv-stat-label">Expiring</p>
-              <strong>3</strong>
+              <strong>{liveCardValue("Expiring", 0)}</strong>
             </article>
             <article className="pv-stat-card" style={{ borderLeftColor: "#0d9488" }}>
               <p className="pv-stat-label">OCR Queue</p>
-              <strong>12</strong>
+              <strong>{liveCardValue("Pending", 0)}</strong>
             </article>
           </div>
 
@@ -24288,19 +24461,19 @@ export function WorkflowModuleView({
           <div className="pv-stats messaging-stat-grid">
             <article className="pv-stat-card" style={{ borderLeftColor: "#1e3a8a" }}>
               <p className="pv-stat-label">Messages Sent</p>
-              <strong>214</strong>
+              <strong>{liveCardValue("Messages Sent", filteredMessagingRows.length)}</strong>
             </article>
             <article className="pv-stat-card" style={{ borderLeftColor: "#dc2626" }}>
               <p className="pv-stat-label">Failed</p>
-              <strong>6</strong>
+              <strong>{liveCardValue("Failed", 0)}</strong>
             </article>
             <article className="pv-stat-card" style={{ borderLeftColor: "#0d9488" }}>
               <p className="pv-stat-label">Opt-ins</p>
-              <strong>480</strong>
+              <strong>{liveCardValue("Active Records", 0)}</strong>
             </article>
             <article className="pv-stat-card" style={{ borderLeftColor: "#f59e0b" }}>
               <p className="pv-stat-label">Templates</p>
-              <strong>12</strong>
+              <strong>{liveCardValue("Templates", filteredMessagingRows.length)}</strong>
             </article>
           </div>
 
@@ -24363,19 +24536,19 @@ export function WorkflowModuleView({
           <div className="pv-stats biomedical-stat-grid">
             <article className="pv-stat-card" style={{ borderLeftColor: "#1e3a8a" }}>
               <p className="pv-stat-label">Devices</p>
-              <strong>128</strong>
+              <strong>{liveCardValue("Devices", filteredBiomedicalRows.length)}</strong>
             </article>
             <article className="pv-stat-card" style={{ borderLeftColor: "#f59e0b" }}>
               <p className="pv-stat-label">Maintenance Due</p>
-              <strong>9</strong>
+              <strong>{liveCardValue("Maintenance Due", 0)}</strong>
             </article>
             <article className="pv-stat-card" style={{ borderLeftColor: "#0d9488" }}>
               <p className="pv-stat-label">Calibrations</p>
-              <strong>6</strong>
+              <strong>{liveCardValue("Calibrations", 0)}</strong>
             </article>
             <article className="pv-stat-card" style={{ borderLeftColor: "#dc2626" }}>
               <p className="pv-stat-label">Recall Alerts</p>
-              <strong>1</strong>
+              <strong>{liveCardValue("Recall Alerts", 0)}</strong>
             </article>
           </div>
 
@@ -24438,19 +24611,19 @@ export function WorkflowModuleView({
           <div className="pv-stats home-care-stat-grid">
             <article className="pv-stat-card" style={{ borderLeftColor: "#1e3a8a" }}>
               <p className="pv-stat-label">Visits Today</p>
-              <strong>14</strong>
+              <strong>{liveCardValue("Visits Today", 0)}</strong>
             </article>
             <article className="pv-stat-card" style={{ borderLeftColor: "#f59e0b" }}>
               <p className="pv-stat-label">Pending</p>
-              <strong>5</strong>
+              <strong>{liveCardValue("Pending", 0)}</strong>
             </article>
             <article className="pv-stat-card" style={{ borderLeftColor: "#0d9488" }}>
               <p className="pv-stat-label">Equipment Dispatch</p>
-              <strong>3</strong>
+              <strong>{liveCardValue("Active Records", filteredHomeCareRows.length)}</strong>
             </article>
             <article className="pv-stat-card" style={{ borderLeftColor: "#dc2626" }}>
               <p className="pv-stat-label">Escalations</p>
-              <strong>1</strong>
+              <strong>{liveCardValue("Escalations", 0)}</strong>
             </article>
           </div>
 
@@ -24559,19 +24732,19 @@ export function WorkflowModuleView({
           <div className="pv-stats cdss-stat-grid">
             <article className="pv-stat-card" style={{ borderLeftColor: "#1e3a8a" }}>
               <p className="pv-stat-label">Active Rules</p>
-              <strong>28</strong>
+              <strong>{liveCardValue("Active Rules", filteredCdssRows.length)}</strong>
             </article>
             <article className="pv-stat-card" style={{ borderLeftColor: "#dc2626" }}>
               <p className="pv-stat-label">Critical Alerts</p>
-              <strong>4</strong>
+              <strong>{liveCardValue("Critical Alerts", 0)}</strong>
             </article>
             <article className="pv-stat-card" style={{ borderLeftColor: "#b91c1c" }}>
               <p className="pv-stat-label">Hard Stops</p>
-              <strong>2</strong>
+              <strong>{liveCardValue("Hard Stops", 0)}</strong>
             </article>
             <article className="pv-stat-card" style={{ borderLeftColor: "#0d9488" }}>
               <p className="pv-stat-label">Pending Reviews</p>
-              <strong>6</strong>
+              <strong>{liveCardValue("Pending Reviews", 0)}</strong>
             </article>
           </div>
 
@@ -27080,15 +27253,15 @@ export function WorkflowModuleView({
           <div className="pv-stats workforce-stat-grid">
             <article className="pv-stat-card" style={{ borderLeftColor: "#dc2626" }}>
               <p className="pv-stat-label">Projected Gap</p>
-              <strong>12</strong>
+              <strong>{workforceRows.filter((row) => String(row.gap).startsWith("-")).length}</strong>
             </article>
             <article className="pv-stat-card" style={{ borderLeftColor: "#1e3a8a" }}>
               <p className="pv-stat-label">Filled Roles</p>
-              <strong>210</strong>
+              <strong>{liveCardValue("Active Records", workforceRows.length)}</strong>
             </article>
             <article className="pv-stat-card" style={{ borderLeftColor: "#0d9488" }}>
               <p className="pv-stat-label">Overtime Hours</p>
-              <strong>320</strong>
+              <strong>{liveCardValue("Today Records", 0)}</strong>
             </article>
           </div>
 
@@ -27215,7 +27388,7 @@ export function WorkflowModuleView({
             </article>
             <article className="pv-stat-card" style={{ borderLeftColor: "#dc2626" }}>
               <p className="pv-stat-label">Open Incidents</p>
-              <strong>0</strong>
+              <strong>{liveCardValue("Open Incidents", 0)}</strong>
             </article>
             <article className="pv-stat-card" style={{ borderLeftColor: "#7c3aed" }}>
               <p className="pv-stat-label">Burnout Risk</p>
