@@ -28,9 +28,26 @@ export const REFRESH_TOKEN_STORAGE_KEY = "hmis_refresh_token";
 export const SESSION_STORAGE_KEY = "hmis_hospital_admin_session";
 export const DEVICE_ID_STORAGE_KEY = "hmis_device_id";
 export const LICENSE_FACILITY_STORAGE_KEY = "hmis_license_facility_code";
+export const HMIS_LIVE_REFRESH_EVENT = "hmis:live-data-changed";
+const HMIS_LIVE_REFRESH_STORAGE_KEY = "hmis_live_data_changed_at";
 let csrfTokenCache: string | null = null;
 let accessTokenMemory: string | null = null;
 let refreshTokenMemory: string | null = null;
+
+export function notifyLiveDataChanged(detail: Record<string, unknown> = {}) {
+  if (typeof window === "undefined") return;
+  const payload = {
+    ...detail,
+    changedAt: String(detail.changedAt || new Date().toISOString()),
+    source: String(detail.source || "desktop"),
+  };
+  window.dispatchEvent(new CustomEvent(HMIS_LIVE_REFRESH_EVENT, { detail: payload }));
+  try {
+    window.localStorage.setItem(HMIS_LIVE_REFRESH_STORAGE_KEY, JSON.stringify(payload));
+  } catch {
+    // Cross-window refresh is best effort only.
+  }
+}
 
 type LoginPayload = {
   email: string;
@@ -411,11 +428,12 @@ export async function apiFetch(
     if (token) {
       retryHeaders.set("Authorization", `Bearer ${token}`);
     }
-    return fetch(`${API_BASE_URL}${path}`, {
+    const retry = await fetch(`${API_BASE_URL}${path}`, {
       ...init,
       headers: retryHeaders,
       credentials: "include",
     });
+    return retry;
   }
 
   if (first.status !== 401) {
@@ -439,11 +457,12 @@ export async function apiFetch(
     retryHeaders.set("Authorization", `Bearer ${newAccessToken}`);
   }
 
-  return fetch(`${API_BASE_URL}${path}`, {
+  const retry = await fetch(`${API_BASE_URL}${path}`, {
     ...init,
     headers: retryHeaders,
     credentials: "include",
   });
+  return retry;
 }
 
 export async function fetchModuleDomainRecords(moduleKey: string, limit = 100) {
@@ -470,6 +489,65 @@ export async function fetchModuleDomainSummary(moduleKey: string, limit = 500) {
     throw new Error(toErrorMessage(body, "Module statistics could not be loaded"));
   }
   return body || null;
+}
+
+async function postAutomation(path: string, payload: Record<string, unknown> = {}) {
+  const response = await apiFetch(path, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  const body = await parseJsonSafe(response);
+  if (!response.ok) {
+    throw new Error(toErrorMessage(body, "HMIS automation failed"));
+  }
+  return body?.data ?? body;
+}
+
+export type HmisAutomationArea =
+  | "patients"
+  | "appointments"
+  | "queue"
+  | "pharmacy";
+
+export function runHmisAutomation(
+  area: HmisAutomationArea,
+  action: string,
+  payload: Record<string, unknown> = {},
+) {
+  return postAutomation(`/hmis-automation/${area}/${action}`, payload);
+}
+
+export function runClinicalAutomation(
+  module: string,
+  action: string,
+  payload: Record<string, unknown> = {},
+) {
+  return postAutomation(`/hmis-automation/clinical/${module}/${action}`, payload);
+}
+
+export function runDiagnosticsAutomation(
+  module: "lab" | "radiology",
+  action: string,
+  payload: Record<string, unknown> = {},
+) {
+  return postAutomation(`/hmis-automation/diagnostics/${module}/${action}`, payload);
+}
+
+export function runFinanceAutomation(
+  module: string,
+  action: string,
+  payload: Record<string, unknown> = {},
+) {
+  return postAutomation(`/hmis-automation/finance/${module}/${action}`, payload);
+}
+
+export function runSupportAutomation(
+  module: string,
+  action: string,
+  payload: Record<string, unknown> = {},
+) {
+  return postAutomation(`/hmis-automation/support/${module}/${action}`, payload);
 }
 
 export type BackendPatientInput = {
@@ -1078,25 +1156,57 @@ export async function fetchOpdQueue(params?: {
 }
 
 export async function fetchQueueBoard(params?: {
+  facilityId?: string;
   departmentId?: string;
   doctorId?: string;
   queueType?: string;
   includeCompleted?: boolean;
 }) {
-  const query = new URLSearchParams();
-  if (params?.departmentId) query.set("departmentId", params.departmentId);
-  if (params?.doctorId) query.set("doctorId", params.doctorId);
-  if (params?.queueType) query.set("queueType", params.queueType);
-  if (typeof params?.includeCompleted === "boolean") {
-    query.set("includeCompleted", params.includeCompleted ? "true" : "false");
-  }
-  const qs = query.toString();
-  const res = await apiFetch(`/opd/queue/board${qs ? `?${qs}` : ""}`);
-  const body = await parseJsonSafe(res);
-  if (!res.ok) {
-    throw new Error(toErrorMessage(body, "Failed to fetch queue board"));
-  }
-  return (body as any)?.data ?? body;
+  const buildQuery = (includeFacilityId: boolean) => {
+    const query = new URLSearchParams();
+    if (includeFacilityId && params?.facilityId) query.set("facilityId", params.facilityId);
+    if (params?.departmentId) query.set("departmentId", params.departmentId);
+    if (params?.doctorId) query.set("doctorId", params.doctorId);
+    if (params?.queueType) query.set("queueType", params.queueType);
+    if (typeof params?.includeCompleted === "boolean") {
+      query.set("includeCompleted", params.includeCompleted ? "true" : "false");
+    }
+    return query.toString();
+  };
+
+  const fetchBoardPayload = async (qs: string) => {
+    const res = await apiFetch(`/opd/queue/board${qs ? `?${qs}` : ""}`);
+    const body = await parseJsonSafe(res);
+    if (res.ok) {
+      const payload = (body as any)?.data ?? body;
+      const tokens = Array.isArray((payload as any)?.tokens) ? (payload as any).tokens : [];
+      if (tokens.length > 0) return payload;
+    }
+
+    const fallbackRes = await apiFetch(`/queue/board${qs ? `?${qs}` : ""}`);
+    const fallbackBody = await parseJsonSafe(fallbackRes);
+    if (fallbackRes.ok) {
+      const payload = (fallbackBody as any)?.data ?? fallbackBody;
+      const tokens = Array.isArray((payload as any)?.tokens) ? (payload as any).tokens : [];
+      if (tokens.length > 0) return payload;
+      if (res.ok) return (body as any)?.data ?? body;
+      return payload;
+    }
+
+    if (!res.ok) {
+      throw new Error(toErrorMessage(fallbackBody, toErrorMessage(body, "Failed to fetch queue board")));
+    }
+    return (body as any)?.data ?? body;
+  };
+
+  const qs = buildQuery(true);
+  const payload = await fetchBoardPayload(qs);
+  const tokens = Array.isArray((payload as any)?.tokens) ? (payload as any).tokens : [];
+  if (tokens.length > 0 || !params?.facilityId) return payload;
+
+  const fallbackPayload = await fetchBoardPayload(buildQuery(false));
+  const fallbackTokens = Array.isArray((fallbackPayload as any)?.tokens) ? (fallbackPayload as any).tokens : [];
+  return fallbackTokens.length > 0 ? fallbackPayload : payload;
 }
 
 export async function fetchQueueAnalytics(params?: {
@@ -1177,6 +1287,27 @@ export async function updateQueueTokenStatus(payload: {
   const body = await parseJsonSafe(res);
   if (!res.ok) {
     throw new Error(toErrorMessage(body, "Failed to update queue token status"));
+  }
+  return (body as any)?.data ?? body;
+}
+
+export async function transferQueueToken(payload: {
+  tokenNumber?: string;
+  tokenId?: string;
+  departmentId: string;
+  queueType?: string;
+  tokenPrefix?: string;
+  reason?: string;
+  priority?: string | number;
+}) {
+  const res = await apiFetch("/opd/queue/token/transfer", {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload || {}),
+  });
+  const body = await parseJsonSafe(res);
+  if (!res.ok) {
+    throw new Error(toErrorMessage(body, "Failed to transfer queue token"));
   }
   return (body as any)?.data ?? body;
 }
@@ -6295,6 +6426,10 @@ export async function submitModuleRecord(input: WorkflowSubmitInput) {
         if (["false", "0", "no", "n"].includes(normalized)) return false;
         return undefined;
       };
+      const vulnerabilityFlags = String(input.formData.vulnerability_flags || "")
+        .split(",")
+        .map((flag) => flag.trim())
+        .filter(Boolean);
 
       const commonPayload: Partial<BackendPatientInput> = {
         ...(firstName ? { firstName } : {}),
@@ -6311,6 +6446,10 @@ export async function submitModuleRecord(input: WorkflowSubmitInput) {
           ? { address: input.formData.physical_address || input.formData.address }
           : {}),
         ...(input.formData.allergies ? { allergies: input.formData.allergies } : {}),
+        ...(input.formData.photo_url || input.formData.patient_photo
+          ? { photoUrl: input.formData.photo_url || input.formData.patient_photo }
+          : {}),
+        ...(vulnerabilityFlags.length > 0 ? { vulnerabilityFlags } : {}),
         ...(input.formData.emergency_contact_name
           ? { nextOfKinName: input.formData.emergency_contact_name }
           : {}),
@@ -6341,6 +6480,7 @@ export async function submitModuleRecord(input: WorkflowSubmitInput) {
         consentVersion: input.formData.consent_version || undefined,
         consentAcceptedAt: input.formData.consent_accepted_at || undefined,
         portalAccessEnabled: parseBool(input.formData.portal_access_enabled),
+        portalPhone: input.formData.portal_phone || input.formData.phone || undefined,
         referralSource: input.formData.referral_source || undefined,
         duplicateOverrideReason: input.formData.duplicate_override_reason || undefined,
         facilityLinkNote: input.formData.facility_link_note || undefined,
@@ -6369,6 +6509,10 @@ export async function submitModuleRecord(input: WorkflowSubmitInput) {
         ...(commonPayload.email ? { email: commonPayload.email } : {}),
         ...(commonPayload.address ? { address: commonPayload.address } : {}),
         ...(commonPayload.allergies ? { allergies: commonPayload.allergies } : {}),
+        ...(commonPayload.photoUrl ? { photoUrl: commonPayload.photoUrl } : {}),
+        ...(commonPayload.vulnerabilityFlags && commonPayload.vulnerabilityFlags.length > 0
+          ? { vulnerabilityFlags: commonPayload.vulnerabilityFlags }
+          : {}),
         ...(commonPayload.nextOfKinName ? { nextOfKinName: commonPayload.nextOfKinName } : {}),
         ...(commonPayload.nextOfKinPhone ? { nextOfKinPhone: commonPayload.nextOfKinPhone } : {}),
         ...(commonPayload.insuranceProvider
@@ -6414,6 +6558,7 @@ export async function submitModuleRecord(input: WorkflowSubmitInput) {
         ...(commonPayload.portalAccessEnabled !== undefined
           ? { portalAccessEnabled: commonPayload.portalAccessEnabled }
           : {}),
+        ...(commonPayload.portalPhone ? { portalPhone: commonPayload.portalPhone } : {}),
         ...(commonPayload.referralSource ? { referralSource: commonPayload.referralSource } : {}),
         ...(commonPayload.duplicateOverrideReason
           ? { duplicateOverrideReason: commonPayload.duplicateOverrideReason }

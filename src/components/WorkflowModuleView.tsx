@@ -5,6 +5,7 @@ import {
   type WorkflowField,
   type WorkflowModule,
 } from "../modules/workflowCatalog";
+import { getHmisAutomationActions } from "../modules/hmisAutomationActions";
 import {
   clockInStaff,
   clockOutAttendance,
@@ -84,6 +85,7 @@ import {
   fetchSecurityRbacCatalog,
   fetchModuleDomainRecords,
   fetchModuleDomainSummary,
+  apiFetch,
   fetchInpatientAdmissions,
   fetchInpatientDashboard,
   fetchLaboratoryDashboard,
@@ -254,6 +256,45 @@ import {
 } from "../lib/apiClient";
 import { useAppStore } from "../store/appStore";
 
+const normalizeQueueDepartmentId = (value: string) =>
+  value
+    .toUpperCase()
+    .replace(/&/g, " AND ")
+    .replace(/[^A-Z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "")
+    .slice(0, 48);
+
+const workflowQueueDepartmentOverride: Record<string, string> = {
+  appointments: "APPOINTMENTS",
+  outpatient: "OPD",
+  "outpatient / opd": "OPD",
+  emergency: "EMERGENCY",
+  laboratory: "LABORATORY",
+  radiology: "RADIOLOGY",
+  pharmacy: "PHARMACY",
+  billing: "BILLING",
+  inpatient: "INPATIENT",
+  maternity: "MATERNITY",
+  icu: "ICU",
+  nursing: "NURSING",
+  "nursing admin": "NURSING",
+  dental: "DENTAL",
+  physiotherapy: "PHYSIOTHERAPY",
+  "physiotherapy & rehabilitation": "PHYSIOTHERAPY",
+  "nutrition & dietetics": "NUTRITION",
+  "operating theatre": "THEATRE",
+};
+
+const waitingListModuleConfig: Record<number, { departmentId: string }> = WORKFLOW_MODULES
+  .filter((module) => module.id !== 1)
+  .reduce<Record<number, { departmentId: string }>>((acc, module) => {
+    const nameKey = module.name.toLowerCase();
+    acc[module.id] = {
+      departmentId: workflowQueueDepartmentOverride[nameKey] || normalizeQueueDepartmentId(module.name),
+    };
+    return acc;
+  }, {});
+
 type ModuleRecord = {
   id: string;
   formId: string;
@@ -326,7 +367,7 @@ type DispatchStatus =
 function toPatientFromBackend(raw: any): Patient {
   const firstName = raw.firstName || "";
   const lastName = raw.lastName || "";
-  const fullName = `${firstName} ${lastName}`.trim() || raw.name || "Unnamed Patient";
+  const fullName = `${firstName} ${raw.middleName || ""} ${lastName}`.replace(/\s+/g, " ").trim() || raw.name || "Unnamed Patient";
   const genderRaw = String(raw.gender || "").toUpperCase();
   const gender: Patient["gender"] = genderRaw === "FEMALE" ? "Female" : "Male";
   const latestVisitStatus = raw?.visits?.[0]?.status
@@ -363,10 +404,10 @@ function toPatientFromBackend(raw: any): Patient {
     : "WAITING") as Patient["queueStatus"];
   return {
     id: String(raw.id),
-    regNo: raw.patientCode || raw.regNo || "",
-    nationalId: raw.nationalId || "",
+    regNo: raw.patientCode || raw.mrn || raw.regNo || "",
+    nationalId: raw.nationalId || raw.idNumber || "",
     name: fullName,
-    phone: raw.phone || "",
+    phone: raw.phone || raw.phonePrimary || raw.phoneSecondary || "",
     gender,
     age: Number(raw.age || 0),
     queueStatus,
@@ -399,6 +440,11 @@ function isQueueField(fieldKey: string) {
 
 const BACKEND_GENERATED_FIELD_KEYS = new Set([
   "patientid",
+  "patientcode",
+  "patientmrn",
+  "mrn",
+  "regno",
+  "searchregno",
   "visitid",
   "queuetoken",
   "opdtoken",
@@ -487,6 +533,20 @@ function extractGeneratedFieldValuesFromResult(
   if (patientId) {
     generated.patient_id = patientId;
     generated.patientId = patientId;
+  }
+  const patientCode = firstNonEmptyString(
+    readNestedValue(result, "patient.patientCode"),
+    readNestedValue(result, "patient.mrn"),
+    result?.patientCode,
+    result?.mrn,
+    result?.regNo,
+  );
+  if (patientCode) {
+    generated.patient_code = patientCode;
+    generated.patientCode = patientCode;
+    generated.mrn = patientCode;
+    generated.reg_no = patientCode;
+    generated.search_reg_no = patientCode;
   }
   if (visitId) {
     generated.visit_id = visitId;
@@ -709,6 +769,11 @@ function prefillFromPatient(patient: Patient, fields: WorkflowField[]) {
     registration_type: "RETURNING",
     national_id_passport: patient.nationalId || "",
     nationalId: patient.nationalId || "",
+    national_id: patient.nationalId || "",
+    id_number: patient.nationalId || "",
+    idNumber: patient.nationalId || "",
+    patient_id_number: patient.nationalId || "",
+    passport_number: patient.nationalId || "",
     phone: patient.phone || "",
     phone_number: patient.phone || "",
     patient_name: patient.name || "",
@@ -1479,6 +1544,7 @@ export function WorkflowModuleView({
   onPatientsRefresh?: () => Promise<void> | void;
 }) {
   const currentUser = useAppStore((state) => state.user);
+  const activeFacility = useAppStore((state) => state.facility);
   const isWardModule =
     module.id === 5 || /bed\s*\/?\s*ward|ward/i.test(String(module.name || ""));
   const isInpatientModule = module.id === 2;
@@ -1627,6 +1693,10 @@ export function WorkflowModuleView({
     64: "migration",
   };
   const moduleDomainKey = moduleDomainKeyById[module.id] || "";
+  const hmisAutomationActions = useMemo(
+    () => getHmisAutomationActions(moduleDomainKey),
+    [moduleDomainKey],
+  );
   const [search, setSearch] = useState("");
   const [activeStage, setActiveStage] = useState(module.stages[0]?.id || "stage_1");
   const [activeFormId, setActiveFormId] = useState(module.forms[0]?.id || "");
@@ -1638,6 +1708,48 @@ export function WorkflowModuleView({
   const [liveModuleLoading, setLiveModuleLoading] = useState(false);
   const [formError, setFormError] = useState("");
   const [formNotice, setFormNotice] = useState<{ type: "success" | "error"; message: string } | null>(null);
+  const [hmisAutomationBusy, setHmisAutomationBusy] = useState("");
+  const [hmisAutomationNotice, setHmisAutomationNotice] = useState<{
+    type: "success" | "error";
+    message: string;
+  } | null>(null);
+  const runHmisAutomationAction = async (action: {
+    label: string;
+    endpoint: string;
+    method?: "POST" | "PATCH" | "PUT";
+    payload?: Record<string, unknown>;
+  }) => {
+    setHmisAutomationBusy(action.label);
+    setHmisAutomationNotice(null);
+    try {
+      const response = await apiFetch(action.endpoint, {
+        method: action.method || "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          facilityId: activeFacility?.id,
+          ...(action.payload || {}),
+        }),
+      });
+      let body: any = {};
+      try {
+        body = await response.json();
+      } catch {
+        body = {};
+      }
+      if (!response.ok) {
+        throw new Error(String(body?.message || body?.error || `${action.label} failed.`));
+      }
+      setHmisAutomationNotice({ type: "success", message: `${action.label} completed.` });
+      await loadLiveModuleData();
+    } catch (error: any) {
+      setHmisAutomationNotice({
+        type: "error",
+        message: String(error?.message || `${action.label} failed.`),
+      });
+    } finally {
+      setHmisAutomationBusy("");
+    }
+  };
   const [labQueueOrderModalOpen, setLabQueueOrderModalOpen] = useState(false);
   const [labQueueOrderSaving, setLabQueueOrderSaving] = useState(false);
   const [labQueueOrderError, setLabQueueOrderError] = useState("");
@@ -1662,8 +1774,19 @@ export function WorkflowModuleView({
     sameFacilityMatches?: Array<any>;
   } | null>(null);
   const [registrationDuplicateLoading, setRegistrationDuplicateLoading] = useState(false);
+  const [registrationInsuranceCheck, setRegistrationInsuranceCheck] = useState<{
+    status?: string;
+    activeMember?: boolean;
+    remainingBenefit?: number;
+    preAuthorisationRequired?: boolean;
+    reason?: string;
+  } | null>(null);
+  const [registrationInsuranceLoading, setRegistrationInsuranceLoading] = useState(false);
   const [profilePatient, setProfilePatient] = useState<Patient | null>(null);
   const [selectedPatientDetails, setSelectedPatientDetails] = useState<any | null>(null);
+  const [waitingListOpen, setWaitingListOpen] = useState(false);
+  const [waitingListLoading, setWaitingListLoading] = useState(false);
+  const [waitingListRows, setWaitingListRows] = useState<any[]>([]);
 
   const normalizeBackendRecord = useCallback(
     (row: any): ModuleRecord => {
@@ -3524,6 +3647,66 @@ export function WorkflowModuleView({
       }, {}),
     [],
   );
+  const waitingListConfig = waitingListModuleConfig[module.id];
+
+  const loadWaitingList = useCallback(async () => {
+    if (!waitingListConfig) return;
+    setWaitingListLoading(true);
+    try {
+      const board = await fetchQueueBoard({
+        departmentId: waitingListConfig.departmentId,
+        facilityId: activeFacility?.id,
+      });
+      const tokens = Array.isArray((board as any)?.tokens) ? (board as any).tokens : [];
+      setWaitingListRows(tokens);
+      setPatientQueueMap((current) => {
+        const next = { ...current };
+        tokens.forEach((row: any) => {
+          const patientId = String(row?.patientId || "").trim();
+          if (patientId) next[patientId] = module.id;
+        });
+        return next;
+      });
+    } catch {
+      setWaitingListRows([]);
+    } finally {
+      setWaitingListLoading(false);
+    }
+  }, [waitingListConfig?.departmentId, module.id, activeFacility?.id]);
+
+  useEffect(() => {
+    const handleWaitingListOpen = (event: Event) => {
+      const detail = (event as CustomEvent<{ moduleId?: number }>).detail || {};
+      if (Number(detail.moduleId) !== module.id || !waitingListConfig) return;
+      setWaitingListOpen(true);
+      void loadWaitingList();
+    };
+    const handleQueued = () => {
+      if (!waitingListConfig || !waitingListOpen) return;
+      void loadWaitingList();
+    };
+    window.addEventListener("hmis:open-module-waiting-list", handleWaitingListOpen);
+    window.addEventListener("hmis:patient-queued", handleQueued);
+    return () => {
+      window.removeEventListener("hmis:open-module-waiting-list", handleWaitingListOpen);
+      window.removeEventListener("hmis:patient-queued", handleQueued);
+    };
+  }, [module.id, waitingListConfig?.departmentId, waitingListOpen, loadWaitingList]);
+
+  useEffect(() => {
+    if (!waitingListConfig) return;
+    void loadWaitingList();
+  }, [module.id, waitingListConfig?.departmentId, loadWaitingList]);
+
+  useEffect(() => {
+    const handleWaitingListCheckin = (event: Event) => {
+      const detail = (event as CustomEvent<{ moduleId?: number; patientId?: string }>).detail || {};
+      if (Number(detail.moduleId) !== module.id || !detail.patientId) return;
+      checkInPatient(String(detail.patientId));
+    };
+    window.addEventListener("hmis:workflow-queue-checkin", handleWaitingListCheckin);
+    return () => window.removeEventListener("hmis:workflow-queue-checkin", handleWaitingListCheckin);
+  }, [module.id, patients, selectedPatientDetails, activeFormId]);
 
   const activeFormFields: WorkflowField[] = useMemo(() => {
     const base = activeForm?.fields || [];
@@ -3635,6 +3818,21 @@ export function WorkflowModuleView({
   useEffect(() => {
     localStorage.setItem(storageKey, JSON.stringify(records));
   }, [records, storageKey]);
+
+  useEffect(() => {
+    const refreshLiveModule = () => {
+      if (document.visibilityState !== "hidden") {
+        void loadLiveModuleData();
+        if (waitingListOpen) {
+          void loadWaitingList();
+        }
+      }
+    };
+    const interval = window.setInterval(refreshLiveModule, 90000);
+    return () => {
+      window.clearInterval(interval);
+    };
+  }, [loadLiveModuleData, loadWaitingList, waitingListOpen]);
 
   useEffect(() => {
     localStorage.setItem(PATIENT_CHECKIN_STORAGE_KEY, JSON.stringify(patientCheckinMap));
@@ -3809,6 +4007,7 @@ export function WorkflowModuleView({
     try {
       const [boardRes, analyticsRes, countersRes] = await Promise.all([
         fetchQueueBoard({
+          facilityId: activeFacility?.id,
           departmentId: queueDepartmentFilter.trim() || undefined,
           doctorId: queueDoctorFilter.trim() || undefined,
           queueType: queueTypeFilter !== "ALL" ? queueTypeFilter : undefined,
@@ -3855,6 +4054,7 @@ export function WorkflowModuleView({
     }
   }, [
     isQueueManagementModule,
+    activeFacility?.id,
     queueDepartmentFilter,
     queueDoctorFilter,
     queueTypeFilter,
@@ -8008,6 +8208,65 @@ export function WorkflowModuleView({
   }, [isRegistrationModule, activeFormId, selectedPatientId, isCheckedIn, form]);
 
   useEffect(() => {
+    if (!isRegistrationModule || activeFormId !== "new_patient_registration") {
+      setRegistrationInsuranceCheck(null);
+      setRegistrationInsuranceLoading(false);
+      return;
+    }
+    const provider = String(form.insurance_provider || "").trim();
+    const policyNumber = String(form.insurance_member_id || "").trim();
+    if (!provider || !policyNumber) {
+      setRegistrationInsuranceCheck(null);
+      setRegistrationInsuranceLoading(false);
+      return;
+    }
+
+    let cancelled = false;
+    const timer = window.setTimeout(async () => {
+      setRegistrationInsuranceLoading(true);
+      try {
+        const response = await apiFetch("/tenant/patients/insurance/eligibility", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            provider,
+            policyNumber,
+            expiryDate: form.insurance_expiry || undefined,
+            visitType: form.registration_type || "OUTPATIENT",
+          }),
+        });
+        const result = await response.json().catch(() => null);
+        if (!response.ok) {
+          throw new Error(String(result?.message || "Insurance eligibility check failed."));
+        }
+        if (!cancelled) setRegistrationInsuranceCheck(result || null);
+      } catch {
+        if (!cancelled) {
+          setRegistrationInsuranceCheck({
+            status: "FLAGGED",
+            activeMember: false,
+            reason: "eligibility could not be confirmed",
+          });
+        }
+      } finally {
+        if (!cancelled) setRegistrationInsuranceLoading(false);
+      }
+    }, 500);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [
+    isRegistrationModule,
+    activeFormId,
+    form.insurance_provider,
+    form.insurance_member_id,
+    form.insurance_expiry,
+    form.registration_type,
+  ]);
+
+  useEffect(() => {
     if (module.id !== 6) return;
     let cancelled = false;
 
@@ -8223,10 +8482,12 @@ export function WorkflowModuleView({
             admissionsRes.status === "rejected" ? "admissions" : "",
             analyticsRes.status === "rejected" ? "analytics" : "",
           ].filter(Boolean);
-          if (failedParts.length > 0) {
+          if (failedParts.length > 0 && rows.length === 0) {
             setEhrError(
-              `Some EMR sections failed to load: ${failedParts.join(", ")}. Showing available data.`,
+              `EMR records could not be built because these sections failed to load: ${failedParts.join(", ")}.`,
             );
+          } else {
+            setEhrError("");
           }
         }
       } catch (error: any) {
@@ -8510,6 +8771,32 @@ export function WorkflowModuleView({
 
   const filteredPatients = useMemo(() => {
     const term = search.toLowerCase();
+    const queuedPatients = waitingListRows
+      .map((row: any) => {
+        const patientId = String(row?.patientId || "").trim();
+        if (!patientId) return null;
+        const existing = patients.find((patient) => patient.id === patientId);
+        if (existing) {
+          return { ...existing, queueModuleId: module.id };
+        }
+        const patientName = String(row?.patientName || "Queued patient").trim();
+        const [firstName, ...restName] = patientName.split(/\s+/);
+        return {
+          id: patientId,
+          name: patientName,
+          regNo: String(row?.patientCode || row?.mrn || row?.tokenNumber || "").trim(),
+          phone: String(row?.patientPhone || "").trim(),
+          nationalId: "",
+          gender: "Male",
+          age: 0,
+          queueStatus: "WAITING",
+          queueModuleId: module.id,
+          visitDate: String(row?.issuedAt || ""),
+          firstName,
+          lastName: restName.join(" "),
+        } as Patient;
+      })
+      .filter(Boolean) as Patient[];
     const sourcePatients =
       module.id === 1
         ? Array.from(
@@ -8517,7 +8804,11 @@ export function WorkflowModuleView({
               [...serverSearchPatients, ...patients].map((patient) => [patient.id, patient]),
             ).values(),
           )
-        : patients;
+        : Array.from(
+            new Map(
+              [...queuedPatients, ...patients].map((patient) => [patient.id, patient]),
+            ).values(),
+          );
     const queueStatusToModule: Record<Patient["queueStatus"], number> = {
       WAITING: 1,
       TRIAGE: 3,
@@ -8528,7 +8819,7 @@ export function WorkflowModuleView({
       COMPLETED: 1,
     };
     const queueMatchedPatients = sourcePatients.filter((p) => {
-      const isMatch = `${p.name} ${p.regNo} ${p.phone} ${p.nationalId}`
+      const isMatch = `${p.name} ${p.regNo} ${p.phone} ${p.nationalId} ${(p as any).firstName || ""} ${(p as any).middleName || ""} ${(p as any).lastName || ""}`
         .toLowerCase()
         .includes(term);
       if (!isMatch) return false;
@@ -8574,7 +8865,7 @@ export function WorkflowModuleView({
     return queueMatchedPatients.filter((patient) =>
       namesLikelyMatch(latestAssignmentByPatient[patient.id] || "", currentNurseName),
     );
-  }, [patients, search, module.id, patientQueueMap, serverSearchPatients, currentUser?.role, currentUser?.name, records, nursingDashboard]);
+  }, [patients, search, module.id, patientQueueMap, serverSearchPatients, currentUser?.role, currentUser?.name, records, nursingDashboard, waitingListRows]);
   const ehrWardOptions = useMemo(
     () =>
       Array.from(
@@ -9700,37 +9991,78 @@ export function WorkflowModuleView({
     },
     [liveModuleSummary],
   );
+  const derivedLiveSummaryNumber = useCallback(
+    (label: string): number | undefined => {
+      const normalized = label.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+      const total = liveSummaryNumber("total", 0);
+      const completed = liveSummaryNumber("completed", 0);
+      if (/today|session|visit|upload|signed|sent|dispensed/.test(normalized)) {
+        return liveSummaryNumber("today");
+      }
+      if (/30d|30 d|month|recent/.test(normalized)) {
+        return liveSummaryNumber("last30Days");
+      }
+      if (/critical|high|hard|alert|risk|overdue|failed|recall|escalation|defaulter/.test(normalized)) {
+        return liveSummaryNumber("critical");
+      }
+      if (/failure|failures|incident|incidents|backup/.test(normalized)) {
+        return liveSummaryNumber("critical", liveSummaryNumber("open"));
+      }
+      if (/open|pending|waiting|requested|scheduled|review|due|expir|withdrawn/.test(normalized)) {
+        return liveSummaryNumber("pending", liveSummaryNumber("open"));
+      }
+      if (/approval|approvals|role|roles|appointment|appointments/.test(normalized)) {
+        return total;
+      }
+      if (/capacity/.test(normalized)) return total;
+      if (/occupied/.test(normalized)) return liveSummaryNumber("active", liveSummaryNumber("open"));
+      if (/available/.test(normalized)) return Math.max(0, total - liveSummaryNumber("active", liveSummaryNumber("open", 0)));
+      if (/completed|accepted|performed|reported|released|resolved/.test(normalized)) {
+        return liveSummaryNumber("completed");
+      }
+      if (/active|assigned|admission|device|rule|plan|account|household|order|patient|document|message|template|cycle|procedure|referral|consent|case|record|booking|donor|invoice|claim|doctor|protocol|nurse|asset|goal|model|scenario/.test(normalized)) {
+        return liveSummaryNumber("active", liveSummaryNumber("open", total));
+      }
+      if (/outstanding|receivable|balance/.test(normalized)) {
+        return liveSummaryNumber("outstanding");
+      }
+      if (/paid|collected/.test(normalized)) {
+        return liveSummaryNumber("paid", liveSummaryNumber("revenue"));
+      }
+      if (/revenue|billed|income|cash|amount|flow|asset|stock value/.test(normalized)) {
+        return liveSummaryNumber("revenue");
+      }
+      if (/cost|expense|liabilit/.test(normalized)) {
+        return liveSummaryNumber("expense");
+      }
+      if (/profit|net|margin|equity/.test(normalized)) {
+        return liveSummaryNumber("net");
+      }
+      if (/percent|rate|ratio|occupancy|compliance|efficiency/.test(normalized)) {
+        return total > 0 ? (completed / total) * 100 : undefined;
+      }
+      if (/total|forms|reports|records|rows|items/.test(normalized)) {
+        return total;
+      }
+      return undefined;
+    },
+    [liveSummaryNumber],
+  );
   const liveCardValue = useCallback(
     (label: string, fallback: string | number = 0) => {
       if (liveModuleLoading && !liveModuleSummary) return "...";
       const normalized = label.toLowerCase();
-      let value: number | undefined;
+      const value = derivedLiveSummaryNumber(label);
       if (/revenue|paid|collected|billed|amount|flow|profit|cost|expense|asset|liabilit|equity|cash|stock value/.test(normalized)) {
-        if (/expense|cost|liabilit/.test(normalized)) value = liveSummaryNumber("expense");
-        else if (/outstanding|receivable/.test(normalized)) value = liveSummaryNumber("outstanding");
-        else if (/profit|net/.test(normalized)) value = liveSummaryNumber("net");
-        else value = liveSummaryNumber("revenue");
-        return formatKes(value);
+        return value === undefined ? fallback : formatKes(value);
       }
       if (/percent|rate|ratio|occupancy|compliance|efficiency/.test(normalized)) {
-        value = liveSummaryNumber("total") > 0
-          ? (liveSummaryNumber("completed") / liveSummaryNumber("total")) * 100
-          : 0;
-        return `${value.toFixed(2)}%`;
-      }
-      if (/today|session|visit|upload|signed|sent|dispensed/.test(normalized)) value = liveSummaryNumber("today");
-      else if (/30d|month|recent/.test(normalized)) value = liveSummaryNumber("last30Days");
-      else if (/active|admission|device|rule|plan|account|household|order|patient|document|message|template|cycle|procedure|referral|consent|case|record|booking|donor|invoice|claim/.test(normalized)) {
-        value = liveSummaryNumber("total");
-      } else if (/open|pending|review|due|expir|failed|critical|alert|hard|risk|overdue|escalation|defaulter|withdrawn|recall/.test(normalized)) {
-        value = liveSummaryNumber(/critical|hard|alert|risk|overdue|failed|recall|escalation/.test(normalized) ? "critical" : "pending");
-      } else if (/completed|accepted|performed|reported|released/.test(normalized)) {
-        value = liveSummaryNumber("completed");
+        return value === undefined ? fallback : `${value.toFixed(2)}%`;
       }
       if (value === undefined) return fallback;
       return value.toLocaleString();
     },
-    [formatKes, liveModuleLoading, liveModuleSummary, liveSummaryNumber],
+    [derivedLiveSummaryNumber, formatKes, liveModuleLoading, liveModuleSummary],
   );
   const liveModuleMixRows = useMemo(() => {
     const charts = liveModuleSummary?.charts || {};
@@ -11903,6 +12235,36 @@ export function WorkflowModuleView({
     void open();
   };
 
+  const publishCheckedInPatientState = (patientId: string, patient?: Patient | null, details?: any) => {
+    if (typeof window === "undefined" || !patientId) return;
+    const payload = (details && typeof details === "object" && ((details as any).data || (details as any).patient || details)) || {};
+    const patientName =
+      patient?.name ||
+      [payload?.firstName, payload?.middleName, payload?.lastName].filter(Boolean).join(" ").trim() ||
+      payload?.name ||
+      payload?.patientName ||
+      "";
+    const mrn = patient?.regNo || payload?.patientCode || payload?.mrn || payload?.regNo || "";
+    const idNumber = patient?.nationalId || payload?.nationalId || payload?.idNumber || payload?.national_id || "";
+    const state = {
+      hasCheckedInPatient: true,
+      patientId,
+      id: patientId,
+      patientName,
+      name: patientName,
+      mrn,
+      patientCode: mrn,
+      nationalId: idNumber,
+      idNumber,
+      phone: patient?.phone || payload?.phone || payload?.phonePrimary || "",
+      queueModule: module.name,
+      queueModuleId: module.id,
+      isQueued: false,
+    };
+    window.localStorage.setItem("hmis_patient_module_state", JSON.stringify(state));
+    window.dispatchEvent(new CustomEvent("hmis:patient-module-state", { detail: state }));
+  };
+
   const checkInPatient = (patientId: string) => {
     const loadDetails = async () => {
       setDetailsLoading(true);
@@ -11910,6 +12272,7 @@ export function WorkflowModuleView({
       try {
         const details = await fetchTenantPatientById(patientId);
         setSelectedPatientDetails(details);
+        publishCheckedInPatientState(patientId, patients.find((p) => p.id === patientId) || null, details);
         if (module.id === 1) {
           loadRegistrationPrefill(patientId, details);
         } else {
@@ -11932,11 +12295,58 @@ export function WorkflowModuleView({
     const patient = patients.find((p) => p.id === patientId);
     setSelectedPatientId(patientId);
     setPatientCheckinMap((prev) => ({ ...prev, [patientId]: true }));
+    publishCheckedInPatientState(patientId, patient || null);
     void loadDetails();
     if (module.id !== 1) {
       applyAutoPrefill(patientId, patient || null);
     }
     setFormError("");
+  };
+
+  const checkInWaitingListPatient = async (row: any) => {
+    const patientId = String(row?.patientId || "").trim();
+    if (!patientId) return;
+    try {
+      await updateQueueTokenStatus({
+        tokenId: row?.tokenId || row?.id,
+        tokenNumber: row?.tokenNumber,
+        patientId,
+        visitId: row?.visitId,
+        status: "IN_SERVICE",
+        reason: `Checked in to ${module.name}`,
+      });
+      await loadWaitingList();
+    } catch {
+      // Keep local check-in usable if queue status sync is temporarily unavailable.
+    }
+    try {
+      await apiFetch("/module-actions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          module: moduleDomainKey || module.name,
+          action: "Queued Patient Check-In",
+          data: {
+            patientId,
+            patientName: row?.patientName || "Patient",
+            patient_mrn: row?.patientCode || row?.mrn || "",
+            mrn: row?.patientCode || row?.mrn || "",
+            queueToken: row?.tokenNumber || "",
+            queueStatus: "IN_SERVICE",
+            checkedInAt: new Date().toISOString(),
+          },
+          context: { title: module.name, moduleId: module.id, source: "module.waiting-list" },
+        }),
+      });
+    } catch {
+      // Action logging should not block check-in.
+    }
+    checkInPatient(patientId);
+    setWaitingListOpen(false);
+    setFormNotice({
+      type: "success",
+      message: `${String(row?.patientName || "Patient")} checked in to ${module.name}.`,
+    });
   };
 
   const checkOutPatient = (patientId: string) => {
@@ -23754,7 +24164,29 @@ export function WorkflowModuleView({
             </button>
           </div>
         )}
+        {hmisAutomationActions.length > 0 && (
+          <div className="module-actions hmis-automation-action-bar">
+            {hmisAutomationActions.map((action) => (
+              <button
+                key={action.label}
+                type="button"
+                className="topbar-logout-btn"
+                disabled={Boolean(hmisAutomationBusy)}
+                onClick={() => void runHmisAutomationAction(action)}
+              >
+                <WorkflowActionIcon type={hmisAutomationBusy === action.label ? "refresh" : "activity"} />
+                {hmisAutomationBusy === action.label ? "Running..." : action.label}
+              </button>
+            ))}
+          </div>
+        )}
       </div>
+
+      {hmisAutomationNotice && (
+        <div className={`workflow-notice ${hmisAutomationNotice.type === "success" ? "is-success" : "is-error"}`}>
+          {hmisAutomationNotice.message}
+        </div>
+      )}
 
       {moduleDomainKey && liveModuleMixRows.length > 0 && (
         <section className="reporting-chart-grid" style={{ marginTop: 16, marginBottom: 16 }}>
@@ -29879,6 +30311,50 @@ export function WorkflowModuleView({
         </div>
       )}
 
+      {waitingListOpen && waitingListConfig ? (
+        <div className="module-modal-backdrop" onClick={() => setWaitingListOpen(false)}>
+          <aside className="workflow-waiting-panel" onClick={(event) => event.stopPropagation()}>
+            <div className="workflow-waiting-panel-head">
+              <div>
+                <h3>Waiting List</h3>
+                <p>{waitingListRows.length} patient{waitingListRows.length === 1 ? "" : "s"} queued to this module.</p>
+              </div>
+              <button type="button" className="workflow-waiting-close" onClick={() => setWaitingListOpen(false)}>
+                ×
+              </button>
+            </div>
+            <div className="workflow-waiting-panel-body">
+              {waitingListLoading ? (
+                <div className="pv-empty">Loading queued patients...</div>
+              ) : waitingListRows.length === 0 ? (
+                <div className="pv-empty">No queued patients for this module.</div>
+              ) : (
+                waitingListRows.map((row: any) => {
+                  const patientId = String(row?.patientId || "").trim();
+                  const checkedIn = Boolean(patientCheckinMap[patientId]);
+                  const selected = selectedPatientId === patientId;
+                  return (
+                    <div key={String(row?.tokenId || row?.tokenNumber || patientId)} className={`workflow-waiting-item ${selected ? "is-selected" : ""}`}>
+                      <button type="button" className="workflow-waiting-select" onClick={() => viewPatient(patientId)}>
+                        <div className="workflow-waiting-copy">
+                          <strong>{String(row?.patientName || "Queued patient")}</strong>
+                          <span>{String(row?.tokenNumber || "")} · {String(row?.priority || "WAITING")}</span>
+                        </div>
+                      </button>
+                      <div className="workflow-waiting-actions">
+                        <button type="button" className="btn-primary workflow-waiting-checkin" onClick={() => checkInWaitingListPatient(row)}>
+                          {checkedIn ? "Checked In" : "Check In"}
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          </aside>
+        </div>
+      ) : null}
+
       {!isWardModule && !isInpatientModule && !isAppointmentModule && !isOpdFlowModule && !isLaboratoryModule && !isRadiologyModule && !isPharmacyModule && !isOtModule && !isMaternityModule && !isAccountingModule && !isCostAccountingModule && !isStrategicPlanningModule && !isOrchestrationModule && !isWorkforcePlanningModule && !isIcuModule && !isNicuModule && !isPhysioModule && !isNutritionModule && !isDentalModule && !isInfectionControlModule && !isCommunityHealthModule && !isConsentModule && !isReferralManagementModule && !isDocumentManagementModule && !isMessagingModule && !isBiomedicalModule && !isHomeCareModule && !isClinicalResearchModule && !isCdssModule && !isIctModule && !isNursingModule && !isNursingAdminModule && !isMedicalDirectorModule && !isRevenueCycleModule && (
         <div className="workflow-stage-grid">
           {module.stages.map((stage) => {
@@ -29923,10 +30399,10 @@ export function WorkflowModuleView({
         {!isWardModule && !isAppointmentModule && !isInpatientModule && !isOpdFlowModule && !isLaboratoryModule && !isRadiologyModule && !isPharmacyModule && !isOtModule && !isMaternityModule && !isAccountingModule && !isCostAccountingModule && !isStrategicPlanningModule && !isOrchestrationModule && !isWorkforcePlanningModule && !isIcuModule && !isNicuModule && !isPhysioModule && !isNutritionModule && !isDentalModule && !isInfectionControlModule && !isCommunityHealthModule && !isConsentModule && !isReferralManagementModule && !isDocumentManagementModule && !isMessagingModule && !isBiomedicalModule && !isHomeCareModule && !isClinicalResearchModule && !isCdssModule && !isIctModule && !isNursingModule && !isNursingAdminModule && !isMedicalDirectorModule && !isRevenueCycleModule && !disablePatientSearch && (
           <div className="workflow-patients">
             <div className="workflow-panel-title">
-              {module.id === 1 ? "Recent Registered (Latest 5)" : "Patients"}
+              {module.id === 1 && search.trim() ? "Search Results" : module.id === 1 ? "Recent Registered (Latest 5)" : "Patients"}
             </div>
             <div className="workflow-patient-list">
-              {(module.id === 1 ? recentRegisteredPatients : filteredPatients).map((patient) => (
+              {(module.id === 1 && search.trim() ? filteredPatients : module.id === 1 ? recentRegisteredPatients : filteredPatients).map((patient) => (
                 <button
                   key={patient.id}
                   className={`workflow-patient-item ${selectedPatientId === patient.id ? "is-selected" : ""}`}
@@ -29943,7 +30419,7 @@ export function WorkflowModuleView({
                   </div>
                 </button>
               ))}
-              {(module.id === 1 ? recentRegisteredPatients.length === 0 : filteredPatients.length === 0) && (
+              {(module.id === 1 && search.trim() ? filteredPatients.length === 0 : module.id === 1 ? recentRegisteredPatients.length === 0 : filteredPatients.length === 0) && (
                 <div className="pv-empty">No matching patients.</div>
               )}
             </div>
@@ -30305,6 +30781,24 @@ export function WorkflowModuleView({
                       ))}
                     </div>
                   )}
+              </div>
+            )}
+            {isRegistrationModule && registrationInsuranceLoading && (
+              <div className="workflow-notice is-warning">
+                Checking insurance eligibility...
+              </div>
+            )}
+            {isRegistrationModule && !registrationInsuranceLoading && registrationInsuranceCheck && (
+              <div className={`workflow-notice ${registrationInsuranceCheck.activeMember ? "is-success" : "is-error"}`}>
+                {registrationInsuranceCheck.activeMember
+                  ? `Insurance confirmed. Remaining benefit KES ${Number(
+                      registrationInsuranceCheck.remainingBenefit || 0,
+                    ).toLocaleString()}${
+                      registrationInsuranceCheck.preAuthorisationRequired
+                        ? "; pre-authorisation required."
+                        : "; no pre-authorisation required."
+                    }`
+                  : `Insurance flagged: ${registrationInsuranceCheck.reason || "eligibility could not be confirmed"}.`}
               </div>
             )}
 

@@ -18,6 +18,7 @@ import {
   clearTokens,
   completeFacilitySetup,
   createBed,
+  createQueueToken,
   createStaffProfile,
   createWard,
   createTenantPatient,
@@ -48,6 +49,12 @@ import {
   fetchInsuranceClaims,
   fetchInsurancePreAuthorizations,
   fetchLaboratoryRequests,
+  fetchQueueAnalytics,
+  fetchQueueBoard,
+  callNextQueueToken,
+  overrideQueuePriority,
+  queueCounterSession,
+  updateQueueTokenStatus,
   generateMedilinkAiReply,
   initiateMpesaStkPush,
   activateLicense,
@@ -101,6 +108,72 @@ const MARKETING_BASE_URL = normalizeBaseUrl(
   "https://medilinkke.onrender.com",
 );
 const MARKETING_PRICING_URL = `${String(MARKETING_BASE_URL).replace(/\/$/, "")}/pricing`;
+
+const normalizeQueueDepartmentId = (value: string) =>
+  value
+    .toUpperCase()
+    .replace(/&/g, " AND ")
+    .replace(/[^A-Z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "")
+    .slice(0, 48);
+
+const queueDestinationOverride: Record<string, { departmentId: string; queueType: string; tokenPrefix: string }> = {
+  "appointments": { departmentId: "APPOINTMENTS", queueType: "APPOINTMENTS", tokenPrefix: "APT" },
+  "outpatient": { departmentId: "OPD", queueType: "OPD", tokenPrefix: "OPD" },
+  "outpatient / opd": { departmentId: "OPD", queueType: "OPD", tokenPrefix: "OPD" },
+  "emergency": { departmentId: "EMERGENCY", queueType: "EMERGENCY", tokenPrefix: "ER" },
+  "laboratory": { departmentId: "LABORATORY", queueType: "LABORATORY", tokenPrefix: "LAB" },
+  "radiology": { departmentId: "RADIOLOGY", queueType: "RADIOLOGY", tokenPrefix: "RAD" },
+  "pharmacy": { departmentId: "PHARMACY", queueType: "PHARMACY", tokenPrefix: "PHR" },
+  "billing": { departmentId: "BILLING", queueType: "BILLING", tokenPrefix: "BIL" },
+  "inpatient": { departmentId: "INPATIENT", queueType: "INPATIENT", tokenPrefix: "IPD" },
+  "maternity": { departmentId: "MATERNITY", queueType: "MATERNITY", tokenPrefix: "MAT" },
+  "icu": { departmentId: "ICU", queueType: "ICU", tokenPrefix: "ICU" },
+  "nursing": { departmentId: "NURSING", queueType: "NURSING", tokenPrefix: "NUR" },
+  "nursing station": { departmentId: "NURSING", queueType: "NURSING", tokenPrefix: "NUR" },
+  "dental": { departmentId: "DENTAL", queueType: "DENTAL", tokenPrefix: "DEN" },
+  "physiotherapy": { departmentId: "PHYSIOTHERAPY", queueType: "PHYSIOTHERAPY", tokenPrefix: "PHY" },
+  "physiotherapy & rehabilitation": { departmentId: "PHYSIOTHERAPY", queueType: "PHYSIOTHERAPY", tokenPrefix: "PHY" },
+  "nutrition & dietetics": { departmentId: "NUTRITION", queueType: "NUTRITION", tokenPrefix: "NUT" },
+  "operating theatre": { departmentId: "THEATRE", queueType: "THEATRE", tokenPrefix: "OT" },
+};
+
+const createQueueDestination = (label: string) => {
+  const cleanedLabel = label.replace(/\s+/g, " ").trim();
+  const key = cleanedLabel.toLowerCase();
+  const override = queueDestinationOverride[key];
+  const departmentId = override?.departmentId || normalizeQueueDepartmentId(cleanedLabel);
+  const tokenPrefix =
+    override?.tokenPrefix ||
+    cleanedLabel
+      .split(/[^A-Za-z0-9]+/)
+      .filter(Boolean)
+      .map((part) => part[0])
+      .join("")
+      .toUpperCase()
+      .slice(0, 4) ||
+    "MOD";
+  return {
+    label: cleanedLabel,
+    departmentId,
+    queueType: override?.queueType || departmentId,
+    tokenPrefix,
+  };
+};
+
+const patientQueueDestinations = [
+  { label: "Outpatient / OPD", departmentId: "OPD", queueType: "OPD", tokenPrefix: "OPD" },
+  ...WORKFLOW_MODULES.filter((module) => module.id !== 1).map((module) => createQueueDestination(module.name)),
+].filter((destination, index, all) => (
+  all.findIndex((candidate) => candidate.label.toLowerCase() === destination.label.toLowerCase()) === index
+));
+
+const workflowWaitingListConfig: Record<number, { departmentId: string }> = WORKFLOW_MODULES
+  .filter((module) => module.id !== 1)
+  .reduce<Record<number, { departmentId: string }>>((acc, module) => {
+    acc[module.id] = { departmentId: createQueueDestination(module.name).departmentId };
+    return acc;
+  }, {});
 
 async function openExternalUrl(url: string) {
   try {
@@ -359,6 +432,51 @@ function isAdminLikeRole(role: unknown) {
     "facility_admin",
     "tenant_admin",
   ].includes(key);
+}
+
+const QUEUED_PATIENT_LOCK_STORAGE_KEY = "hmis_patient_registration_queued_ids";
+
+function isSuperAdminRole(role: unknown) {
+  return String(role || "").trim().toLowerCase().replace(/[\s-]+/g, "_") === "super_admin";
+}
+
+function readQueuedPatientLocks() {
+  if (typeof window === "undefined") return new Set<string>();
+  try {
+    const value = window.localStorage.getItem(QUEUED_PATIENT_LOCK_STORAGE_KEY);
+    const rows = value ? JSON.parse(value) : [];
+    return new Set(Array.isArray(rows) ? rows.map((item) => String(item)) : []);
+  } catch {
+    return new Set<string>();
+  }
+}
+
+function readPatientModuleState() {
+  if (typeof window === "undefined") return { hasCheckedInPatient: false, isQueued: false };
+  try {
+    const value = window.localStorage.getItem("hmis_patient_module_state");
+    return value ? JSON.parse(value) : { hasCheckedInPatient: false, isQueued: false };
+  } catch {
+    return { hasCheckedInPatient: false, isQueued: false };
+  }
+}
+
+function publishPatientModuleState(patient: any, isQueued = false) {
+  if (typeof window === "undefined") return;
+  const state = {
+    hasCheckedInPatient: Boolean(patient?.id),
+    patientId: patient?.id || "",
+    patientName: patient?.name || "",
+    mrn: patient?.regNo || patient?.mrn || "",
+    patientCode: patient?.regNo || patient?.mrn || "",
+    nationalId: patient?.nationalId || patient?.idNumber || "",
+    idNumber: patient?.idNumber || patient?.nationalId || "",
+    phone: patient?.phone || "",
+    isQueued,
+    queueModule: patient?.queueModule || patient?.queueStatus || "",
+  };
+  window.localStorage.setItem("hmis_patient_module_state", JSON.stringify(state));
+  window.dispatchEvent(new CustomEvent("hmis:patient-module-state", { detail: state }));
 }
 
 function getAdminAllowedModules(role: unknown) {
@@ -869,15 +987,44 @@ function ageFromDob(dob?: string | null) {
 }
 
 const patientRegistrationDateValue = (patient: any) =>
+  patient?.patient?.registeredAt ||
+  patient?.patient?.createdAt ||
+  patient?.data?.registeredAt ||
+  patient?.data?.createdAt ||
   patient?.registeredAt ||
   patient?.registered_at ||
+  patient?.registeredDate ||
+  patient?.dateRegistered ||
   patient?.registrationDate ||
+  patient?.registration_date ||
   patient?.registeredOn ||
   patient?.createdAt ||
   patient?.created_at ||
+  patient?.createdOn ||
   patient?.visitDate ||
   patient?.updatedAt ||
   patient?.updated_at ||
+  patient?.payload?.createdAt ||
+  patient?.metadata?.createdAt ||
+  "";
+
+const patientStatsDateValue = (patient: any) =>
+  patient?.patient?.registeredAt ||
+  patient?.patient?.createdAt ||
+  patient?.data?.registeredAt ||
+  patient?.data?.createdAt ||
+  patient?.registeredAt ||
+  patient?.registered_at ||
+  patient?.registeredDate ||
+  patient?.dateRegistered ||
+  patient?.registrationDate ||
+  patient?.registration_date ||
+  patient?.registeredOn ||
+  patient?.createdAt ||
+  patient?.created_at ||
+  patient?.createdOn ||
+  patient?.payload?.createdAt ||
+  patient?.metadata?.createdAt ||
   "";
 
 const isSameLocalDate = (value: unknown, expected: Date) => {
@@ -890,10 +1037,24 @@ const isSameLocalDate = (value: unknown, expected: Date) => {
   );
 };
 
+const isWithinLastDays = (value: unknown, expected: Date, days: number) => {
+  const text = String(value || "").trim();
+  if (!text || /^today$/i.test(text)) return true;
+  const date = value instanceof Date ? value : new Date(String(value || ""));
+  const end = expected.getTime();
+  const start = end - days * 24 * 60 * 60 * 1000;
+  const time = date.getTime();
+  return (
+    Number.isFinite(time) &&
+    time >= start &&
+    time <= end
+  );
+};
+
 const formatPatientRegistrationDate = (patient: any) => {
   const value = patientRegistrationDateValue(patient);
   const date = new Date(String(value || ""));
-  return Number.isFinite(date.getTime()) ? date.toLocaleDateString() : "Today";
+  return Number.isFinite(date.getTime()) ? date.toLocaleDateString() : new Date().toLocaleDateString();
 };
 
 function dobFromAge(age: number) {
@@ -1066,7 +1227,8 @@ function PatientsView() {
     vulnerabilityFlags: [] as string[],
     hasInsurance: false,
   });
-  const { patients, removePatient, setPatients, facility } = useAppStore();
+  const { patients, removePatient, setPatients, facility, user } = useAppStore();
+  const [statsPatients, setStatsPatients] = useState<Patient[]>([]);
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [formOpen, setFormOpen] = useState(false);
@@ -1076,7 +1238,7 @@ function PatientsView() {
   const [exportingCsv, setExportingCsv] = useState(false);
   const [error, setError] = useState("");
   const [workspaceAction, setWorkspaceAction] = useState<
-    "duplicates" | "insurance" | "portal" | "photo" | "vulnerability" | "merge" | null
+    "monitor" | "duplicates" | "insurance" | "portal" | "photo" | "vulnerability" | "merge" | null
   >(null);
   const [workspaceQuery, setWorkspaceQuery] = useState("");
   const [workspacePrimaryId, setWorkspacePrimaryId] = useState("");
@@ -1093,6 +1255,10 @@ function PatientsView() {
   const actionNoticeTimer = useRef<number | null>(null);
   const [todayPage, setTodayPage] = useState(0);
   const [recentRegisteredIds, setRecentRegisteredIds] = useState<Set<string>>(new Set());
+  const [queuedPatientLocks, setQueuedPatientLocks] = useState<Set<string>>(() => readQueuedPatientLocks());
+  const [queuePatient, setQueuePatient] = useState<Patient | null>(null);
+  const [queueDestinationInput, setQueueDestinationInput] = useState("");
+  const [queueSaving, setQueueSaving] = useState(false);
   const [selectedPatient, setSelectedPatient] = useState<Patient | null>(null);
   const [editingPatient, setEditingPatient] = useState<Patient | null>(null);
   const [form, setForm] = useState(createEmptyPatientForm);
@@ -1101,6 +1267,8 @@ function PatientsView() {
   const [duplicateDetailsOpen, setDuplicateDetailsOpen] = useState(false);
   const [duplicateMergeStatus, setDuplicateMergeStatus] = useState("");
   const dobPickerRef = useRef<HTMLInputElement | null>(null);
+  const checkedInPatientRef = useRef<Patient | null>(null);
+  const isPatientQueuedFromThisModuleRef = useRef<(patient: any) => boolean>(() => false);
 
   const showActionNotice = useCallback((message: string) => {
     setActionNotice(message);
@@ -1109,6 +1277,39 @@ function PatientsView() {
     }
     actionNoticeTimer.current = window.setTimeout(() => setActionNotice(""), 2600);
   }, []);
+
+  const rememberQueuedPatientLock = useCallback((patientId: string) => {
+    setQueuedPatientLocks((current) => {
+      const next = new Set(current);
+      next.add(String(patientId));
+      if (typeof window !== "undefined") {
+        window.localStorage.setItem(QUEUED_PATIENT_LOCK_STORAGE_KEY, JSON.stringify(Array.from(next)));
+      }
+      return next;
+    });
+  }, []);
+
+  const isPatientQueuedFromThisModule = useCallback(
+    (patient: any) =>
+      Boolean(
+        patient?.id &&
+          (queuedPatientLocks.has(String(patient.id)) ||
+            patient?.queuedFromPatientRegistration ||
+            patient?.queueSource === "patient.registration" ||
+            patient?.queueStatus ||
+            patient?.queueModule ||
+            patient?.queueToken),
+      ),
+    [queuedPatientLocks],
+  );
+
+  const isSuperAdmin = isSuperAdminRole(user?.role);
+  const canEditPatientRecord = useCallback(
+    (patient: any) =>
+      Boolean(patient?.id && (isSuperAdmin || (patient.id === checkedInPatientId && !isPatientQueuedFromThisModule(patient)))),
+    [checkedInPatientId, isPatientQueuedFromThisModule, isSuperAdmin],
+  );
+  isPatientQueuedFromThisModuleRef.current = isPatientQueuedFromThisModule;
 
   const openDateOfBirthPicker = () => {
     const picker = dobPickerRef.current;
@@ -1252,7 +1453,11 @@ function PatientsView() {
       if (showLoader) setLoading(true);
       try {
         const backendPatients = await fetchTenantPatients(query || undefined, facility?.id);
-        setPatients(backendPatients.map(toFrontendPatient));
+        const mapped = backendPatients.map(toFrontendPatient);
+        setPatients(mapped);
+        if (!query) {
+          setStatsPatients(mapped);
+        }
       } catch {
         // keep local data fallback
       } finally {
@@ -1269,7 +1474,11 @@ function PatientsView() {
       try {
         const backendPatients = await fetchTenantPatients(search.trim() || undefined, facility?.id);
         if (!cancelled) {
-          setPatients(backendPatients.map(toFrontendPatient));
+          const mapped = backendPatients.map(toFrontendPatient);
+          setPatients(mapped);
+          if (!search.trim()) {
+            setStatsPatients(mapped);
+          }
         }
       } catch {
         // keep local data fallback
@@ -1289,10 +1498,8 @@ function PatientsView() {
     const refreshSilently = () => {
       void refreshPatients("", false);
     };
-    window.addEventListener("focus", refreshSilently);
-    const interval = window.setInterval(refreshSilently, 15000);
+    const interval = window.setInterval(refreshSilently, 90000);
     return () => {
-      window.removeEventListener("focus", refreshSilently);
       window.clearInterval(interval);
     };
   }, [refreshPatients]);
@@ -1318,8 +1525,18 @@ function PatientsView() {
 
   useEffect(() => {
     const handleWorkspaceAction = (event: Event) => {
-      const action = (event as CustomEvent<{ action?: typeof workspaceAction }>).detail?.action;
+      const action = (event as CustomEvent<{ action?: typeof workspaceAction | "queue" }>).detail?.action;
       if (!action) return;
+      if (action === "queue") {
+        const patient = checkedInPatientRef.current || patients.find((row) => row.id === checkedInPatientId) || null;
+        if (!patient) {
+          showActionNotice("Check in a patient before opening queue routing.");
+          return;
+        }
+        setQueuePatient(patient);
+        setQueueDestinationInput("");
+        return;
+      }
       setWorkspaceAction(action);
       setWorkspaceQuery("");
       setWorkspacePrimaryId("");
@@ -1331,7 +1548,7 @@ function PatientsView() {
 
     window.addEventListener("hmis:patient-workspace-action", handleWorkspaceAction);
     return () => window.removeEventListener("hmis:patient-workspace-action", handleWorkspaceAction);
-  }, []);
+  }, [checkedInPatientId, patients, showActionNotice]);
 
   const handleResetForm = () => {
     setFormTab("personal");
@@ -1397,6 +1614,10 @@ function PatientsView() {
 
   const handleRegister = async (e: React.FormEvent) => {
     e.preventDefault();
+    const submitter = (e.nativeEvent as SubmitEvent).submitter as HTMLElement | null;
+    if (submitter?.dataset.patientRegister !== "true") {
+      return;
+    }
     setSaving(true);
     setError("");
     try {
@@ -1450,6 +1671,10 @@ function PatientsView() {
         primaryFacilityId: facility?.id || undefined,
         orgId: facility?.id || undefined,
       } as any;
+      if (editingPatient && !canEditPatientRecord(editingPatient)) {
+        showActionNotice("Patient is already queued. Only Super Admin can edit this record.");
+        return;
+      }
       const created = editingPatient
         ? await updateTenantPatient(editingPatient.id, payload)
         : await createTenantPatient(payload);
@@ -1462,6 +1687,7 @@ function PatientsView() {
         mapped[0];
       if (createdPatient) {
         setCheckedInPatientId(createdPatient.id);
+        publishPatientModuleState(createdPatient, isPatientQueuedFromThisModule(createdPatient));
         setRecentRegisteredIds((current) => new Set([...Array.from(current), createdPatient.id]));
         setSearch("");
         setCheckInStatus(
@@ -1474,10 +1700,22 @@ function PatientsView() {
             ? `${createdPatient.name} updated successfully.`
             : `${createdPatient.name} registered successfully.`,
         );
+        if (!editingPatient && !isPatientQueuedFromThisModule(createdPatient)) {
+          setQueuePatient(createdPatient);
+        }
+        setQueueDestinationInput("");
         setTodayPage(0);
       }
       setFormOpen(false);
       handleResetForm();
+      try {
+        const latest = await fetchTenantPatients(undefined, facility?.id);
+        const mapped = latest.map(toFrontendPatient);
+        setPatients(mapped);
+        setStatsPatients(mapped);
+      } catch {
+        // keep current UI state if the silent refresh fails
+      }
     } catch (err: any) {
       setError(err?.message || "Failed to register patient.");
     } finally {
@@ -1485,19 +1723,16 @@ function PatientsView() {
     }
   };
 
+  const patientsForStats = statsPatients.length > 0 ? statsPatients : patients;
+  const nowForPatientStats = new Date();
   const patientStats = {
-    total: patients.length,
-    thisMonth: patients.filter((patient) => {
-      const date = new Date(String(patientRegistrationDateValue(patient) || ""));
-      const now = new Date();
-      return (
-        Number.isFinite(date.getTime()) &&
-        date.getFullYear() === now.getFullYear() &&
-        date.getMonth() === now.getMonth()
-      );
+    total: patientsForStats.length,
+    thisMonth: patientsForStats.filter((patient) => {
+      const registeredValue = patientStatsDateValue(patient) || patientRegistrationDateValue(patient);
+      return recentRegisteredIds.has(patient.id) || isWithinLastDays(registeredValue, nowForPatientStats, 30);
     }).length,
-    male: patients.filter((patient) => patient.gender === "Male").length,
-    female: patients.filter((patient) => patient.gender === "Female").length,
+    male: patientsForStats.filter((patient) => String(patient.gender || "").toUpperCase() === "MALE").length,
+    female: patientsForStats.filter((patient) => String(patient.gender || "").toUpperCase() === "FEMALE").length,
   };
 
   const exportCSV = async () => {
@@ -1572,6 +1807,7 @@ function PatientsView() {
   };
 
   const workspaceTitles: Record<NonNullable<typeof workspaceAction>, string> = {
+    monitor: "Monitor Patient Queue",
     duplicates: "Duplicate Patient Detection",
     insurance: "Insurance Eligibility Verification",
     portal: "Patient Portal Account",
@@ -1601,17 +1837,37 @@ function PatientsView() {
   const datedTodayPatients = patients
     .filter((patient) => {
       const registrationDate = patientRegistrationDateValue(patient);
-      return recentRegisteredIds.has(patient.id) || !registrationDate || isSameLocalDate(registrationDate, new Date());
+      return recentRegisteredIds.has(patient.id) || isSameLocalDate(registrationDate, new Date());
     })
     .sort((a, b) => {
       const left = new Date(String(patientRegistrationDateValue(a) || 0)).getTime();
       const right = new Date(String(patientRegistrationDateValue(b) || 0)).getTime();
       return right - left;
     });
-  const todayPatients = datedTodayPatients.length > 0 ? datedTodayPatients : patients;
+  const todayPatients = datedTodayPatients;
   const todayTotalPages = Math.max(1, Math.ceil(todayPatients.length / 10));
   const todayPatientsPage = todayPatients.slice(todayPage * 10, todayPage * 10 + 10);
   const searchPopupPatients = search.trim() && !checkedInPatientId ? filtered.slice(0, 6) : [];
+  checkedInPatientRef.current = checkedInPatient || null;
+  const monitoredQueuePatients = patients
+    .filter((patient) => isPatientQueuedFromThisModule(patient))
+    .map((patient) => ({
+      patient,
+      queueModule:
+        (patient as any)?.queueModule ||
+        (patient as any)?.queueStatus ||
+        (patient as any)?.departmentId ||
+        "Queued",
+    }));
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    publishPatientModuleState(
+      checkedInPatient,
+      checkedInPatient ? isPatientQueuedFromThisModule(checkedInPatient) : false,
+    );
+  }, [checkedInPatient, isPatientQueuedFromThisModule]);
+
   const duplicateCandidates = patients
     .flatMap((patient, index) =>
       patients.slice(index + 1).flatMap((other) => {
@@ -1675,7 +1931,9 @@ function PatientsView() {
       }
       await updateTenantPatient(patient.id, { photoUrl: workspacePhotoUrl.trim() } as any);
       const latest = await fetchTenantPatients(undefined, facility?.id);
-      setPatients(latest.map(toFrontendPatient));
+      const mapped = latest.map(toFrontendPatient);
+      setPatients(mapped);
+      setStatsPatients(mapped);
       setWorkspaceStatus("Patient photo updated and attached to the MRN.");
       return;
     }
@@ -1739,16 +1997,89 @@ function PatientsView() {
       checkedInAt: new Date().toISOString(),
     });
     setCheckedInPatientId(pendingCheckInPatient.id);
+    publishPatientModuleState(pendingCheckInPatient, isPatientQueuedFromThisModule(pendingCheckInPatient));
     setRecentRegisteredIds((current) => new Set([...Array.from(current), pendingCheckInPatient.id]));
     setCheckInStatus(
       `${pendingCheckInPatient.name} checked in for ${checkInMode === "today" ? "today" : visitDate}. Patient data is now visible.`,
     );
     showActionNotice(`${pendingCheckInPatient.name} checked in successfully.`);
+    if (isPatientQueuedFromThisModule(pendingCheckInPatient)) {
+      showActionNotice(`${pendingCheckInPatient.name} is already queued from Patient Registration.`);
+    } else {
+      setQueuePatient(pendingCheckInPatient);
+    }
+    setQueueDestinationInput("");
     setPendingCheckInPatient(null);
   };
 
+  const queuePatientNext = async () => {
+    if (!queuePatient?.id) return;
+    if (isPatientQueuedFromThisModule(queuePatient)) {
+      showActionNotice(`${queuePatient.name} has already been queued from this module.`);
+      setQueuePatient(null);
+      setQueueDestinationInput("");
+      return;
+    }
+    const typed = queueDestinationInput.trim().toLowerCase();
+    const destination =
+      patientQueueDestinations.find((item) => item.label.toLowerCase() === typed) ||
+      patientQueueDestinations.find((item) => item.label.toLowerCase().includes(typed));
+    if (!destination) {
+      showActionNotice("Select the module to queue patient next.");
+      return;
+    }
+    setQueueSaving(true);
+    try {
+      const result = await createQueueToken({
+        patientId: queuePatient.id,
+        departmentId: destination.departmentId,
+        queueType: destination.queueType,
+        tokenPrefix: destination.tokenPrefix,
+        queueLane: "GENERAL",
+        priority: 3,
+        source: "patient.registration",
+        notes: `Queued from Patient Registration to ${destination.label}`,
+      });
+      const token = (result as any)?.token || result;
+      const tokenNumber = token?.tokenNumber || queuePatient.regNo;
+      const queuedPatient = {
+        ...queuePatient,
+        queueStatus: destination.departmentId as Patient["queueStatus"],
+        queueModule: destination.label,
+        queueToken: tokenNumber,
+        queueSource: "patient.registration",
+        queuedFromPatientRegistration: true,
+        regNo: queuePatient.regNo || tokenNumber,
+      };
+      rememberQueuedPatientLock(queuePatient.id);
+      publishPatientModuleState(queuedPatient, true);
+      setPatients(
+        patients.map((patient) =>
+          patient.id === queuePatient.id
+            ? { ...patient, ...queuedPatient }
+            : patient,
+        ),
+      );
+      window.dispatchEvent(new CustomEvent("hmis:patient-queued", { detail: { patient: queuePatient, destination, token } }));
+      showActionNotice(`${queuePatient.name} queued to ${destination.label}.`);
+      setQueuePatient(null);
+      setQueueDestinationInput("");
+    } catch (err: any) {
+      showActionNotice(err?.message || "Patient queue failed.");
+    } finally {
+      setQueueSaving(false);
+    }
+  };
+
   const openPatientForEdit = async (patient: Patient) => {
-    if (patient.id !== checkedInPatientId) return;
+    if (!canEditPatientRecord(patient)) {
+      showActionNotice(
+        isPatientQueuedFromThisModule(patient)
+          ? "Patient is already queued. Only Super Admin can edit this record."
+          : "Check in patient before editing.",
+      );
+      return;
+    }
     let fullPatient: any = patient;
     try {
       fullPatient = await fetchTenantPatientById(patient.id);
@@ -1771,6 +2102,7 @@ function PatientsView() {
       checkedOutAt: new Date().toISOString(),
     });
     setCheckedInPatientId("");
+    publishPatientModuleState(null, false);
     setPendingCheckInPatient(null);
     setCheckInStatus(`${patient.name} checked out successfully.`);
     showActionNotice(`${patient.name} checked out successfully.`);
@@ -1927,7 +2259,7 @@ function PatientsView() {
               color: "#1e3a8a",
             },
             {
-              label: "Registered This Month",
+              label: "Registered Last 30 Days",
               value: patientStats.thisMonth,
               color: "#0d9488",
             },
@@ -1967,7 +2299,27 @@ function PatientsView() {
             </button>
           </div>
 
-          {workspaceAction === "duplicates" ? (
+          {workspaceAction === "monitor" ? (
+            <div className="patient-workspace-list">
+              {monitoredQueuePatients.length > 0 ? (
+                monitoredQueuePatients.map(({ patient, queueModule }) => (
+                  <div className="patient-workspace-row" key={`monitor-${patient.id}`}>
+                    <Icon type="users" size={18} />
+                    <div>
+                      <strong>{patient.name}</strong>
+                      <small>
+                        MRN {patient.regNo || patient.id} · Queued to {String(queueModule)}
+                      </small>
+                    </div>
+                  </div>
+                ))
+              ) : (
+                <div className="patient-workspace-empty">
+                  No patient has been queued from this module yet.
+                </div>
+              )}
+            </div>
+          ) : workspaceAction === "duplicates" ? (
             <div className="patient-workspace-list">
               {duplicateCandidates.length === 0 ? (
                 <div className="patient-workspace-empty">
@@ -2152,10 +2504,22 @@ function PatientsView() {
                   <button
                     type="button"
                     className="pv-table-action pv-table-edit"
-                    title={p.id === checkedInPatientId ? "Edit checked-in patient" : "Check in patient before editing"}
-                    aria-label={p.id === checkedInPatientId ? "Edit patient" : "Check in before editing"}
-                    data-tooltip={p.id === checkedInPatientId ? "Edit" : "Check in first"}
-                    disabled={p.id !== checkedInPatientId}
+                    title={
+                      isPatientQueuedFromThisModule(p) && !isSuperAdmin
+                        ? "Patient already queued. Only Super Admin can edit."
+                        : p.id === checkedInPatientId || isSuperAdmin
+                          ? "Edit patient"
+                          : "Check in patient before editing"
+                    }
+                    aria-label={canEditPatientRecord(p) ? "Edit patient" : "Patient cannot be edited"}
+                    data-tooltip={
+                      isPatientQueuedFromThisModule(p) && !isSuperAdmin
+                        ? "Locked"
+                        : canEditPatientRecord(p)
+                          ? "Edit"
+                          : "Check in first"
+                    }
+                    disabled={!canEditPatientRecord(p)}
                     onClick={() => void openPatientForEdit(p)}
                   >
                     <Icon type="ehr" size={16} />
@@ -2424,11 +2788,11 @@ function PatientsView() {
               <div className="patient-form-footer-actions">
                 <button type="button" className="form-btn form-btn-cancel" onClick={() => { setFormOpen(false); handleResetForm(); }}>Cancel</button>
                 {formTab === "kin" && !form.hasInsurance ? (
-                  <button type="submit" form="patient-registration-form" className="form-btn form-btn-primary" disabled={saving}>{saving ? "Saving..." : editingPatient ? "Update Patient" : "Register Patient"}</button>
+                  <button type="submit" form="patient-registration-form" data-patient-register="true" className="form-btn form-btn-primary" disabled={saving}>{saving ? "Saving..." : editingPatient ? "Update Patient" : "Register Patient"}</button>
                 ) : formTab !== "insurance" ? (
                   <button type="button" className="form-btn form-btn-primary" onClick={() => setFormTab(formTab === "personal" ? "medical" : formTab === "medical" ? "kin" : "insurance")}>Next →</button>
                 ) : (
-                  <button type="submit" form="patient-registration-form" className="form-btn form-btn-primary" disabled={saving}>{saving ? "Saving..." : editingPatient ? "Update Patient" : "Register Patient"}</button>
+                  <button type="submit" form="patient-registration-form" data-patient-register="true" className="form-btn form-btn-primary" disabled={saving}>{saving ? "Saving..." : editingPatient ? "Update Patient" : "Register Patient"}</button>
                 )}
               </div>
             </div>
@@ -2454,6 +2818,54 @@ function PatientsView() {
             <div className="patient-duplicate-panel-actions">
               <button type="button" onClick={autofillDuplicatePatient}>Auto Fill</button>
               <button type="button" onClick={requestDuplicateMerge}>Request Merge</button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {queuePatient ? (
+        <div className="patient-form-modal patient-queue-backdrop" onClick={() => !queueSaving && setQueuePatient(null)}>
+          <div className="patient-form-panel patient-queue-modal" onClick={(event) => event.stopPropagation()}>
+            <div className="patient-form-header patient-queue-header">
+              <div className="patient-form-header-main">
+                <div className="patient-form-icon">
+                  <Icon type="calendar" size={20} />
+                </div>
+                <div>
+                  <h2 className="form-title">Queue Patient Next</h2>
+                  <p className="form-title-note">{queuePatient.name} is checked in. Select the next module before they appear elsewhere.</p>
+                </div>
+              </div>
+              <button type="button" className="patient-form-close patient-queue-close" onClick={() => setQueuePatient(null)} disabled={queueSaving}>
+                ×
+              </button>
+            </div>
+            <div className="patient-queue-body">
+              <label className="form-field patient-queue-field">
+                <span>Destination module *</span>
+                <input
+                  className="form-input"
+                  list="desktop-patient-queue-destinations"
+                  value={queueDestinationInput}
+                  onChange={(event) => setQueueDestinationInput(event.target.value)}
+                  placeholder="Type or select module, e.g. Outpatient / OPD"
+                  autoFocus
+                />
+                <datalist id="desktop-patient-queue-destinations">
+                  {patientQueueDestinations.map((destination) => (
+                    <option key={`${destination.departmentId}-${destination.label}`} value={destination.label} />
+                  ))}
+                </datalist>
+                <small>Queued patients become visible in the selected module queue only.</small>
+              </label>
+              <div className="form-actions">
+                <button type="button" className="form-cancel" onClick={() => setQueuePatient(null)} disabled={queueSaving}>
+                  Cancel
+                </button>
+                <button type="button" className="form-submit" onClick={queuePatientNext} disabled={queueSaving}>
+                  {queueSaving ? "Queuing..." : "Queue Patient"}
+                </button>
+              </div>
             </div>
           </div>
         </div>
@@ -2554,8 +2966,14 @@ function PatientsView() {
             <div className="patient-drawer-footer">
               <button
                 className="patient-drawer-edit-btn"
-                disabled={selectedPatient.id !== checkedInPatientId}
-                title={selectedPatient.id === checkedInPatientId ? "Edit checked-in patient" : "Check in this patient before editing"}
+                disabled={!canEditPatientRecord(selectedPatient)}
+                title={
+                  isPatientQueuedFromThisModule(selectedPatient) && !isSuperAdmin
+                    ? "Patient already queued. Only Super Admin can edit."
+                    : selectedPatient.id === checkedInPatientId || isSuperAdmin
+                      ? "Edit patient"
+                      : "Check in this patient before editing"
+                }
                 onClick={() => {
                   void openPatientForEdit(selectedPatient);
                   setSelectedPatient(null);
@@ -2613,20 +3031,32 @@ function PatientsView() {
 function AppointmentsView() {
   const { patients, facility } = useAppStore();
   const [appointments, setAppointments] = useState<any[]>([]);
+  const [doctors, setDoctors] = useState<any[]>([]);
   const [search, setSearch] = useState("");
   const [activeForm, setActiveForm] = useState<"booking" | "slots" | "cancel" | null>(null);
   const [loading, setLoading] = useState(false);
   const [notice, setNotice] = useState("");
+  const [calendarDate, setCalendarDate] = useState(new Date().toISOString().slice(0, 10));
+  const [calendarDoctor, setCalendarDoctor] = useState("All doctors");
+  const [waitingListOpen, setWaitingListOpen] = useState(false);
+  const [waitingListLoading, setWaitingListLoading] = useState(false);
+  const [waitingListRows, setWaitingListRows] = useState<any[]>([]);
+  const [checkedInQueuePatients, setCheckedInQueuePatients] = useState<Record<string, boolean>>({});
+  const [searchPatient, setSearchPatient] = useState("");
+  const [showPatientResults, setShowPatientResults] = useState(false);
+  const [appointmentStats, setAppointmentStats] = useState<any>({});
   const [booking, setBooking] = useState({
     patientId: "",
-    doctorName: "",
+    doctorId: "",
     department: "OPD",
     date: new Date().toISOString().slice(0, 10),
     time: "08:00",
     appointmentType: "New",
-    source: "Walk-in",
+    bookingSource: "Walk-in",
+    insuranceScheme: "",
     chiefComplaint: "",
     notes: "",
+    sendReminder: false,
     durationMinutes: 30,
     repeatEnabled: false,
     repeatEvery: 6,
@@ -2661,13 +3091,33 @@ function AppointmentsView() {
   const loadAppointments = useCallback(async () => {
     setLoading(true);
     try {
-      const response = await apiFetch("/appointments");
+      const [response, statsResponse] = await Promise.all([
+        apiFetch("/appointments"),
+        apiFetch("/appointments/stats").catch(() => null),
+      ]);
       const data = await parseJsonSafe(response);
       setAppointments(Array.isArray(data) ? data : []);
+      if (statsResponse) {
+        const statsData = await parseJsonSafe(statsResponse);
+        setAppointmentStats(statsData && typeof statsData === "object" ? statsData : {});
+      } else {
+        setAppointmentStats({});
+      }
     } catch {
       setAppointments([]);
+      setAppointmentStats({});
     } finally {
       setLoading(false);
+    }
+  }, []);
+
+  const loadDoctors = useCallback(async () => {
+    try {
+      const response = await apiFetch("/staff?role=DOCTOR");
+      const data = await parseJsonSafe(response);
+      setDoctors(Array.isArray(data) ? data : []);
+    } catch {
+      setDoctors([]);
     }
   }, []);
 
@@ -2675,20 +3125,111 @@ function AppointmentsView() {
     void loadAppointments();
   }, [loadAppointments]);
 
+  const loadAppointmentWaitingList = useCallback(async () => {
+    setWaitingListLoading(true);
+    try {
+      const board = await fetchQueueBoard({
+        departmentId: "APPOINTMENTS",
+        facilityId: facility?.id,
+      });
+      setWaitingListRows(Array.isArray((board as any)?.tokens) ? (board as any).tokens : []);
+    } catch {
+      setWaitingListRows([]);
+    } finally {
+      setWaitingListLoading(false);
+    }
+  }, [facility?.id]);
+
+  useEffect(() => {
+    const refresh = () => {
+      if (document.visibilityState !== "hidden") {
+        void loadAppointments();
+        void loadAppointmentWaitingList();
+      }
+    };
+    const interval = window.setInterval(refresh, 90000);
+    return () => {
+      window.clearInterval(interval);
+    };
+  }, [loadAppointments, loadAppointmentWaitingList]);
+
+  useEffect(() => {
+    void loadAppointmentWaitingList();
+  }, [loadAppointmentWaitingList]);
+
+  useEffect(() => {
+    const handleWaitingListOpen = (event: Event) => {
+      const detail = (event as CustomEvent).detail || {};
+      if (detail?.departmentId !== "APPOINTMENTS" && detail?.moduleId !== 4) return;
+      setWaitingListOpen(true);
+      void loadAppointmentWaitingList();
+    };
+    const handleQueued = (event: Event) => {
+      const detail = (event as CustomEvent).detail || {};
+      const departmentId = detail?.destination?.departmentId || detail?.departmentId;
+      if (departmentId && departmentId !== "APPOINTMENTS") return;
+      void loadAppointmentWaitingList();
+    };
+    window.addEventListener("hmis:open-module-waiting-list", handleWaitingListOpen);
+    window.addEventListener("hmis:patient-queued", handleQueued);
+    return () => {
+      window.removeEventListener("hmis:open-module-waiting-list", handleWaitingListOpen);
+      window.removeEventListener("hmis:patient-queued", handleQueued);
+    };
+  }, [loadAppointmentWaitingList]);
+
+  useEffect(() => {
+    void loadDoctors();
+  }, [loadDoctors]);
+
   const patientName = (patientId: string) => {
     const match = patients.find((patient) => patient.id === patientId);
     return match?.name || "Patient";
   };
 
+  const patientSearchOptions = searchPatient
+    ? patients.filter((patient) => {
+        const needle = searchPatient.toLowerCase();
+        return `${patient.name} ${patient.regNo || ""}`.toLowerCase().includes(needle);
+      })
+    : patients;
+
   const appointmentPatientName = (item: any) =>
     item?.patient
-      ? [item.patient.firstName, item.patient.lastName].filter(Boolean).join(" ").trim() || "Patient"
-      : item?.patientName || patientName(item?.patientId);
+      ? [item.patient.firstName, item.patient.middleName, item.patient.lastName].filter(Boolean).join(" ").trim() ||
+        item.patient.name ||
+        item.patient.fullName ||
+        item.patient.displayName ||
+        item.patient.patientCode ||
+        item.patient.mrn ||
+        "Patient"
+      : item?.patientName ||
+        item?.patientFullName ||
+        item?.patientCode ||
+        item?.mrn ||
+        patientName(item?.patientId) ||
+        item?.patientId ||
+        "Patient";
 
   const appointmentDoctorName = (item: any) =>
     item?.doctor
-      ? `Dr. ${[item.doctor.firstName, item.doctor.lastName].filter(Boolean).join(" ")}`.trim()
-      : item?.doctorName || item?.notes?.match(/Doctor: ([^\n]+)/)?.[1] || "Doctor";
+      ? (() => {
+          const name =
+            [item.doctor.firstName, item.doctor.lastName].filter(Boolean).join(" ").trim() ||
+            item.doctor.name ||
+            item.doctor.fullName ||
+            item.doctor.displayName;
+          return name ? (/^dr\.?\s/i.test(name) ? name : `Dr. ${name}`) : "Doctor";
+        })()
+      : item?.doctorName || item?.providerName || item?.clinicianName || item?.doctorId || item?.notes?.match(/Doctor: ([^\n]+)/)?.[1] || "Doctor";
+
+  const appointmentDoctorFirstName = (item: any) =>
+    item?.doctor?.firstName || String(appointmentDoctorName(item)).replace(/^Dr\.?\s+/i, "").split(" ")[0] || "Doctor";
+
+  const selectedDoctorName =
+    doctors.find((doctor) => doctor.id === booking.doctorId)
+      ? `Dr. ${doctors.find((doctor) => doctor.id === booking.doctorId)?.firstName || ""} ${doctors.find((doctor) => doctor.id === booking.doctorId)?.lastName || ""}`.trim()
+      : "Selected doctor";
 
   const toLocalDate = (value?: string) => {
     if (!value) return "";
@@ -2704,12 +3245,22 @@ function AppointmentsView() {
     return `${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
   };
 
-  const selectedDateAppointments = appointments.filter((item) => toLocalDate(item?.dateTime || item?.scheduledDate) === booking.date);
-  const bookedTimes = new Set(
-    selectedDateAppointments
-      .filter((item) => !["CANCELLED", "NO_SHOW", "NOSHOW"].includes(String(item?.status || "").toUpperCase()))
-      .map((item) => toLocalTime(item?.dateTime || item?.scheduledTime)),
-  );
+  const selectedDateAppointments = appointments.filter((item) => {
+    const doctor = appointmentDoctorName(item);
+    return (
+      toLocalDate(item?.dateTime || item?.scheduledDate) === calendarDate &&
+      (calendarDoctor === "All doctors" || doctor === calendarDoctor)
+    );
+  });
+  const bookedAppointmentsByTime = selectedDateAppointments
+    .filter((item) => !["CANCELLED", "NO_SHOW", "NOSHOW"].includes(String(item?.status || "").toUpperCase()))
+    .reduce((map, item) => {
+      const time = toLocalTime(item?.dateTime || item?.scheduledTime);
+      const current = map.get(time) || [];
+      current.push(item);
+      map.set(time, current);
+      return map;
+    }, new Map<string, any[]>());
   const slotDuration = Math.max(15, Number(booking.durationMinutes) || 30);
   const calendarSlots = Array.from({ length: 20 }, (_, index) => {
     const totalMinutes = 8 * 60 + index * slotDuration;
@@ -2717,9 +3268,150 @@ function AppointmentsView() {
     const minute = totalMinutes % 60;
     const time = `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
     const blocked = hour === 12;
-    const booked = bookedTimes.has(time);
+    const slotAppointments = bookedAppointmentsByTime.get(time) || [];
+    const appointment = slotAppointments[0];
+    return {
+      time,
+      appointment,
+      appointments: slotAppointments,
+      patientCount: slotAppointments.length,
+      doctorFirstName: appointment ? appointmentDoctorFirstName(appointment) : "",
+      status: blocked ? "blocked" : slotAppointments.length > 0 ? "booked" : "available",
+    };
+  }).filter((slot) => Number(slot.time.slice(0, 2)) < 18);
+  const bookingBookedTimes = new Set(
+    appointments
+      .filter((item) => toLocalDate(item?.dateTime || item?.scheduledDate) === booking.date)
+      .filter((item) => !booking.doctorId || item?.doctorId === booking.doctorId)
+      .filter((item) => !["CANCELLED", "NO_SHOW", "NOSHOW"].includes(String(item?.status || "").toUpperCase()))
+      .map((item) => toLocalTime(item?.dateTime || item?.scheduledTime)),
+  );
+  const bookingCalendarSlots = Array.from({ length: 20 }, (_, index) => {
+    const totalMinutes = 8 * 60 + index * slotDuration;
+    const hour = Math.floor(totalMinutes / 60);
+    const minute = totalMinutes % 60;
+    const time = `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
+    const blocked = hour === 12;
+    const booked = bookingBookedTimes.has(time);
     return { time, status: blocked ? "blocked" : booked ? "booked" : "available" };
   }).filter((slot) => Number(slot.time.slice(0, 2)) < 18);
+  const doctorOptions = Array.from(new Set(appointments.map(appointmentDoctorName).filter(Boolean)));
+  const appointmentResponseLabel = (item: any) =>
+    String(item?.responseStatus || item?.patientResponse || item?.response || item?.status || "").toUpperCase() === "CONFIRMED"
+      ? "Confirmed"
+      : String(item?.responseStatus || item?.patientResponse || item?.response || item?.status || "").toUpperCase() === "CANCELLED"
+        ? "Cancelled"
+        : ["NO_SHOW", "NOSHOW"].includes(String(item?.status || "").toUpperCase())
+          ? "No-show"
+          : String(item?.status || "").toUpperCase() === "ARRIVED"
+            ? "Arrived"
+            : "No response";
+
+  const appointmentDateTime = (item: any) => {
+    const directValue = item?.dateTime || item?.scheduledAt;
+    const directDate = directValue ? new Date(String(directValue)) : null;
+    if (directDate && Number.isFinite(directDate.getTime())) return directDate;
+
+    const dateValue = item?.scheduledDate || item?.appointmentDate || item?.date;
+    const timeValue = item?.scheduledTime || item?.startTime || item?.time || item?.slotTime;
+    if (dateValue && timeValue) {
+      const datePart = String(dateValue).includes("T") ? String(dateValue).slice(0, 10) : String(dateValue);
+      const timePart = String(timeValue).includes("T") ? String(timeValue).slice(11, 16) : String(timeValue).slice(0, 5);
+      const combined = new Date(`${datePart}T${timePart || "00:00"}:00`);
+      if (Number.isFinite(combined.getTime())) return combined;
+    }
+
+    const fallbackDate = dateValue ? new Date(String(dateValue)) : null;
+    return fallbackDate && Number.isFinite(fallbackDate.getTime()) ? fallbackDate : null;
+  };
+
+  const appointmentTimeText = (item: any) => {
+    const appointmentDate = item?.dateTime || item?.scheduledAt || item?.scheduledDate || item?.appointmentDate || item?.date || "";
+    const parsedDate = appointmentDateTime(item);
+    const formattedDate = parsedDate ? parsedDate.toLocaleString() : String(appointmentDate || "");
+    const scheduledTime = item?.scheduledTime || item?.startTime || item?.time || item?.slotTime
+      ? String(item?.scheduledTime || item?.startTime || item?.time || item?.slotTime).slice(0, 5)
+      : "";
+    if (formattedDate && scheduledTime && !formattedDate.includes(scheduledTime)) return `${formattedDate} ${scheduledTime}`;
+    return formattedDate || scheduledTime || "—";
+  };
+
+  const appointmentSourceText = (item: any) =>
+    String(item?.source || item?.bookingSource || "").toLowerCase().includes("app")
+      ? "Booked via Medilink App"
+      : item?.source || item?.bookingSource || "Walk-in";
+
+  const appointmentStatusText = (item: any) => String(item?.status || item?.appointmentStatus || "Scheduled").replace(/_/g, " ");
+
+  const updateAppointmentStatus = async (id: string, status: string) => {
+    try {
+      await apiFetch(`/appointments/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status }),
+      });
+      setNotice(status === "NO_SHOW" ? "Appointment marked as no-show." : "Patient arrival confirmed.");
+      await loadAppointments();
+    } catch {
+      setNotice("Appointment update failed.");
+    }
+  };
+
+  const runAppointmentSidebarAction = useCallback(
+    async (action: string) => {
+      if (action === "recurring") {
+        setBooking((current) => ({
+          ...current,
+          repeatEnabled: true,
+          repeatEvery: current.repeatEvery || 6,
+          repeatUnit: current.repeatUnit || "weeks",
+          repeatUntil:
+            current.repeatUntil ||
+            new Date(Date.now() + 180 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10),
+        }));
+        setActiveForm("booking");
+        setNotice("Recurring series mode enabled.");
+        return;
+      }
+
+      if (action === "waitlist") {
+        try {
+          const response = await apiFetch("/appointments/notify-waitlist", { method: "POST" });
+          const body = await parseJsonSafe(response);
+          setNotice(body?.message || "Next waiting-list patient offered the available slot.");
+          await Promise.all([loadAppointments(), loadAppointmentWaitingList()]);
+        } catch {
+          setNotice("Waiting-list release failed.");
+        }
+        return;
+      }
+
+      if (action === "no-show") {
+        const now = new Date();
+        const candidate = appointments.find((item) => {
+          const status = String(item?.status || item?.appointmentStatus || "SCHEDULED").toUpperCase();
+          const time = appointmentDateTime(item);
+          return ["SCHEDULED", "CONFIRMED", "ARRIVED"].includes(status) && time !== null && time <= now;
+        });
+        if (!candidate?.id) {
+          setNotice("No due appointment is ready to mark as no-show.");
+          return;
+        }
+        await updateAppointmentStatus(candidate.id, "NO_SHOW");
+      }
+    },
+    [appointments, loadAppointmentWaitingList],
+  );
+
+  useEffect(() => {
+    const handleSidebarAction = (event: Event) => {
+      const action = String((event as CustomEvent<{ action?: string }>).detail?.action || "");
+      if (!action) return;
+      void runAppointmentSidebarAction(action);
+    };
+    window.addEventListener("hmis:appointment-sidebar-action", handleSidebarAction);
+    return () => window.removeEventListener("hmis:appointment-sidebar-action", handleSidebarAction);
+  }, [runAppointmentSidebarAction]);
 
   const recurrenceDates = () => {
     if (!booking.repeatEnabled || !booking.repeatUntil) return [booking.date];
@@ -2746,7 +3438,7 @@ function AppointmentsView() {
     try {
       const metadata = [
         booking.notes,
-        booking.doctorName ? `Doctor: ${booking.doctorName}` : "",
+        booking.insuranceScheme ? `Insurance: ${booking.insuranceScheme}` : "",
         `Reminder policy: ${booking.reminder24Sms ? "SMS 24h" : "SMS off"}; ${booking.reminder2WhatsApp ? "WhatsApp 2h" : "WhatsApp off"}`,
         booking.responseTracking ? "Patient response tracking: CONFIRM/CANCEL enabled" : "Patient response tracking disabled",
         booking.waitingListAllowed ? "Waiting list release enabled" : "Waiting list release disabled",
@@ -2762,15 +3454,16 @@ function AppointmentsView() {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             patientId: booking.patientId,
+            doctorId: booking.doctorId || undefined,
             appointmentType: booking.appointmentType,
             departmentId: booking.department,
             scheduledDate: new Date(`${date}T00:00:00`).toISOString(),
             scheduledTime: dateTime.toISOString(),
             durationMinutes: Number(booking.durationMinutes) || 30,
-            source: booking.appBooking ? "Medilink App" : booking.source,
+            source: booking.appBooking ? "Medilink App" : booking.bookingSource,
             chiefComplaint: booking.chiefComplaint || undefined,
             notes: metadata || undefined,
-            reminderSent: Boolean(booking.reminder24Sms || booking.reminder2WhatsApp),
+            reminderSent: Boolean(booking.sendReminder || booking.reminder24Sms || booking.reminder2WhatsApp),
             dateTime: dateTime.toISOString(),
             status: "SCHEDULED",
             facilityId: facility?.id || undefined,
@@ -2835,18 +3528,94 @@ function AppointmentsView() {
     }
   };
 
-  const filtered = appointments.filter(
-    (a) =>
-      appointmentPatientName(a).toLowerCase().includes(search.toLowerCase()) ||
-      appointmentDoctorName(a).toLowerCase().includes(search.toLowerCase()) ||
-      String(a.status || "").toLowerCase().includes(search.toLowerCase()),
-  );
+  const filtered = appointments.filter((a) => {
+    const needle = search.toLowerCase().trim();
+    if (!needle) return true;
+    const patientText = [
+      appointmentPatientName(a),
+      a?.patient?.patientCode,
+      a?.patient?.mrn,
+      a?.patient?.phone,
+      a?.patientId,
+    ]
+      .filter(Boolean)
+      .join(" ")
+      .toLowerCase();
+    const doctorText = appointmentDoctorName(a).toLowerCase();
+    const statusText = appointmentStatusText(a).toLowerCase();
+    const sourceText = appointmentSourceText(a).toLowerCase();
+    const responseText = appointmentResponseLabel(a).toLowerCase();
+    const timeText = appointmentTimeText(a).toLowerCase();
+    return (
+      patientText.includes(needle) ||
+      doctorText.includes(needle) ||
+      statusText.includes(needle) ||
+      sourceText.includes(needle) ||
+      responseText.includes(needle) ||
+      timeText.includes(needle)
+    );
+  });
+  const checkInAppointmentQueuePatient = async (row: any) => {
+    const patientId = String(row?.patientId || "").trim();
+    if (!patientId) return;
+    try {
+      await updateQueueTokenStatus({
+        tokenId: row?.tokenId || row?.id,
+        tokenNumber: row?.tokenNumber,
+        patientId,
+        visitId: row?.visitId,
+        status: "IN_SERVICE",
+        reason: "Checked in to Appointments",
+      });
+      await loadAppointmentWaitingList();
+    } catch {
+      // Keep local check-in usable if the queue status sync is temporarily unavailable.
+    }
+    try {
+      await apiFetch("/module-actions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          module: "appointments",
+          action: "Queued Patient Check-In",
+          data: {
+            patientId,
+            patientName: row?.patientName || "Patient",
+            patient_mrn: row?.patientCode || row?.mrn || "",
+            mrn: row?.patientCode || row?.mrn || "",
+            queueToken: row?.tokenNumber || "",
+            queueStatus: "IN_SERVICE",
+            checkedInAt: new Date().toISOString(),
+          },
+          context: { title: "Appointments & Schedules", source: "appointment.waiting-list" },
+        }),
+      });
+    } catch {
+      // Action logging should not block check-in.
+    }
+    setCheckedInQueuePatients((current) => ({ ...current, [patientId]: true }));
+    setBooking((current) => ({
+      ...current,
+      patientId,
+      bookingSource: "Patient Registration Queue",
+    }));
+    setNotice(`${String(row?.patientName || "Patient")} checked in for Appointments.`);
+  };
   const today = new Date().toISOString().slice(0, 10);
   const todayCount = appointments.filter((item) => toLocalDate(item?.dateTime || item?.scheduledDate) === today).length;
   const bookedCount = appointments.filter((item) => !["CANCELLED", "NO_SHOW", "NOSHOW"].includes(String(item?.status || "").toUpperCase())).length;
   const cancelledCount = appointments.filter((item) => String(item?.status || "").toUpperCase() === "CANCELLED").length;
   const noShowCount = appointments.filter((item) => ["NO_SHOW", "NOSHOW"].includes(String(item?.status || "").toUpperCase())).length;
   const appBookingCount = appointments.filter((item) => String(item?.source || "").toLowerCase().includes("app")).length;
+  const completedCount = appointments.filter((item) => String(item?.status || "").toUpperCase() === "COMPLETED").length;
+  const appointmentStatCards = [
+    { label: "Today's Visits", value: appointmentStats.todayVisits ?? todayCount, color: "#1e3a8a", bg: "linear-gradient(180deg, #ffffff 0%, #eef4ff 100%)" },
+    { label: "Booked Slots", value: appointmentStats.bookedSlots ?? bookedCount, color: "#16a34a", bg: "linear-gradient(180deg, #ffffff 0%, #eefcf3 100%)" },
+    { label: "Cancelled", value: appointmentStats.cancelled ?? cancelledCount, color: "#7c3aed", bg: "linear-gradient(180deg, #ffffff 0%, #f5efff 100%)" },
+    { label: "No-Shows", value: appointmentStats.noShows ?? noShowCount, color: "#dc2626", bg: "linear-gradient(180deg, #ffffff 0%, #fff1f2 100%)" },
+    { label: "App Bookings", value: appointmentStats.appBookings ?? appBookingCount, color: "#0ea5e9", bg: "linear-gradient(180deg, #ffffff 0%, #eff9ff 100%)" },
+    { label: "Completed", value: appointmentStats.completed ?? completedCount, color: "#0d9488", bg: "linear-gradient(180deg, #ffffff 0%, #eefcf9 100%)" },
+  ];
 
   return (
     <div className="appointments-view">
@@ -2854,96 +3623,217 @@ function AppointmentsView() {
         <div>
           <h2 className="pv-title"><Icon type="calendar" size={18} /> Appointments & Schedules</h2>
           <p className="pv-subtitle">
-            Slot booking, reminders, waiting lists, no-show tracking, and app bookings.
+            Consultation scheduling and visit coordination
           </p>
-        </div>
-        <div className="appointment-actions">
-          <button className="appointment-action-btn is-booking" onClick={() => setActiveForm("booking")}><Icon type="calendar" size={15} /> Appointment Booking</button>
-          <button className="appointment-action-btn is-slots" onClick={() => setActiveForm("slots")}><Icon type="settings" size={15} /> Appointment Slot Configuration</button>
-          <button className="appointment-action-btn is-cancel" onClick={() => setActiveForm("cancel")}><Icon type="cancel" size={15} /> Appointment Cancellation</button>
         </div>
       </div>
       {notice ? <div className="module-toast appointment-toast">{notice}</div> : null}
       <div className="pv-stats appointment-stats">
-        {[
-          ["Today's Visits", todayCount, "#1e3a8a"],
-          ["Booked Slots", bookedCount, "#16a34a"],
-          ["Cancelled", cancelledCount, "#7c3aed"],
-          ["No-Shows", noShowCount, "#dc2626"],
-          ["App Bookings", appBookingCount, "#0ea5e9"],
-          ["Waiting List", 0, "#f59e0b"],
-        ].map(([label, value, color]) => (
-          <div className="pv-stat-card" style={{ borderLeftColor: String(color) }} key={String(label)}>
+        {appointmentStatCards.map(({ label, value, color, bg }) => (
+          <div
+            className="pv-stat-card"
+            style={{
+              "--appointment-stat-color": color,
+              "--appointment-stat-bg": bg,
+            } as React.CSSProperties}
+            key={label}
+          >
             <p>{label}</p>
             <strong>{value}</strong>
           </div>
         ))}
       </div>
-      <div className="pv-search-wrap">
-        <svg
-          width="16"
-          height="16"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="#94a3b8"
-          strokeWidth="2"
-          style={{
-            position: "absolute",
-            left: 12,
-            top: "50%",
-            transform: "translateY(-50%)",
-          }}
-        >
-          <circle cx="11" cy="11" r="8" />
-          <path d="M21 21l-4.35-4.35" />
-        </svg>
-        <input
-          className="pv-search"
-          placeholder="Search appointments..."
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-        />
+      <div className="pv-search-bar">
+        <div className="pv-search-wrap">
+          <svg
+            width="16"
+            height="16"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="#94a3b8"
+            strokeWidth="2"
+            style={{
+              position: "absolute",
+              left: 12,
+              top: "50%",
+              transform: "translateY(-50%)",
+            }}
+          >
+            <circle cx="11" cy="11" r="8" />
+            <path d="M21 21l-4.35-4.35" />
+          </svg>
+          <input
+            className="pv-search"
+            placeholder="Search patient"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+          />
+        </div>
       </div>
-      <div className="pv-table-wrap">
+      <section className="appointment-calendar-board">
+        <div className="appointment-calendar-toolbar">
+          <div>
+            <h3>Slot-Based Calendar View</h3>
+            <p>Click a green slot to reserve immediately. Red is booked; grey is blocked.</p>
+          </div>
+          <div className="appointment-calendar-filters">
+            <input type="date" value={calendarDate} onChange={(event) => setCalendarDate(event.target.value)} />
+            <select value={calendarDoctor} onChange={(event) => setCalendarDoctor(event.target.value)}>
+              <option>All doctors</option>
+              {doctorOptions.map((doctor) => <option key={doctor}>{doctor}</option>)}
+            </select>
+          </div>
+        </div>
+        {notice ? <div className="appointment-calendar-notice">{notice}</div> : null}
+        <div className="appointment-calendar-legend">
+          <span><i className="slot-available" /> Available</span>
+          <span><i className="slot-booked" /> Booked</span>
+          <span><i className="slot-blocked" /> Blocked</span>
+        </div>
+        <div className="appointment-calendar-grid">
+          {calendarSlots.map((slot) => {
+            const appointment = slot.appointment;
+            return (
+              <button
+                key={slot.time}
+                type="button"
+                className={`appointment-calendar-slot is-${slot.status}`}
+                disabled={slot.status !== "available"}
+                onClick={() => {
+                  setBooking((current) => ({ ...current, date: calendarDate, time: slot.time }));
+                  setActiveForm("booking");
+                }}
+              >
+                <strong>{slot.time}</strong>
+                <span>{slot.status === "available" ? "Available" : slot.status === "blocked" ? "Blocked" : `${slot.patientCount} patient${slot.patientCount === 1 ? "" : "s"} · Dr. ${slot.doctorFirstName}`}</span>
+                {appointment ? <small>{appointmentSourceText(appointment)} · {appointmentStatusText(appointment)}</small> : null}
+              </button>
+            );
+          })}
+        </div>
+        <div className="appointment-operations-grid">
+          <div>
+            <h4>Patient Response Tracking</h4>
+            <p>CONFIRM/CANCEL replies update status and morning priority.</p>
+            <div className="appointment-mini-list">
+              {appointments.slice(0, 5).map((item) => (
+                <div key={item.id}>
+                  <span>{appointmentPatientName(item)}</span>
+                  <strong>{appointmentResponseLabel(item)}</strong>
+                </div>
+              ))}
+            </div>
+          </div>
+          <div>
+            <h4>Waiting List Release</h4>
+            <p>Queued patients are managed from the popup waiting list, matching the web workflow.</p>
+            <div className="appointment-mini-list">
+              <div>
+                <span>{waitingListRows.length} queued patient{waitingListRows.length === 1 ? "" : "s"}</span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setWaitingListOpen(true);
+                    void loadAppointmentWaitingList();
+                  }}
+                >
+                  Open Waiting List
+                </button>
+              </div>
+            </div>
+          </div>
+          <div>
+            <h4>Arrival, App Booking & No-Show</h4>
+            <p>One-click arrival for app bookings and DNA/no-show tracking.</p>
+            <div className="appointment-mini-list">
+              {appointments.slice(0, 5).map((item) => (
+                <div key={item.id}>
+                  <span>{appointmentSourceText(item) === "Booked via Medilink App" ? "Booked via Medilink App" : appointmentPatientName(item)}</span>
+                  <span className="appointment-inline-actions">
+                    <button type="button" onClick={() => updateAppointmentStatus(item.id, "CONFIRMED")}>Arrived</button>
+                    <button type="button" onClick={() => updateAppointmentStatus(item.id, "NO_SHOW")}>No-show</button>
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      </section>
+      <div className="pv-table-wrap appointment-table-wrap">
         <table className="pv-table">
           <thead>
             <tr>
-              <th>Time</th>
               <th>Patient</th>
               <th>Doctor</th>
+              <th>Time</th>
               <th>Source</th>
+              <th>Response</th>
               <th>Status</th>
-              <th>Actions</th>
             </tr>
           </thead>
           <tbody>
             {filtered.map((a) => (
               <tr key={a.id}>
-                <td className="pv-code">{new Date(a.dateTime || a.scheduledTime || Date.now()).toLocaleString()}</td>
                 <td className="pv-name">{appointmentPatientName(a)}</td>
                 <td>{appointmentDoctorName(a)}</td>
-                <td>{a.source || "Walk-in"}</td>
+                <td className="pv-code">{appointmentTimeText(a)}</td>
+                <td>{appointmentSourceText(a)}</td>
+                <td>{appointmentResponseLabel(a)}</td>
                 <td>
                   <span
                     className={`pv-badge ${String(a.status).toUpperCase() === "SCHEDULED" ? "badge-male" : "badge-female"}`}
                   >
-                    {a.status}
+                    {appointmentStatusText(a)}
                   </span>
-                </td>
-                <td>
-                  <button className="pv-del" onClick={() => {
-                    setCancelData((current) => ({ ...current, appointmentId: a.id }));
-                    setActiveForm("cancel");
-                  }}>Cancel</button>
                 </td>
               </tr>
             ))}
             {filtered.length === 0 ? (
-              <tr><td colSpan={6}>No appointments found.</td></tr>
+              <tr><td className="pv-empty" colSpan={6}>No records found.</td></tr>
             ) : null}
           </tbody>
         </table>
       </div>
+      {waitingListOpen ? (
+        <div className="module-modal-backdrop" onClick={() => setWaitingListOpen(false)}>
+          <aside className="workflow-waiting-panel" onClick={(event) => event.stopPropagation()}>
+            <div className="workflow-waiting-panel-head">
+              <div>
+                <h3>Waiting List</h3>
+                <p>{waitingListRows.length} patient{waitingListRows.length === 1 ? "" : "s"} queued to Appointments.</p>
+              </div>
+              <button type="button" className="workflow-waiting-close" onClick={() => setWaitingListOpen(false)}>
+                ×
+              </button>
+            </div>
+            <div className="workflow-waiting-panel-body">
+              {waitingListLoading ? (
+                <div className="pv-empty">Loading queued patients...</div>
+              ) : waitingListRows.length === 0 ? (
+                <div className="pv-empty">No queued patients for Appointments.</div>
+              ) : (
+                waitingListRows.map((row: any) => (
+                  <div key={String(row?.tokenId || row?.tokenNumber || row?.patientId)} className="workflow-waiting-item">
+                    <div className="workflow-waiting-copy">
+                      <strong>{String(row?.patientName || "Queued patient")}</strong>
+                      <span>{String(row?.tokenNumber || "")} · {String(row?.priority || "WAITING")}</span>
+                    </div>
+                    <div className="workflow-waiting-actions">
+                      <button
+                        type="button"
+                        className="btn-primary workflow-waiting-checkin"
+                        onClick={() => checkInAppointmentQueuePatient(row)}
+                      >
+                        {checkedInQueuePatients[String(row?.patientId || "")] ? "Checked In" : "Check In"}
+                      </button>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          </aside>
+        </div>
+      ) : null}
       {activeForm ? (
         <div className="module-form-overlay appointment-form-overlay">
           <div className={`module-form-panel appointment-form-panel appointment-mode-${activeForm}`}>
@@ -2957,52 +3847,129 @@ function AppointmentsView() {
               </div>
               <button className="modal-close-btn" onClick={() => setActiveForm(null)}>×</button>
             </div>
+            <div className="appointment-form-tabs">
+              <button
+                type="button"
+                onClick={() => setActiveForm("booking")}
+                className={`appointment-form-tab ${activeForm === "booking" ? "is-active" : ""}`}
+              >
+                <Icon type="calendar" size={15} /> Booking
+              </button>
+              <button
+                type="button"
+                onClick={() => setActiveForm("slots")}
+                className={`appointment-form-tab ${activeForm === "slots" ? "is-active" : ""}`}
+              >
+                <Icon type="settings" size={15} /> Slots
+              </button>
+              <button
+                type="button"
+                onClick={() => setActiveForm("cancel")}
+                className={`appointment-form-tab ${activeForm === "cancel" ? "is-active" : ""}`}
+              >
+                <Icon type="cancel" size={15} /> Cancel
+              </button>
+            </div>
             {activeForm === "booking" ? (
               <form className="appointment-form-body" onSubmit={submitBooking}>
-                <div><label className="form-label">Patient *</label><select required className="form-input" value={booking.patientId} onChange={(e) => setBooking({ ...booking, patientId: e.target.value })}><option value="">Select patient</option>{patients.map((patient) => <option key={patient.id} value={patient.id}>{patient.name} ({patient.regNo})</option>)}</select></div>
-                <div><label className="form-label">Doctor / Clinic</label><input className="form-input" value={booking.doctorName} onChange={(e) => setBooking({ ...booking, doctorName: e.target.value })} placeholder="Dr. Achieng / Diabetes Clinic" /></div>
-                <div><label className="form-label">Appointment Type</label><select className="form-input" value={booking.appointmentType} onChange={(e) => setBooking({ ...booking, appointmentType: e.target.value })}>{["New", "Follow-up", "Specialist", "Procedure", "Telemedicine"].map((item) => <option key={item}>{item}</option>)}</select></div>
-                <div><label className="form-label">Department</label><select className="form-input" value={booking.department} onChange={(e) => setBooking({ ...booking, department: e.target.value })}>{["OPD", "Specialist Clinic", "Procedure", "Telemedicine", "Diagnostics"].map((item) => <option key={item}>{item}</option>)}</select></div>
-                <div><label className="form-label">Date</label><input required type="date" className="form-input" value={booking.date} onChange={(e) => setBooking({ ...booking, date: e.target.value })} /></div>
-                <div><label className="form-label">Time</label><input required type="time" className="form-input" value={booking.time} onChange={(e) => setBooking({ ...booking, time: e.target.value })} /></div>
+                <div>
+                  <label className="form-label">Patient Search</label>
+                  <div className="appointment-patient-search-wrap">
+                    <input
+                      className="form-input"
+                      placeholder="Search by MRN, name, or ID number..."
+                      value={searchPatient}
+                      onChange={(e) => {
+                        setSearchPatient(e.target.value);
+                        setShowPatientResults(true);
+                      }}
+                      onFocus={() => setShowPatientResults(true)}
+                      onBlur={() => window.setTimeout(() => setShowPatientResults(false), 150)}
+                    />
+                    {showPatientResults && patientSearchOptions.length > 0 ? (
+                      <ul className="appointment-patient-results">
+                        {patientSearchOptions.map((patient) => (
+                          <li key={patient.id}>
+                            <button
+                              type="button"
+                              onMouseDown={() => {
+                                setBooking((current) => ({ ...current, patientId: patient.id }));
+                                setSearchPatient(`${patient.name}${patient.regNo ? ` (${patient.regNo})` : ""}`);
+                                setShowPatientResults(false);
+                              }}
+                            >
+                              {patient.name} {patient.regNo ? `(${patient.regNo})` : ""}
+                            </button>
+                          </li>
+                        ))}
+                      </ul>
+                    ) : null}
+                  </div>
+                </div>
+                <div className="appointment-grid-2">
+                  <div><label className="form-label">Appointment Type *</label><select required className="form-input" value={booking.appointmentType} onChange={(e) => setBooking({ ...booking, appointmentType: e.target.value })}>{["New", "Follow-up", "Specialist", "Procedure", "Telemedicine"].map((item) => <option key={item}>{item}</option>)}</select></div>
+                  <div><label className="form-label">Department *</label><select required className="form-input" value={booking.department} onChange={(e) => setBooking({ ...booking, department: e.target.value })}>{["OPD", "Specialist Clinic", "Procedure", "Telemedicine", "Diagnostics"].map((item) => <option key={item}>{item}</option>)}</select></div>
+                </div>
+                <div><label className="form-label">Preferred Doctor</label><select className="form-input" value={booking.doctorId} onChange={(e) => setBooking({ ...booking, doctorId: e.target.value })}><option value="">-- Choose Doctor (Optional) --</option>{doctors.map((doctor) => <option key={doctor.id} value={doctor.id}>{`Dr. ${doctor.firstName || ""} ${doctor.lastName || ""}`.trim()} {doctor.specialization ? `(${doctor.specialization})` : ""}</option>)}</select></div>
+                <div className="appointment-grid-2">
+                  <div><label className="form-label">Appointment Date</label><input required type="date" className="form-input" value={booking.date} onChange={(e) => setBooking({ ...booking, date: e.target.value })} /></div>
+                  <div><label className="form-label">Appointment Time</label><input required type="time" className="form-input" value={booking.time} onChange={(e) => setBooking({ ...booking, time: e.target.value })} /></div>
+                </div>
                 <div className="appointment-slot-calendar">
-                  <div className="appointment-slot-calendar-head"><strong>Slot-Based Calendar</strong><span>Green available, red booked, grey blocked.</span></div>
-                  <div className="appointment-slot-grid">{calendarSlots.map((slot) => <button key={slot.time} type="button" className={`appointment-slot-cell is-${slot.status} ${booking.time === slot.time ? "is-selected" : ""}`} disabled={slot.status !== "available"} onClick={() => setBooking({ ...booking, time: slot.time })}>{slot.time}</button>)}</div>
+                  <div className="appointment-slot-calendar-head"><div><strong>Slot-Based Calendar</strong><span>{booking.date ? `${selectedDoctorName} · ${booking.date}` : "Choose date and doctor to reserve a slot"}</span></div><div className="appointment-slot-legend"><span><i className="slot-available" /> Available</span><span><i className="slot-booked" /> Booked</span><span><i className="slot-blocked" /> Blocked</span></div></div>
+                  <div className="appointment-slot-grid">{bookingCalendarSlots.map((slot) => <button key={slot.time} type="button" className={`appointment-slot-cell is-${slot.status} ${booking.time === slot.time ? "is-selected" : ""}`} disabled={slot.status !== "available"} onClick={() => setBooking({ ...booking, time: slot.time })}>{slot.time}</button>)}</div>
                 </div>
-                <div><label className="form-label">Source</label><select className="form-input" value={booking.source} onChange={(e) => setBooking({ ...booking, source: e.target.value })}>{["Walk-in", "Phone", "Portal", "Referral"].map((item) => <option key={item}>{item}</option>)}</select></div>
-                <div><label className="form-label">Duration Minutes</label><input type="number" className="form-input" value={booking.durationMinutes} onChange={(e) => setBooking({ ...booking, durationMinutes: Number(e.target.value) })} /></div>
+                <div className="appointment-grid-2">
+                  <div><label className="form-label">Booking Source</label><select className="form-input" value={booking.bookingSource} onChange={(e) => setBooking({ ...booking, bookingSource: e.target.value })}>{["Walk-in", "Phone", "Portal", "Referral"].map((item) => <option key={item}>{item}</option>)}</select></div>
+                  <div><label className="form-label">Insurance to Use</label><input className="form-input" placeholder="Active insurance scheme" value={booking.insuranceScheme} onChange={(e) => setBooking({ ...booking, insuranceScheme: e.target.value })} /></div>
+                </div>
                 <div><label className="form-label">Chief Complaint</label><input className="form-input" value={booking.chiefComplaint} onChange={(e) => setBooking({ ...booking, chiefComplaint: e.target.value })} /></div>
-                <div><label className="form-label">Required Resources</label><input className="form-input" value={booking.requiredResources} onChange={(e) => setBooking({ ...booking, requiredResources: e.target.value })} placeholder="Theatre, anaesthetist, ultrasound..." /></div>
-                <div className="appointment-feature-panel">
-                  {[
-                    ["repeatEnabled", "Recurring appointment series"],
-                    ["reminder24Sms", "SMS reminder 24 hours before"],
-                    ["reminder2WhatsApp", "WhatsApp reminder 2 hours before"],
-                    ["responseTracking", "Track CONFIRM / CANCEL replies"],
-                    ["waitingListAllowed", "Release cancelled slots to waiting list"],
-                    ["appBooking", "Booked via Medilink App"],
-                  ].map(([key, label]) => <label key={key} className="appointment-check-row"><input type="checkbox" checked={Boolean((booking as any)[key])} onChange={(e) => setBooking({ ...booking, [key]: e.target.checked } as any)} />{label}</label>)}
+                <div><label className="form-label">Notes</label><textarea className="form-input" value={booking.notes} onChange={(e) => setBooking({ ...booking, notes: e.target.value })} rows={2} /></div>
+                <div className="appointment-grid-2">
+                  <div><label className="form-label">Slot Duration (minutes)</label><input type="number" className="form-input" value={booking.durationMinutes} onChange={(e) => setBooking({ ...booking, durationMinutes: Number(e.target.value) })} /></div>
+                  <label className="appointment-check-row appointment-check-inline"><input type="checkbox" checked={booking.sendReminder} onChange={(e) => setBooking({ ...booking, sendReminder: e.target.checked })} />Send Reminder</label>
                 </div>
-                {booking.repeatEnabled ? <div className="appointment-repeat-grid"><label>Every<input type="number" className="form-input" value={booking.repeatEvery} onChange={(e) => setBooking({ ...booking, repeatEvery: Number(e.target.value) })} /></label><label>Unit<select className="form-input" value={booking.repeatUnit} onChange={(e) => setBooking({ ...booking, repeatUnit: e.target.value })}><option value="weeks">Weeks</option><option value="months">Months</option></select></label><label>Until<input type="date" className="form-input" value={booking.repeatUntil} onChange={(e) => setBooking({ ...booking, repeatUntil: e.target.value })} /></label></div> : null}
-                <div><label className="form-label">No-Show Policy</label><select className="form-input" value={booking.noShowPolicy} onChange={(e) => setBooking({ ...booking, noShowPolicy: e.target.value })}><option>Track only</option><option>Require deposit after 3 no-shows</option><option>Supervisor approval after repeat no-show</option></select></div>
-                <div><label className="form-label">Notes</label><textarea className="form-input" value={booking.notes} onChange={(e) => setBooking({ ...booking, notes: e.target.value })} /></div>
+                <div className="appointment-feature-panel">
+                  <div className="appointment-feature-title"><Icon type="settings" size={15} /> Advanced appointment controls</div>
+                  <div className="appointment-grid-2">
+                    <label className="appointment-check-row"><input type="checkbox" checked={booking.repeatEnabled} onChange={(e) => setBooking({ ...booking, repeatEnabled: e.target.checked })} />Recurring appointment series</label>
+                    <label className="appointment-check-row"><input type="checkbox" checked={booking.appBooking} onChange={(e) => setBooking({ ...booking, appBooking: e.target.checked })} />Booked via Medilink App</label>
+                  </div>
+                </div>
+                {booking.repeatEnabled ? <div className="appointment-repeat-grid"><label>Repeat Every<input type="number" className="form-input" value={booking.repeatEvery} onChange={(e) => setBooking({ ...booking, repeatEvery: Number(e.target.value) })} /></label><label>Repeat Unit<select className="form-input" value={booking.repeatUnit} onChange={(e) => setBooking({ ...booking, repeatUnit: e.target.value })}><option value="weeks">Weeks</option><option value="months">Months</option></select></label><label>Repeat Until<input type="date" className="form-input" value={booking.repeatUntil} onChange={(e) => setBooking({ ...booking, repeatUntil: e.target.value })} /></label></div> : null}
+                <div className="appointment-grid-2">
+                  <label className="appointment-check-row"><input type="checkbox" checked={booking.reminder24Sms} onChange={(e) => setBooking({ ...booking, reminder24Sms: e.target.checked })} />SMS reminder 24 hours before</label>
+                  <label className="appointment-check-row"><input type="checkbox" checked={booking.reminder2WhatsApp} onChange={(e) => setBooking({ ...booking, reminder2WhatsApp: e.target.checked })} />WhatsApp reminder 2 hours before</label>
+                  <label className="appointment-check-row"><input type="checkbox" checked={booking.responseTracking} onChange={(e) => setBooking({ ...booking, responseTracking: e.target.checked })} />Track CONFIRM / CANCEL replies</label>
+                  <label className="appointment-check-row"><input type="checkbox" checked={booking.waitingListAllowed} onChange={(e) => setBooking({ ...booking, waitingListAllowed: e.target.checked })} />Release cancelled slots to waiting list</label>
+                </div>
+                <div className="appointment-grid-2">
+                  <div><label className="form-label">Required Resources</label><input className="form-input" value={booking.requiredResources} onChange={(e) => setBooking({ ...booking, requiredResources: e.target.value })} placeholder="Theatre, anaesthetist, ultrasound..." /></div>
+                  <div><label className="form-label">No-Show Policy</label><select className="form-input" value={booking.noShowPolicy} onChange={(e) => setBooking({ ...booking, noShowPolicy: e.target.value })}><option>Track only</option><option>Require deposit after 3 no-shows</option><option>Supervisor approval after repeat no-show</option></select></div>
+                </div>
                 <div className="module-form-footer"><button type="button" className="form-btn form-btn-cancel" onClick={() => setActiveForm(null)}>Cancel</button><button className="form-btn form-btn-primary" disabled={loading}>{loading ? "Scheduling..." : "Schedule"}</button></div>
               </form>
             ) : activeForm === "slots" ? (
               <form className="appointment-form-body" onSubmit={submitSlots}>
-                <div><label className="form-label">Doctor / Clinic</label><input required className="form-input" value={slotConfig.doctorName} onChange={(e) => setSlotConfig({ ...slotConfig, doctorName: e.target.value })} /></div>
-                <div><label className="form-label">Department</label><input required className="form-input" value={slotConfig.department} onChange={(e) => setSlotConfig({ ...slotConfig, department: e.target.value })} /></div>
-                <div><label className="form-label">Date</label><input required type="date" className="form-input" value={slotConfig.date} onChange={(e) => setSlotConfig({ ...slotConfig, date: e.target.value })} /></div>
-                <div><label className="form-label">Start Time</label><input required type="time" className="form-input" value={slotConfig.startTime} onChange={(e) => setSlotConfig({ ...slotConfig, startTime: e.target.value })} /></div>
-                <div><label className="form-label">End Time</label><input required type="time" className="form-input" value={slotConfig.endTime} onChange={(e) => setSlotConfig({ ...slotConfig, endTime: e.target.value })} /></div>
-                <div><label className="form-label">Slot Duration</label><input required type="number" className="form-input" value={slotConfig.slotDuration} onChange={(e) => setSlotConfig({ ...slotConfig, slotDuration: Number(e.target.value) })} /></div>
-                <div><label className="form-label">Slot Type</label><select className="form-input" value={slotConfig.slotType} onChange={(e) => setSlotConfig({ ...slotConfig, slotType: e.target.value })}><option>OPD</option><option>Telemedicine</option><option>Procedure</option></select></div>
+                <div className="appointment-grid-2">
+                  <div><label className="form-label">Doctor *</label><select required className="form-input" value={slotConfig.doctorName} onChange={(e) => setSlotConfig({ ...slotConfig, doctorName: e.target.value })}><option value="">Select Doctor</option>{doctors.map((doctor) => <option key={doctor.id} value={doctor.id}>{`Dr. ${doctor.firstName || ""} ${doctor.lastName || ""}`.trim()}</option>)}</select></div>
+                  <div><label className="form-label">Department *</label><input required className="form-input" value={slotConfig.department} onChange={(e) => setSlotConfig({ ...slotConfig, department: e.target.value })} placeholder="Clinic or department" /></div>
+                </div>
+                <div className="appointment-grid-3">
+                  <div><label className="form-label">Date *</label><input required type="date" className="form-input" value={slotConfig.date} onChange={(e) => setSlotConfig({ ...slotConfig, date: e.target.value })} /></div>
+                  <div><label className="form-label">Start Time *</label><input required type="time" className="form-input" value={slotConfig.startTime} onChange={(e) => setSlotConfig({ ...slotConfig, startTime: e.target.value })} /></div>
+                  <div><label className="form-label">End Time *</label><input required type="time" className="form-input" value={slotConfig.endTime} onChange={(e) => setSlotConfig({ ...slotConfig, endTime: e.target.value })} /></div>
+                </div>
+                <div className="appointment-grid-2">
+                  <div><label className="form-label">Slot Duration</label><input required type="number" className="form-input" value={slotConfig.slotDuration} onChange={(e) => setSlotConfig({ ...slotConfig, slotDuration: Number(e.target.value) })} /></div>
+                  <div><label className="form-label">Slot Type</label><select className="form-input" value={slotConfig.slotType} onChange={(e) => setSlotConfig({ ...slotConfig, slotType: e.target.value })}><option>OPD</option><option>Telemedicine</option><option>Procedure</option></select></div>
+                </div>
                 <div><label className="form-label">Maximum Patients</label><input type="number" className="form-input" value={slotConfig.maxPatients} onChange={(e) => setSlotConfig({ ...slotConfig, maxPatients: Number(e.target.value) })} /></div>
                 <div className="module-form-footer"><button type="button" className="form-btn form-btn-cancel" onClick={() => setActiveForm(null)}>Cancel</button><button className="form-btn form-btn-primary" disabled={loading}>{loading ? "Saving..." : "Save Slots"}</button></div>
               </form>
             ) : (
               <form className="appointment-form-body" onSubmit={submitCancel}>
-                <div><label className="form-label">Appointment</label><select required className="form-input" value={cancelData.appointmentId} onChange={(e) => setCancelData({ ...cancelData, appointmentId: e.target.value })}><option value="">Select appointment</option>{appointments.map((item) => <option key={item.id} value={item.id}>{appointmentPatientName(item)} - {new Date(item.dateTime || item.scheduledTime).toLocaleString()}</option>)}</select></div>
+                <div><label className="form-label">Appointment</label><select required className="form-input" value={cancelData.appointmentId} onChange={(e) => setCancelData({ ...cancelData, appointmentId: e.target.value })}><option value="">Select appointment</option>{appointments.map((item) => <option key={item.id} value={item.id}>{appointmentPatientName(item)} - {appointmentTimeText(item)}</option>)}</select></div>
                 <div><label className="form-label">Reason</label><select className="form-input" value={cancelData.reason} onChange={(e) => setCancelData({ ...cancelData, reason: e.target.value })}>{["Patient request", "Doctor unavailable", "Emergency", "Other"].map((item) => <option key={item}>{item}</option>)}</select></div>
                 <label className="appointment-check-row"><input type="checkbox" checked={cancelData.notifyPatient} onChange={(e) => setCancelData({ ...cancelData, notifyPatient: e.target.checked })} />Notify patient</label>
                 <label className="appointment-check-row"><input type="checkbox" checked={cancelData.reschedule} onChange={(e) => setCancelData({ ...cancelData, reschedule: e.target.checked })} />Reschedule immediately</label>
@@ -6338,24 +7305,24 @@ function QueueManagementView() {
     fields: QueueField[];
   };
   type QueueRow = {
+    id: string;
     token: string;
     patient: string;
-    status: "Waiting" | "Called" | "In Service" | "Completed";
+    status: string;
     estimatedWait: number;
     serviceType: string;
     priority: string;
+    priorityColor?: string;
+    room?: string;
   };
 
   const [search, setSearch] = useState("");
   const [activeFormKey, setActiveFormKey] = useState<QueueForm["key"] | null>(null);
   const [formValues, setFormValues] = useState<Record<string, string>>({});
   const [notice, setNotice] = useState("");
-  const [queueRows, setQueueRows] = useState<QueueRow[]>([
-    { token: "OPD-001", patient: "Jane Doe", status: "Waiting", estimatedWait: 12, serviceType: "OPD", priority: "Normal" },
-    { token: "LAB-014", patient: "Samuel Mwangi", status: "Called", estimatedWait: 4, serviceType: "Lab", priority: "Urgent" },
-    { token: "PHA-008", patient: "Amina Hassan", status: "In Service", estimatedWait: 0, serviceType: "Pharmacy", priority: "Normal" },
-    { token: "BIL-021", patient: "Peter Otieno", status: "Completed", estimatedWait: 0, serviceType: "Billing", priority: "Normal" },
-  ]);
+  const [queueBoard, setQueueBoard] = useState<any>({});
+  const [queueAnalytics, setQueueAnalytics] = useState<any>({});
+  const [queueRows, setQueueRows] = useState<QueueRow[]>([]);
   const forms: QueueForm[] = [
     {
       key: "token",
@@ -6365,7 +7332,7 @@ function QueueManagementView() {
       icon: "calendar",
       submitLabel: "Issue Token",
       fields: [
-        { key: "patient", label: "Patient", type: "text", required: true, note: "Patient MRN or name - auto-filled from registration.", placeholder: "Patient MRN or name" },
+        { key: "patient", label: "Patient ID", type: "text", required: true, note: "Tokens are issued after registration or check-in.", placeholder: "Patient UUID" },
         { key: "service_type", label: "Service type", type: "select", required: true, note: "OPD | Lab | Pharmacy | Billing | Radiology | Triage.", options: ["OPD", "Lab", "Pharmacy", "Billing", "Radiology", "Triage"] },
         { key: "priority_level", label: "Priority level", type: "select", required: true, note: "Normal | Urgent | Emergency - affects queue position.", options: ["Normal", "Urgent", "Emergency"] },
         { key: "linked_appointment", label: "Linked appointment", type: "select", note: "Appointment number if pre-booked.", options: ["None", "APT-1021", "APT-1044", "APT-1063"] },
@@ -6389,18 +7356,47 @@ function QueueManagementView() {
   ];
 
   const activeForm = forms.find((form) => form.key === activeFormKey) || null;
+  const loadQueue = useCallback(async () => {
+    try {
+      const [board, analytics] = await Promise.all([
+        fetchQueueBoard({ departmentId: "OPD" }),
+        fetchQueueAnalytics({ departmentId: "OPD" }).catch(() => ({})),
+      ]);
+      const tokens = Array.isArray((board as any)?.tokens) ? (board as any).tokens : [];
+      setQueueBoard(board || {});
+      setQueueAnalytics(analytics || {});
+      setQueueRows(tokens.map((row: any) => ({
+        id: String(row?.tokenId || row?.id || row?.tokenNumber || ""),
+        token: String(row?.tokenNumber || ""),
+        patient: String(row?.patientName || row?.patientId || "Queued patient"),
+        status: String(row?.status || "WAITING").replace(/_/g, " "),
+        estimatedWait: Number(row?.estimatedWaitMinutes || 0),
+        serviceType: String(row?.departmentId || row?.queueType || "OPD"),
+        priority: String(row?.priority || "NORMAL").replace(/_/g, " "),
+        priorityColor: String(row?.priorityColor || "green"),
+        room: String(row?.counterId || row?.doctorName || "Assigning"),
+      })));
+    } catch (error: any) {
+      setNotice(error?.message || "Failed to load queue board.");
+    }
+  }, []);
+  useEffect(() => {
+    void loadQueue();
+    const timer = window.setInterval(() => void loadQueue(), 1000);
+    return () => window.clearInterval(timer);
+  }, [loadQueue]);
   const filteredRows = queueRows.filter((row) => {
     const needle = search.trim().toLowerCase();
     if (!needle) return true;
     return `${row.token} ${row.patient} ${row.status} ${row.serviceType} ${row.priority}`.toLowerCase().includes(needle);
   });
   const stats = [
-    { label: "Tokens", value: queueRows.length, color: "#1e3a8a" },
-    { label: "Waiting", value: queueRows.filter((row) => row.status === "Waiting").length, color: "#f59e0b" },
-    { label: "Completed", value: queueRows.filter((row) => row.status === "Completed").length, color: "#16a34a" },
+    { label: "Tokens", value: queueAnalytics?.totals?.tokens ?? queueRows.length, color: "#1e3a8a" },
+    { label: "Waiting", value: queueAnalytics?.totals?.waiting ?? queueRows.filter((row) => row.status === "WAITING").length, color: "#f59e0b" },
+    { label: "Completed", value: queueAnalytics?.totals?.completed ?? queueRows.filter((row) => row.status === "COMPLETED").length, color: "#16a34a" },
     {
       label: "Avg Wait",
-      value: `${Math.round(queueRows.reduce((sum, row) => sum + row.estimatedWait, 0) / Math.max(queueRows.length, 1))} min`,
+      value: `${queueAnalytics?.totals?.averageWaitingMinutes ?? Math.round(queueRows.reduce((sum, row) => sum + row.estimatedWait, 0) / Math.max(queueRows.length, 1))} min`,
       color: "#0d9488",
     },
   ];
@@ -6417,28 +7413,71 @@ function QueueManagementView() {
     }
     return <input className="queue-form-control" type={field.type} value={value} onChange={(event) => updateFormValue(field.key, event.target.value)} placeholder={field.placeholder} required={field.required} />;
   };
-  const submitForm = (event: React.FormEvent) => {
+  const submitForm = async (event: React.FormEvent) => {
     event.preventDefault();
     if (!activeForm) return;
-    if (activeForm.key === "token") {
-      const service = String(formValues.service_type || "OPD");
-      const prefix = service.slice(0, 3).toUpperCase();
-      const nextNumber = queueRows.length + 1;
-      setQueueRows((current) => [
-        {
-          token: `${prefix}-${String(nextNumber).padStart(3, "0")}`,
-          patient: String(formValues.patient || "Queued Patient"),
-          status: "Waiting",
-          estimatedWait: String(formValues.priority_level || "") === "Emergency" ? 1 : String(formValues.priority_level || "") === "Urgent" ? 5 : 14,
-          serviceType: service,
-          priority: String(formValues.priority_level || "Normal"),
-        },
-        ...current,
-      ]);
+    try {
+      if (activeForm.key === "token") {
+        const service = String(formValues.service_type || "OPD").toUpperCase();
+        const prefix = service.includes("TRIAGE") ? "T" : service.includes("LAB") ? "L" : service.includes("OPD") ? "DR" : service.slice(0, 3);
+        await createQueueToken({
+          patientId: String(formValues.patient || "").trim(),
+          departmentId: service === "LAB" ? "LABORATORY" : service,
+          queueType: service,
+          tokenPrefix: prefix,
+          priority: String(formValues.priority_level || "Normal").toUpperCase(),
+          servicePoint: String(formValues.counter_assignment || ""),
+          notes: "Issued from Queue Management module",
+        });
+      } else {
+        await queueCounterSession({
+          counterId: String(formValues.counter_name || "").trim(),
+          counterName: String(formValues.counter_name || "").trim(),
+          departmentId: String(formValues.service_type || "OPD").toUpperCase(),
+          staffId: String(formValues.assigned_staff || "").trim(),
+          active: String(formValues.is_open || "Open") === "Open",
+        });
+      }
+      setNotice(`${activeForm.title} saved successfully.`);
+      setActiveFormKey(null);
+      setFormValues({});
+      await loadQueue();
+    } catch (error: any) {
+      setNotice(error?.message || `${activeForm.title} failed.`);
     }
-    setNotice(`${activeForm.title} saved successfully.`);
-    setActiveFormKey(null);
-    setFormValues({});
+  };
+  const callNext = async () => {
+    try {
+      const result = await callNextQueueToken({ departmentId: "OPD" });
+      setNotice((result as any)?.voiceAnnouncement?.text || `Calling ${(result as any)?.tokenNumber || "next token"}.`);
+      await loadQueue();
+    } catch (error: any) {
+      setNotice(error?.message || "Failed to call next patient.");
+    }
+  };
+  const markEmergency = async (row: QueueRow) => {
+    try {
+      await overrideQueuePriority({ tokenId: row.id, priorityLevel: "EMERGENCY", reason: "Emergency override from Queue Management" });
+      setNotice(`${row.token} moved to emergency priority.`);
+      await loadQueue();
+    } catch (error: any) {
+      setNotice(error?.message || "Priority update failed.");
+    }
+  };
+  const transferToken = async (row: QueueRow) => {
+    const target = window.prompt("Transfer to department", "LABORATORY");
+    if (!target) return;
+    try {
+      await apiFetch("/queue/token/transfer", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ tokenId: row.id, toDepartmentId: target.toUpperCase(), reason: "Transferred from Queue Management" }),
+      });
+      setNotice(`${row.token} transferred to ${target.toUpperCase()}.`);
+      await loadQueue();
+    } catch (error: any) {
+      setNotice(error?.message || "Transfer failed.");
+    }
   };
 
   return (
@@ -6449,6 +7488,9 @@ function QueueManagementView() {
           <p className="pv-subtitle">Live queue operations, wait time intelligence, and token routing across all service points.</p>
         </div>
         <div className="module-actions">
+          <button type="button" onClick={callNext} style={{ backgroundColor: "#0d9488", borderColor: "#0d9488", boxShadow: "0 8px 18px #0d948833" }}>
+            <Icon type="bell" size={16} /> Call Next Patient
+          </button>
           {forms.map((form) => (
             <button key={form.key} type="button" onClick={() => setActiveFormKey(form.key)} style={{ backgroundColor: form.accent, borderColor: form.accent, boxShadow: `0 8px 18px ${form.accent}33` }}>
               <Icon type={form.icon} size={16} /> {form.title}
@@ -6457,6 +7499,20 @@ function QueueManagementView() {
         </div>
       </div>
       {notice ? <div className="workflow-notice is-success">{notice}</div> : null}
+      <div className="pv-stats queue-stat-grid">
+        <div className="pv-stat-card" style={{ borderLeftColor: "#0d9488" }}>
+          <p className="pv-stat-label">Last Called</p>
+          <p className="pv-stat-value">{queueBoard?.lastCalled?.tokenNumber || "-"}</p>
+        </div>
+        <div className="pv-stat-card" style={{ borderLeftColor: "#2563eb" }}>
+          <p className="pv-stat-label">Next Three</p>
+          <p className="pv-stat-value">{(queueBoard?.nextTokens || []).map((row: any) => row.tokenNumber).join(", ") || "-"}</p>
+        </div>
+        <div className="pv-stat-card" style={{ borderLeftColor: "#dc2626" }}>
+          <p className="pv-stat-label">Bottleneck</p>
+          <p className="pv-stat-value">{queueAnalytics?.bottleneck?.departmentId || "-"}</p>
+        </div>
+      </div>
       <div className="pv-stats queue-stat-grid">
         {stats.map((stat) => (
           <div key={stat.label} className="pv-stat-card" style={{ borderLeftColor: stat.color }}>
@@ -6474,14 +7530,22 @@ function QueueManagementView() {
       <div className="pv-table-meta"><strong className="pv-table-title">Live Queue Board</strong><span className="pv-badge">Sorted by priority and waiting position.</span></div>
       <div className="pv-table-wrap">
         <table className="pv-table">
-          <thead><tr><th>Token</th><th>Patient</th><th>Status</th><th>Est. Wait</th></tr></thead>
+          <thead><tr><th>Token</th><th>Patient</th><th>Status</th><th>Priority</th><th>Room</th><th>Est. Wait</th><th>Actions</th></tr></thead>
           <tbody>
-            {filteredRows.length === 0 ? <tr><td className="pv-empty" colSpan={4}>No queue records found.</td></tr> : filteredRows.map((row) => (
+            {filteredRows.length === 0 ? <tr><td className="pv-empty" colSpan={7}>No queue records found.</td></tr> : filteredRows.map((row) => (
               <tr key={row.token}>
                 <td className="pv-name">{row.token}</td>
                 <td>{row.patient}</td>
                 <td><span className={`pv-badge ${row.status === "Completed" ? "badge-male" : "badge-female"}`}>{row.status}</span></td>
+                <td><span className="pv-badge" style={{ backgroundColor: row.priorityColor || "#16a34a", color: "#fff" }}>{row.priority}</span></td>
+                <td>{row.room || "-"}</td>
                 <td>{row.estimatedWait} min</td>
+                <td>
+                  <div className="appointment-inline-actions">
+                    <button type="button" onClick={() => markEmergency(row)}>Emergency</button>
+                    <button type="button" onClick={() => transferToken(row)}>Transfer</button>
+                  </div>
+                </td>
               </tr>
             ))}
           </tbody>
@@ -13464,6 +14528,8 @@ export default function App() {
   const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
   const [logoutConfirmOpen, setLogoutConfirmOpen] = useState(false);
+  const [sidebarWaitingCount, setSidebarWaitingCount] = useState(0);
+  const [patientModuleState, setPatientModuleState] = useState<any>(() => readPatientModuleState());
   const [activeNav, setActiveNav] = useState(0);
   const [activeWorkflowModuleId, setActiveWorkflowModuleId] = useState<number | null>(
     null,
@@ -13810,6 +14876,8 @@ export default function App() {
     activeWorkflowModuleId ??
     (activeNav === 1
       ? 1
+      : activeNav === 3
+        ? 4
       : activeNav === 11
         ? 15
         : activeNav === 16
@@ -13822,6 +14890,10 @@ export default function App() {
   const activeWorkflowModule = activeSidebarModuleId
     ? WORKFLOW_MODULE_BY_ID[activeSidebarModuleId]
     : null;
+  const sidebarWaitingConfig = activeSidebarModuleId
+    ? workflowWaitingListConfig[activeSidebarModuleId]
+    : undefined;
+  const isSidebarModuleOpen = Boolean(activeSidebarModuleId);
   const activeSidebarTitle = activeWorkflowModule?.name || "Current Module";
   const setupFacilityNameFallback = getSetupFacilityNameFallback();
   const dashboardFacilityName = pickHospitalName(
@@ -13842,6 +14914,48 @@ export default function App() {
       token: patient.regNo,
       status: String(patient.queueStatus || "Queued"),
     }));
+
+  useEffect(() => {
+    let cancelled = false;
+    const loadSidebarWaitingCount = async () => {
+      if (!sidebarWaitingConfig) {
+        setSidebarWaitingCount(0);
+        return;
+      }
+      try {
+        const board = await fetchQueueBoard({
+          departmentId: sidebarWaitingConfig.departmentId,
+          facilityId: facility?.id,
+        });
+        if (!cancelled) {
+          setSidebarWaitingCount(Array.isArray((board as any)?.tokens) ? (board as any).tokens.length : 0);
+        }
+      } catch {
+        if (!cancelled) setSidebarWaitingCount(0);
+      }
+    };
+    void loadSidebarWaitingCount();
+    const handleQueued = () => void loadSidebarWaitingCount();
+    window.addEventListener("hmis:patient-queued", handleQueued);
+    return () => {
+      cancelled = true;
+      window.removeEventListener("hmis:patient-queued", handleQueued);
+    };
+  }, [sidebarWaitingConfig?.departmentId, facility?.id]);
+
+  useEffect(() => {
+    const handlePatientState = (event: Event) => {
+      setPatientModuleState((event as CustomEvent).detail || readPatientModuleState());
+    };
+    const syncPatientState = () => setPatientModuleState(readPatientModuleState());
+    window.addEventListener("hmis:patient-module-state", handlePatientState);
+    const timer = window.setInterval(syncPatientState, 1000);
+    return () => {
+      window.removeEventListener("hmis:patient-module-state", handlePatientState);
+      window.clearInterval(timer);
+    };
+  }, []);
+
   const openModuleFromSearch = (moduleId: number) => {
     setModuleSearch("");
     setModuleSearchFocused(false);
@@ -14748,6 +15862,10 @@ export default function App() {
           return <PatientsView />;
         }
 
+        if (module.id === 4) {
+          return <AppointmentsView />;
+        }
+
         if (module.id === 13) {
           return <BillingView />;
         }
@@ -14916,6 +16034,7 @@ export default function App() {
           {activeSidebarModuleId === 1 ? (
             <div className="sidebar-workspace-tools">
               {[
+                ["monitor", "Monitor Patient", "users"],
                 ["vulnerability", "Vulnerability Flags", "shield2"],
                 ["merge", "Patient Merge", "sync"],
               ].map(([action, label, icon]) => (
@@ -14940,6 +16059,105 @@ export default function App() {
                   {!sidebarCollapsed && <span>{label}</span>}
                 </button>
               ))}
+              {patientModuleState?.hasCheckedInPatient ? (
+                <button
+                  type="button"
+                  className="sidebar-workspace-btn"
+                  title="Queue Patient"
+                  onClick={() => {
+                    setActiveWorkflowModuleId(null);
+                    setActiveNav(1);
+                    window.setTimeout(() => {
+                      window.dispatchEvent(
+                        new CustomEvent("hmis:patient-workspace-action", {
+                          detail: { action: "queue" },
+                        }),
+                      );
+                    }, 80);
+                  }}
+                >
+                  <Icon type="send" size={16} />
+                  {!sidebarCollapsed && <span>Queue Patient</span>}
+                </button>
+              ) : null}
+            </div>
+          ) : activeSidebarModuleId === 4 ? (
+            <div className="sidebar-workspace-tools">
+              {[
+                ["recurring", "Recurring Series", "calendar"],
+                ["waitlist", "Release Waitlist", "users"],
+                ["no-show", "Mark No-Show", "bell"],
+              ].map(([action, label, icon]) => (
+                <button
+                  key={action}
+                  type="button"
+                  className="sidebar-workspace-btn"
+                  title={label}
+                  onClick={() => {
+                    setActiveWorkflowModuleId(null);
+                    setActiveNav(3);
+                    window.setTimeout(() => {
+                      window.dispatchEvent(
+                        new CustomEvent("hmis:appointment-sidebar-action", {
+                          detail: { action },
+                        }),
+                      );
+                    }, 80);
+                  }}
+                >
+                  <Icon type={icon} size={16} />
+                  {!sidebarCollapsed && <span>{label}</span>}
+                </button>
+              ))}
+              <button
+                type="button"
+                className="sidebar-workspace-btn"
+                title="Open Waiting List"
+                onClick={() => {
+                  window.dispatchEvent(
+                    new CustomEvent("hmis:open-module-waiting-list", {
+                      detail: {
+                        moduleId: activeSidebarModuleId,
+                        departmentId: "APPOINTMENTS",
+                      },
+                    }),
+                  );
+                }}
+              >
+                <Icon type="users" size={16} />
+                {!sidebarCollapsed && (
+                  <span>
+                    Open Waiting List
+                    <small className="sidebar-waiting-count">{sidebarWaitingCount}</small>
+                  </span>
+                )}
+              </button>
+            </div>
+          ) : sidebarWaitingConfig ? (
+            <div className="sidebar-workspace-tools">
+              <button
+                type="button"
+                className="sidebar-workspace-btn"
+                title="Open Waiting List"
+                onClick={() => {
+                  window.dispatchEvent(
+                    new CustomEvent("hmis:open-module-waiting-list", {
+                      detail: {
+                        moduleId: activeSidebarModuleId,
+                        departmentId: sidebarWaitingConfig.departmentId,
+                      },
+                    }),
+                  );
+                }}
+              >
+                <Icon type="users" size={16} />
+                {!sidebarCollapsed && (
+                  <span>
+                    Open Waiting List
+                    <small className="sidebar-waiting-count">{sidebarWaitingCount}</small>
+                  </span>
+                )}
+              </button>
             </div>
           ) : (
             <div className="sidebar-empty-state" title="Module tools">
@@ -14951,7 +16169,7 @@ export default function App() {
           )}
         </nav>
 
-        {roleKey === "hospital_admin" && (
+        {roleKey === "hospital_admin" && !isSidebarModuleOpen && (
           <div className="sidebar-upgrade-wrap">
             <button
               className={`sidebar-upgrade-btn ${activeNav === 40 ? "is-active" : ""}`}
@@ -14974,20 +16192,22 @@ export default function App() {
             <span>Help AI</span>
           </button>
         </div>
-        <div className="sidebar-hospital-card sidebar-hospital-profile">
-          <img
-            src={sidebarFacilityLogo}
-            className="sidebar-hospital-logo"
-            alt={`${sidebarFacilityName} logo`}
-            title={sidebarFacilityName}
-          />
-          {!sidebarCollapsed && (
-            <div className="sidebar-hospital-copy">
-              <span>Active Facility</span>
-              <strong title={sidebarFacilityName}>{sidebarFacilityName}</strong>
-            </div>
-          )}
-        </div>
+        {!isSidebarModuleOpen ? (
+          <div className="sidebar-hospital-card sidebar-hospital-profile">
+            <img
+              src={sidebarFacilityLogo}
+              className="sidebar-hospital-logo"
+              alt={`${sidebarFacilityName} logo`}
+              title={sidebarFacilityName}
+            />
+            {!sidebarCollapsed && (
+              <div className="sidebar-hospital-copy">
+                <span>Active Facility</span>
+                <strong title={sidebarFacilityName}>{sidebarFacilityName}</strong>
+              </div>
+            )}
+          </div>
+        ) : null}
       </aside>
 
           <div className="main">

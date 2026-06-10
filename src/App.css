@@ -7865,6 +7865,34 @@ textarea.telemedicine-form-control {
   gap: 18px;
 }
 
+.appointments-view > .pv-header {
+  order: 0;
+}
+
+.appointments-view > .appointment-toast {
+  order: 1;
+}
+
+.appointments-view > .appointment-stats {
+  order: 2;
+}
+
+.appointments-view > .pv-search-wrap {
+  order: 3;
+}
+
+.appointments-view > .pv-search-bar {
+  order: 3;
+}
+
+.appointments-view > .appointment-calendar-board {
+  order: 4;
+}
+
+.appointments-view > .pv-table-wrap {
+  order: 5;
+}
+
 .appointment-actions {
   display: flex;
   flex-wrap: wrap;
@@ -7872,19 +7900,44 @@ textarea.telemedicine-form-control {
   justify-content: flex-end;
 }
 
+.appointments-view .pv-title {
+  color: #243247 !important;
+  font-size: 1.08rem !important;
+  font-weight: 800 !important;
+  line-height: 1.2 !important;
+}
+
+.appointments-view .pv-title svg {
+  color: #1e40af !important;
+  stroke: #1e40af !important;
+}
+
+.appointments-view .pv-subtitle {
+  color: #64748b !important;
+  font-size: 0.82rem !important;
+  font-weight: 500 !important;
+}
+
 .appointment-action-btn {
-  min-height: 40px;
+  min-height: 42px;
   display: inline-flex;
   align-items: center;
   gap: 8px;
   border: 0;
-  border-radius: 10px;
-  padding: 0 14px;
+  border-radius: 11px;
+  padding: 0 16px;
   color: #ffffff;
   font-size: 0.86rem;
   font-weight: 800;
   cursor: pointer;
-  box-shadow: 0 12px 22px rgba(15, 23, 42, 0.12);
+  box-shadow: 0 13px 24px rgba(15, 23, 42, 0.14);
+  transition: transform 0.16s ease, box-shadow 0.16s ease, filter 0.16s ease;
+}
+
+.appointment-action-btn:hover {
+  transform: translateY(-1px);
+  filter: brightness(1.02);
+  box-shadow: 0 16px 28px rgba(15, 23, 42, 0.18);
 }
 
 .appointment-action-btn svg,
@@ -7906,7 +7959,61 @@ textarea.telemedicine-form-control {
 }
 
 .appointment-stats {
-  grid-template-columns: repeat(6, minmax(0, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 12px !important;
+}
+
+.appointments-view .appointment-stats .pv-stat-card {
+  min-height: 84px !important;
+  padding: 14px 16px 16px !important;
+  border: 1px solid #d9e2ec !important;
+  border-left: 4px solid var(--appointment-stat-color, #1e3a8a) !important;
+  border-radius: 12px !important;
+  background: var(--appointment-stat-bg, #ffffff) !important;
+  box-shadow: 0 8px 22px rgba(15, 23, 42, 0.07) !important;
+  position: relative;
+  display: flex !important;
+  flex-direction: column !important;
+  justify-content: flex-start !important;
+  overflow: hidden !important;
+}
+
+.appointments-view .appointment-stats .pv-stat-card p {
+  color: #64748b !important;
+  font-size: 0.74rem !important;
+  font-weight: 500 !important;
+  margin: 0 0 10px !important;
+  line-height: 1.2 !important;
+}
+
+.appointments-view .appointment-stats .pv-stat-card strong {
+  color: #1f2937 !important;
+  font-size: 1.1rem !important;
+  font-weight: 800 !important;
+  line-height: 1 !important;
+}
+
+.appointments-view .pv-search-bar {
+  width: 100%;
+  padding: 12px 14px;
+  border: 1px solid #dbe5ee;
+  border-radius: 12px;
+  background: #ffffff;
+}
+
+.appointments-view .pv-search-bar .pv-search-wrap {
+  width: 100% !important;
+  max-width: none !important;
+  flex: 0 0 auto !important;
+}
+
+.appointments-view .pv-search {
+  width: 100% !important;
+  max-width: none !important;
+  min-height: 44px;
+  border-color: #d5e0ec;
+  border-radius: 10px;
+  font-size: 0.9rem;
 }
 
 .appointment-toast {
@@ -7929,8 +8036,67 @@ textarea.telemedicine-form-control {
 }
 
 .appointment-form-panel {
-  width: min(980px, 92vw);
+  width: min(980px, 88vw);
   max-height: 92vh;
+  border-radius: 14px;
+  overflow: hidden;
+  box-shadow: 0 26px 72px rgba(15, 23, 42, 0.35);
+}
+
+.appointment-form-tabs {
+  display: flex;
+  border-bottom: 1px solid #cbd5e1;
+  background: #f8fafc;
+}
+
+.appointment-form-tab {
+  flex: 1;
+  min-height: 46px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border: 0;
+  border-right: 1px solid #e2e8f0;
+  background: #f8fafc;
+  color: #64748b;
+  font-size: 0.86rem;
+  font-weight: 800;
+  cursor: pointer;
+  transition: background 0.16s ease, color 0.16s ease, box-shadow 0.16s ease;
+}
+
+.appointment-form-tab:last-child {
+  border-right: 0;
+}
+
+.appointment-form-tab svg,
+.appointment-form-tab .hmis-micon {
+  color: currentColor;
+  stroke: currentColor;
+}
+
+.appointment-form-tab:hover {
+  background: #eef2f7;
+  color: #0f172a;
+}
+
+.appointment-mode-booking .appointment-form-tab.is-active {
+  color: #15803d;
+  background: #ffffff;
+  box-shadow: inset 0 -3px 0 #16a34a;
+}
+
+.appointment-mode-slots .appointment-form-tab.is-active {
+  color: #1d4ed8;
+  background: #ffffff;
+  box-shadow: inset 0 -3px 0 #2563eb;
+}
+
+.appointment-mode-cancel .appointment-form-tab.is-active {
+  color: #6d28d9;
+  background: #ffffff;
+  box-shadow: inset 0 -3px 0 #7c3aed;
 }
 
 .appointment-form-body {
@@ -7943,13 +8109,115 @@ textarea.telemedicine-form-control {
   background: linear-gradient(90deg, rgba(22, 163, 74, 0.05), transparent 32%), #ffffff;
 }
 
+.appointment-mode-slots .appointment-form-body {
+  background: linear-gradient(90deg, rgba(37, 99, 235, 0.06), transparent 32%), #ffffff;
+}
+
+.appointment-mode-cancel .appointment-form-body {
+  background: linear-gradient(90deg, rgba(124, 58, 237, 0.06), transparent 32%), #ffffff;
+}
+
 .appointment-form-body > div,
 .appointment-form-body > label {
   min-width: 0;
   padding: 12px;
   border: 1px solid #e2e8f0;
   border-left: 3px solid #16a34a;
-  border-radius: 8px;
+  border-radius: 10px;
+  background: rgba(248, 250, 252, 0.72);
+}
+
+.appointment-form-body .form-label {
+  color: #334155;
+  font-size: 0.8rem;
+  font-weight: 800;
+}
+
+.appointment-form-body .form-input {
+  min-height: 40px;
+  border: 1px solid #cbd5e1;
+  border-radius: 9px;
+  background: #ffffff;
+  color: #0f172a;
+  font-size: 0.86rem;
+  font-weight: 650;
+  transition: border-color 0.16s ease, box-shadow 0.16s ease;
+}
+
+.appointment-form-body .form-input:focus {
+  border-color: #16a34a;
+  box-shadow: 0 0 0 3px rgba(22, 163, 74, 0.12);
+}
+
+.appointment-mode-slots .appointment-form-body .form-input:focus {
+  border-color: #2563eb;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
+}
+
+.appointment-mode-cancel .appointment-form-body .form-input:focus {
+  border-color: #7c3aed;
+  box-shadow: 0 0 0 3px rgba(124, 58, 237, 0.12);
+}
+
+.appointment-form-body .module-form-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  padding: 14px 0 0;
+  border: 0;
+  background: transparent;
+}
+
+.appointment-form-body .form-btn {
+  min-height: 40px;
+  border-radius: 10px;
+  font-size: 0.85rem;
+  font-weight: 850;
+}
+
+.appointment-mode-booking .appointment-form-body .form-btn-primary {
+  background: #16a34a;
+  box-shadow: 0 12px 24px rgba(22, 163, 74, 0.22);
+}
+
+.appointment-mode-slots .appointment-form-body .form-btn-primary {
+  background: #2563eb;
+  box-shadow: 0 12px 24px rgba(37, 99, 235, 0.22);
+}
+
+.appointment-mode-cancel .appointment-form-body .form-btn-primary {
+  background: #7c3aed;
+  box-shadow: 0 12px 24px rgba(124, 58, 237, 0.22);
+}
+
+.appointment-grid-2,
+.appointment-grid-3 {
+  grid-column: 1 / -1;
+  display: grid;
+  gap: 16px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  box-shadow: none;
+}
+
+.appointment-grid-2 {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.appointment-grid-3 {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.appointment-grid-2 > div,
+.appointment-grid-2 > label,
+.appointment-grid-3 > div,
+.appointment-grid-3 > label {
+  min-width: 0;
+  padding: 14px;
+  border: 1px solid #e2e8f0;
+  border-left: 3px solid #16a34a;
+  border-radius: 10px;
   background: rgba(248, 250, 252, 0.72);
 }
 
@@ -7960,6 +8228,20 @@ textarea.telemedicine-form-control {
 
 .appointment-mode-cancel .appointment-form-body > div,
 .appointment-mode-cancel .appointment-form-body > label {
+  border-left-color: #7c3aed;
+}
+
+.appointment-mode-slots .appointment-grid-2 > div,
+.appointment-mode-slots .appointment-grid-2 > label,
+.appointment-mode-slots .appointment-grid-3 > div,
+.appointment-mode-slots .appointment-grid-3 > label {
+  border-left-color: #2563eb;
+}
+
+.appointment-mode-cancel .appointment-grid-2 > div,
+.appointment-mode-cancel .appointment-grid-2 > label,
+.appointment-mode-cancel .appointment-grid-3 > div,
+.appointment-mode-cancel .appointment-grid-3 > label {
   border-left-color: #7c3aed;
 }
 
@@ -7983,6 +8265,26 @@ textarea.telemedicine-form-control {
   color: #64748b;
   font-size: 0.78rem;
   font-weight: 650;
+}
+
+.appointment-slot-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  justify-content: flex-end;
+}
+
+.appointment-slot-legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin: 0;
+}
+
+.appointment-slot-legend i {
+  width: 9px;
+  height: 9px;
+  border-radius: 999px;
 }
 
 .appointment-slot-grid {
@@ -8052,11 +8354,254 @@ textarea.telemedicine-form-control {
   font-weight: 800;
 }
 
+.appointment-calendar-board {
+  width: 100%;
+  margin: 0;
+  padding: 18px;
+  border: 1px solid #dbe5ee;
+  border-radius: 12px;
+  background: #ffffff;
+  box-shadow: 0 18px 42px rgba(15, 23, 42, 0.08);
+}
+
+.appointment-table-wrap {
+  min-height: 118px;
+  border: 1px solid #dbe5ee;
+  border-radius: 12px;
+  overflow: hidden;
+  background: #ffffff;
+  box-shadow: 0 12px 28px rgba(15, 23, 42, 0.08);
+}
+
+.appointment-calendar-toolbar,
+.appointment-calendar-filters,
+.appointment-calendar-legend {
+  display: flex;
+  gap: 12px;
+}
+
+.appointment-calendar-toolbar {
+  justify-content: space-between;
+  align-items: flex-start;
+}
+
+.appointment-calendar-toolbar h3,
+.appointment-operations-grid h4 {
+  margin: 0;
+  color: #0f172a;
+  font-size: 1rem;
+  font-weight: 850;
+}
+
+.appointment-calendar-toolbar p,
+.appointment-operations-grid p {
+  margin: 4px 0 0;
+  color: #64748b;
+  font-size: 0.82rem;
+}
+
+.appointment-calendar-filters input,
+.appointment-calendar-filters select {
+  min-height: 38px;
+  border: 1px solid #cbd5e1;
+  border-radius: 9px;
+  padding: 0 10px;
+  color: #0f172a;
+  font-size: 0.85rem;
+  font-weight: 700;
+}
+
+.appointment-calendar-notice {
+  margin-top: 12px;
+  border-left: 4px solid #16a34a;
+  border-radius: 8px;
+  padding: 10px 12px;
+  background: #ecfdf5;
+  color: #14532d;
+  font-size: 0.84rem;
+  font-weight: 800;
+}
+
+.appointment-calendar-legend {
+  flex-wrap: wrap;
+  margin-top: 14px;
+  color: #475569;
+  font-size: 0.8rem;
+  font-weight: 800;
+}
+
+.appointment-calendar-legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.appointment-calendar-legend i {
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+}
+
+.slot-available {
+  background: #16a34a;
+}
+
+.slot-booked {
+  background: #dc2626;
+}
+
+.slot-blocked {
+  background: #94a3b8;
+}
+
+.appointment-calendar-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(132px, 1fr));
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.appointment-calendar-slot {
+  min-height: 82px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 3px;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  padding: 10px;
+  color: #ffffff;
+  text-align: left;
+  cursor: pointer;
+  box-shadow: 0 10px 20px rgba(15, 23, 42, 0.1);
+}
+
+.appointment-calendar-slot strong {
+  font-size: 1rem;
+}
+
+.appointment-calendar-slot span,
+.appointment-calendar-slot small {
+  font-size: 0.76rem;
+  font-weight: 750;
+}
+
+.appointment-calendar-slot.is-available {
+  background: linear-gradient(135deg, #15803d, #16a34a);
+}
+
+.appointment-calendar-slot.is-booked {
+  background: linear-gradient(135deg, #991b1b, #dc2626);
+  cursor: not-allowed;
+}
+
+.appointment-calendar-slot.is-blocked {
+  background: linear-gradient(135deg, #64748b, #94a3b8);
+  cursor: not-allowed;
+}
+
+.appointment-operations-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 16px;
+}
+
+.appointment-operations-grid > div {
+  border: 1px solid #e2e8f0;
+  border-left: 4px solid #16a34a;
+  border-radius: 10px;
+  padding: 13px;
+  background: #f8fafc;
+}
+
+.appointment-mini-list {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.appointment-mini-list > div {
+  min-height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  padding: 8px 10px;
+  background: #ffffff;
+  color: #334155;
+  font-size: 0.78rem;
+  font-weight: 750;
+}
+
+.appointment-mini-list button {
+  border: 0;
+  border-radius: 8px;
+  padding: 6px 9px;
+  background: #16a34a;
+  color: #ffffff;
+  font-size: 0.74rem;
+  font-weight: 850;
+  cursor: pointer;
+}
+
+.appointment-inline-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.appointment-patient-search-wrap {
+  position: relative;
+}
+
+.appointment-patient-results {
+  position: absolute;
+  z-index: 10;
+  margin-top: 8px;
+  width: 100%;
+  max-height: 12rem;
+  overflow: auto;
+  border: 1px solid #dbe5ee;
+  border-radius: 10px;
+  background: #ffffff;
+  box-shadow: 0 16px 32px rgba(15, 23, 42, 0.12);
+}
+
+.appointment-patient-results li {
+  list-style: none;
+}
+
+.appointment-patient-results button {
+  width: 100%;
+  border: 0;
+  background: transparent;
+  padding: 10px 12px;
+  text-align: left;
+  color: #0f172a;
+  font-size: 0.85rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.appointment-patient-results button:hover {
+  background: #f1f5f9;
+}
+
+.appointment-check-inline {
+  padding-top: 30px;
+}
+
 @media (max-width: 1000px) {
   .appointment-stats,
   .appointment-form-body,
   .appointment-feature-panel,
-  .appointment-repeat-grid {
+  .appointment-repeat-grid,
+  .appointment-operations-grid,
+  .appointment-grid-2,
+  .appointment-grid-3 {
     grid-template-columns: 1fr;
   }
 }
@@ -20214,6 +20759,20 @@ textarea.insurance-form-input {
   flex-shrink: 0;
 }
 
+.sidebar-waiting-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 22px;
+  margin-left: 8px;
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.18);
+  color: #ffffff;
+  font-size: 0.72rem;
+  font-weight: 800;
+}
+
 .sidebar-collapsed .sidebar-workspace-btn {
   justify-content: center;
   padding: 9px 0;
@@ -22395,6 +22954,227 @@ textarea {
 .patient-action-toast {
   background: linear-gradient(135deg, #0f766e, #16a34a);
   border: 1px solid rgba(255, 255, 255, 0.28);
+}
+
+.patient-queue-modal {
+  width: min(560px, calc(100vw - 32px));
+  max-width: min(560px, calc(100vw - 32px));
+  min-height: auto;
+  max-height: calc(100vh - 72px);
+  height: auto;
+  overflow: hidden;
+}
+
+.patient-queue-header {
+  background: linear-gradient(135deg, #0f766e, #1d4ed8);
+  padding: 18px 20px;
+}
+
+.patient-queue-header .form-title,
+.patient-queue-header .form-title-note {
+  color: #ffffff;
+}
+
+.patient-queue-header .form-title-note {
+  opacity: 0.9;
+}
+
+.patient-queue-header .patient-queue-close {
+  border-color: rgba(255, 255, 255, 0.4);
+  background: #dc2626;
+  color: #ffffff;
+}
+
+.patient-queue-body {
+  display: grid;
+  gap: 14px;
+  padding: 18px 20px;
+}
+
+.patient-queue-field small {
+  color: #64748b;
+  font-size: 0.76rem;
+  font-weight: 500;
+}
+
+.patient-queue-body .form-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  border-top: 1px solid #e2e8f0;
+  padding-top: 14px;
+}
+
+.patient-queue-body .form-cancel,
+.patient-queue-body .form-submit {
+  min-height: 42px;
+  border: 0;
+  border-radius: 11px;
+  padding: 0 16px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.84rem;
+  font-weight: 850;
+  cursor: pointer;
+  box-shadow: 0 12px 24px rgba(15, 23, 42, 0.1);
+}
+
+.patient-queue-body .form-cancel {
+  background: #64748b;
+  color: #ffffff;
+  border: 1px solid #cbd5e1;
+}
+
+.patient-queue-body .form-submit {
+  background: linear-gradient(135deg, #0f766e, #16a34a);
+  color: #ffffff;
+}
+
+.patient-queue-body .form-cancel:hover,
+.patient-queue-body .form-submit:hover {
+  transform: translateY(-1px);
+}
+
+.patient-queue-body .form-cancel:disabled,
+.patient-queue-body .form-submit:disabled {
+  opacity: 0.65;
+  cursor: not-allowed;
+  transform: none;
+}
+
+.module-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1600;
+  display: flex;
+  align-items: stretch;
+  justify-content: flex-end;
+  padding: 0;
+  background: rgba(15, 23, 42, 0.45);
+}
+
+.workflow-waiting-panel {
+  width: min(420px, calc(100vw - 24px));
+  height: 100vh;
+  max-height: 100vh;
+  margin-left: auto;
+  background: #ffffff;
+  border-left: 1px solid #dbe5f1;
+  box-shadow: -20px 0 45px rgba(15, 23, 42, 0.18);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  animation: waitingPanelSlideIn 0.18s ease-out;
+}
+
+@keyframes waitingPanelSlideIn {
+  from {
+    opacity: 0;
+    transform: translateX(22px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+.workflow-waiting-panel-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 18px;
+  border-bottom: 1px solid #e2e8f0;
+  background: linear-gradient(135deg, #0f766e, #1d4ed8);
+  color: #ffffff;
+}
+
+.workflow-waiting-panel-head h3 {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 900;
+  color: #ffffff;
+}
+
+.workflow-waiting-panel-head p {
+  margin-top: 4px;
+  font-size: 0.82rem;
+  color: rgba(255, 255, 255, 0.86);
+}
+
+.workflow-waiting-close {
+  border: 0;
+  background: rgba(255, 255, 255, 0.16);
+  color: #ffffff;
+  width: 34px;
+  height: 34px;
+  font-size: 1.1rem;
+}
+
+.workflow-waiting-panel-body {
+  display: grid;
+  gap: 10px;
+  padding: 18px;
+  overflow-y: auto;
+}
+
+.workflow-waiting-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px;
+  border: 1px solid #e2e8f0;
+  background: #f8fafc;
+}
+
+.workflow-waiting-item.is-selected {
+  border-color: #1d4ed8;
+  background: #eff6ff;
+}
+
+.workflow-waiting-select {
+  flex: 1;
+  border: 0;
+  background: transparent;
+  text-align: left;
+}
+
+.workflow-waiting-copy {
+  display: grid;
+  gap: 4px;
+}
+
+.workflow-waiting-copy strong {
+  font-size: 0.88rem;
+  color: #0f172a;
+}
+
+.workflow-waiting-copy span {
+  font-size: 0.78rem;
+  color: #64748b;
+}
+
+.workflow-waiting-actions {
+  display: flex;
+  align-items: center;
+}
+
+.workflow-waiting-checkin {
+  min-width: 102px;
+  background: linear-gradient(135deg, #16a34a, #15803d) !important;
+  border: 1px solid #16a34a !important;
+  color: #ffffff !important;
+  border-radius: 10px;
+  box-shadow: 0 10px 20px rgba(22, 163, 74, 0.24);
+  font-weight: 800;
+  justify-content: center;
+}
+
+.workflow-waiting-checkin:hover {
+  background: linear-gradient(135deg, #15803d, #166534) !important;
+  transform: translateY(-1px);
 }
 
 @keyframes moduleToastIn {
