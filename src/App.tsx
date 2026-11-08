@@ -7,6 +7,7 @@ import { DesktopSidebar } from "./components/layout/DesktopSidebar";
 import { DesktopTopbar } from "./components/layout/DesktopTopbar";
 import { DesktopAppShell } from "./components/layout/DesktopAppShell";
 import { PatientDrawer } from "./components/patients/PatientDrawer";
+import { OpdDashboardView } from "./views/OpdDashboardView";
 import { MODULE_BY_ID } from "./lib/moduleCatalog";
 import {
   WORKFLOW_MODULE_BY_ID,
@@ -15770,7 +15771,7 @@ export default function App() {
       case 1:
         return <PatientsView />;
       case 2:
-        return <OPDOTView />;
+        return <OpdDashboardView />;
       case 3:
         return <AppointmentsView />;
       case 4:
@@ -15932,6 +15933,10 @@ export default function App() {
 
         if (module.id === 1) {
           return <PatientsView />;
+        }
+
+        if (module.id === 36) {
+          return <OpdDashboardView />;
         }
 
         if (module.id === 4) {
