@@ -6,6 +6,7 @@ import { MigrationCenterView } from "./components/MigrationCenterView";
 import { DesktopSidebar } from "./components/layout/DesktopSidebar";
 import { DesktopTopbar } from "./components/layout/DesktopTopbar";
 import { DesktopAppShell } from "./components/layout/DesktopAppShell";
+import { PatientDrawer } from "./components/patients/PatientDrawer";
 import { MODULE_BY_ID } from "./lib/moduleCatalog";
 import {
   WORKFLOW_MODULE_BY_ID,
@@ -1242,8 +1243,9 @@ function PatientsView() {
   const [exportingCsv, setExportingCsv] = useState(false);
   const [error, setError] = useState("");
   const [workspaceAction, setWorkspaceAction] = useState<
-    "monitor" | "duplicates" | "insurance" | "portal" | "photo" | "vulnerability" | "merge" | null
+    "monitor" | "duplicates" | "insurance" | "portal" | "photo" | "vulnerability" | "merge" | "identity-card" | null
   >(null);
+  const [workspaceIdentityCard, setWorkspaceIdentityCard] = useState<any>(null);
   const [workspaceQuery, setWorkspaceQuery] = useState("");
   const [workspacePrimaryId, setWorkspacePrimaryId] = useState("");
   const [workspaceSecondaryId, setWorkspaceSecondaryId] = useState("");
@@ -1260,6 +1262,7 @@ function PatientsView() {
   const [todayPage, setTodayPage] = useState(0);
   const [recentRegisteredIds, setRecentRegisteredIds] = useState<Set<string>>(new Set());
   const [queuedPatientLocks, setQueuedPatientLocks] = useState<Set<string>>(() => readQueuedPatientLocks());
+  const [patientTableFilter, setPatientTableFilter] = useState<"all" | "recent" | "male" | "female">("all");
   const [queuePatient, setQueuePatient] = useState<Patient | null>(null);
   const [queueDestinationInput, setQueueDestinationInput] = useState("");
   const [queueSaving, setQueueSaving] = useState(false);
@@ -1818,6 +1821,7 @@ function PatientsView() {
     photo: "Patient Photo Capture",
     vulnerability: "Vulnerability Flagging",
     merge: "Patient Merge",
+    "identity-card": "Patient ID Card / QR",
   };
   const vulnerabilityOptions = [
     "Elderly 70+",
@@ -1849,8 +1853,35 @@ function PatientsView() {
       return right - left;
     });
   const todayPatients = datedTodayPatients;
-  const todayTotalPages = Math.max(1, Math.ceil(todayPatients.length / 10));
-  const todayPatientsPage = todayPatients.slice(todayPage * 10, todayPage * 10 + 10);
+  const tablePatients = patients
+    .filter((patient) => {
+      if (patientTableFilter === "recent") {
+        const registeredValue = patientStatsDateValue(patient) || patientRegistrationDateValue(patient);
+        return isWithinLastDays(registeredValue, new Date(), 30);
+      }
+      if (patientTableFilter === "male") return String(patient.gender || "").toUpperCase() === "MALE";
+      if (patientTableFilter === "female") return String(patient.gender || "").toUpperCase() === "FEMALE";
+      if (patientTableFilter === "all") return true;
+      return todayPatients.some((todayPatient) => todayPatient.id === patient.id);
+    })
+    .filter((patient) => {
+      if (!search.trim()) return true;
+      return `${patient.name} ${patient.regNo} ${patient.phone} ${patient.nationalId}`
+        .toLowerCase()
+        .includes(search.trim().toLowerCase());
+    });
+  const tableTotalPages = Math.max(1, Math.ceil(tablePatients.length / 10));
+  const tablePatientsPage = tablePatients.slice(todayPage * 10, todayPage * 10 + 10);
+  const tableFilterLabel =
+    patientTableFilter === "all"
+      ? "All Registered Patients"
+      : patientTableFilter === "today"
+      ? "Today Registered Patients"
+      : patientTableFilter === "recent"
+      ? "Patients Registered in the Last 30 Days"
+      : patientTableFilter === "male"
+      ? "Male Patients"
+      : "Female Patients";
   const searchPopupPatients = search.trim() && !checkedInPatientId ? filtered.slice(0, 6) : [];
   checkedInPatientRef.current = checkedInPatient || null;
   const monitoredQueuePatients = patients
@@ -1900,6 +1931,26 @@ function PatientsView() {
     await parseJsonSafe(response);
   };
 
+  const printIdentityCard = () => {
+    if (!workspaceIdentityCard || typeof window === "undefined") return;
+    const popup = window.open("", "patient-identity-card", "width=680,height=520");
+    if (!popup) {
+      setWorkspaceStatus("Allow pop-ups to print the patient identity card.");
+      return;
+    }
+    const escapeHtml = (value: unknown) =>
+      String(value || "").replace(/[&<>"']/g, (char) =>
+        ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#039;" }[char] || char),
+      );
+    const hospital = workspaceIdentityCard.hospital || {};
+    const printHtml = `<!doctype html><html><head><meta charset="utf-8"><title>${escapeHtml(hospital.name || "Patient Identity Card")}</title><style>
+      @page{size:auto;margin:.25in}*{box-sizing:border-box}html,body{margin:0;padding:0;background:#fff;color:#17233d;font-family:Arial,Helvetica,sans-serif}body{padding:8px}.card{width:560px;max-width:100%;overflow:hidden;border:1px solid #c8d7ea;border-radius:14px;background:linear-gradient(145deg,#fff 0%,#f4f8fd 100%);box-shadow:0 12px 26px rgba(15,52,91,.14);page-break-inside:avoid}.brand{display:grid;grid-template-columns:43px minmax(0,1fr) 44px;align-items:center;gap:12px;min-height:92px;padding:14px 18px;color:#fff;background:linear-gradient(110deg,#123b78,#087d91)}.logo{width:43px;height:43px;object-fit:contain;border-radius:8px;padding:4px;background:#fff}.brand-copy{min-width:0}.eyebrow{display:block;color:#c5e8f1;font-size:10px;font-weight:800;letter-spacing:.04em;text-transform:uppercase}.brand-title{display:block;margin-top:2px;font-size:16px;font-weight:700}.brand small{display:block;margin-top:2px;color:#d9f4f7;font-size:10px;line-height:1.2}.brand small.phone{color:#fff;font-weight:700}.qr{width:44px;height:44px;justify-self:end;border:2px solid #fff;border-radius:5px;background:#fff;image-rendering:pixelated}.body{display:flex;gap:16px;padding:18px 18px 20px}.photo{width:82px;height:96px;flex:0 0 auto;display:grid;place-items:center;border:1px solid #cbd9e8;border-radius:8px;color:#1763b3;background:#e8f1fb;font-size:32px;font-weight:900}.photo img{width:100%;height:100%;object-fit:cover;border-radius:7px}.fields{display:grid;flex:1;grid-template-columns:repeat(2,minmax(0,1fr));gap:11px 20px;align-content:start}.label{display:block;color:#64748b;font-size:10px;font-weight:800;letter-spacing:.04em;text-transform:uppercase}.value{display:block;margin-top:3px;color:#17233d;font-size:14px;font-weight:600;overflow-wrap:anywhere}
+    </style></head><body><main class="card"><header class="brand">${hospital.logoUrl ? `<img class="logo" src="${escapeHtml(resolveAssetUrl(hospital.logoUrl))}" alt="Hospital logo">` : `<span class="logo" aria-hidden="true"></span>`}<div class="brand-copy"><span class="eyebrow">${escapeHtml(hospital.name || "Hospital")}</span><strong class="brand-title">Patient Identity Card</strong><small>${escapeHtml(hospital.address || "Location not configured")}</small><small class="phone">Tel: ${escapeHtml(hospital.phone || "Phone not configured")}</small></div>${workspaceIdentityCard.qrImageUrl ? `<img class="qr" src="${escapeHtml(workspaceIdentityCard.qrImageUrl)}" alt="Patient identity QR code">` : ""}</header><section class="body"><div class="photo">${workspaceIdentityCard.photoUrl ? `<img class="photo" src="${escapeHtml(resolveAssetUrl(workspaceIdentityCard.photoUrl))}" alt="Patient photo">` : escapeHtml(String(workspaceIdentityCard.name || "P").slice(0, 1).toUpperCase())}</div><div class="fields"><div><span class="label">Patient name</span><strong class="value">${escapeHtml(workspaceIdentityCard.name || "Patient")}</strong></div><div><span class="label">Medical record number</span><strong class="value">${escapeHtml(workspaceIdentityCard.mrn || "—")}</strong></div><div><span class="label">Date of birth</span><strong class="value">${escapeHtml(workspaceIdentityCard.dateOfBirth ? new Date(workspaceIdentityCard.dateOfBirth).toLocaleDateString() : "Not captured")}</strong></div><div><span class="label">Patient phone</span><strong class="value">${escapeHtml(workspaceIdentityCard.phone || "Not captured")}</strong></div><div><span class="label">Sex</span><strong class="value">${escapeHtml(workspaceIdentityCard.gender || "Not captured")}</strong></div></div></section></main><script>window.onload=function(){window.print();window.onafterprint=function(){window.close();};};</script></body></html>`;
+    popup.document.open();
+    popup.document.write(printHtml);
+    popup.document.close();
+  };
+
   const handleWorkspaceSubmit = async () => {
     if (!workspaceAction) return;
     const patient = selectedWorkspacePatient;
@@ -1909,12 +1960,47 @@ function PatientsView() {
     }
 
     if (workspaceAction === "insurance" && patient) {
+      try {
+        const res = await apiFetch(`/patients/${patient.id}/insurance/verify`, { method: "POST" });
+        if (res.ok) {
+          const data = await res.json();
+          setWorkspaceStatus(`Insurance verified: ${data?.status || data?.message || "Eligible"}`);
+          showActionNotice("Insurance eligibility verified.");
+          return;
+        }
+      } catch {
+        // fallback
+      }
       const active = Boolean((patient as any).insuranceProvider || (patient as any).insuranceNumber);
       await recordWorkspaceAction("Insurance Eligibility Verification", {
         patientId: patient.id,
         eligibilityStatus: active ? "CONFIRMED" : "MISSING_INSURANCE_DETAILS",
       });
       setWorkspaceStatus(active ? "Eligibility confirmed." : "Capture insurance provider and policy number first.");
+      return;
+    }
+
+    if (workspaceAction === "identity-card" && patient) {
+      try {
+        const res = await apiFetch(`/patients/${patient.id}/identity-card`);
+        if (res.ok) {
+          const data = await res.json();
+          setWorkspaceIdentityCard(data?.data || data);
+          setWorkspaceStatus("Identity card data prepared. Click print below.");
+          showActionNotice("Identity card ready.");
+          return;
+        }
+      } catch {
+        // fallback
+      }
+      setWorkspaceIdentityCard({
+        name: patient.name,
+        mrn: patient.regNo || patient.id.slice(0, 8).toUpperCase(),
+        phone: patient.phone,
+        gender: patient.gender,
+        hospital: { name: facility?.name || dashboardFacilityName || "MediLink Hospital" },
+      });
+      setWorkspaceStatus("Identity card data prepared (local preview).");
       return;
     }
 
@@ -1943,6 +2029,18 @@ function PatientsView() {
     }
 
     if (workspaceAction === "vulnerability" && patient) {
+      try {
+        await updateTenantPatient(patient.id, { vulnerabilityFlags: workspaceFlags } as any);
+        setWorkspaceStatus("Vulnerability flags saved to patient record.");
+        showActionNotice("Vulnerability flags saved.");
+        const latest = await fetchTenantPatients(undefined, facility?.id);
+        const mapped = latest.map(toFrontendPatient);
+        setPatients(mapped);
+        setStatsPatients(mapped);
+        return;
+      } catch {
+        // fallback
+      }
       await recordWorkspaceAction("Patient Vulnerability Flags", {
         patientId: patient.id,
         patientName: patient.name,
@@ -1956,6 +2054,28 @@ function PatientsView() {
       if (!selectedWorkspacePatient || !secondaryWorkspacePatient || workspacePrimaryId === workspaceSecondaryId) {
         setWorkspaceStatus("Select two different records before merging.");
         return;
+      }
+      try {
+        const res = await apiFetch("/patients/merge", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            primaryPatientId: selectedWorkspacePatient.id,
+            secondaryPatientId: secondaryWorkspacePatient.id,
+            reason: "Duplicate patient record merged from desktop workspace",
+          }),
+        });
+        if (res.ok) {
+          setWorkspaceStatus("Patients successfully merged. Secondary MRN has been retired.");
+          showActionNotice("Patient merge completed.");
+          const latest = await fetchTenantPatients(undefined, facility?.id);
+          const mapped = latest.map(toFrontendPatient);
+          setPatients(mapped);
+          setStatsPatients(mapped);
+          return;
+        }
+      } catch {
+        // fallback
       }
       await recordWorkspaceAction("Patient Merge", {
         primaryPatientId: selectedWorkspacePatient.id,
@@ -2261,28 +2381,36 @@ function PatientsView() {
               label: "Total Patients",
               value: patientStats.total,
               color: "#1e3a8a",
+              filter: "all" as const,
             },
             {
               label: "Registered Last 30 Days",
               value: patientStats.thisMonth,
               color: "#0d9488",
+              filter: "recent" as const,
             },
             {
               label: "Male Patients",
               value: patientStats.male,
               color: "#0284c7",
+              filter: "male" as const,
             },
             {
               label: "Female Patients",
               value: patientStats.female,
               color: "#db2777",
+              filter: "female" as const,
             },
           ] as const
         ).map((s) => (
           <div
             key={s.label}
-            className="pv-stat-card"
+            className={`pv-stat-card is-clickable ${patientTableFilter === s.filter ? "is-active" : ""}`}
             style={{ borderLeftColor: s.color }}
+            role="button"
+            tabIndex={0}
+            onClick={() => { setPatientTableFilter(s.filter); setTodayPage(0); }}
+            onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setPatientTableFilter(s.filter); setTodayPage(0); } }}
           >
             <p className="pv-stat-label">{s.label}</p>
             <p className="pv-stat-value">{s.value}</p>
@@ -2427,6 +2555,48 @@ function PatientsView() {
                 </div>
               )}
 
+              {workspaceAction === "identity-card" && workspaceIdentityCard ? (
+                <div className="patient-id-card-result patient-workspace-span">
+                  <div className="patient-id-card-brand">
+                    {workspaceIdentityCard.hospital?.logoUrl ? (
+                      <img src={resolveAssetUrl(workspaceIdentityCard.hospital.logoUrl)} alt="Hospital logo" className="patient-id-card-logo" />
+                    ) : (
+                      <div className="patient-id-card-mark">+</div>
+                    )}
+                    <div className="patient-id-card-hospital-copy">
+                      <span>{workspaceIdentityCard.hospital?.name || "Hospital"}</span>
+                      <strong>Patient Identity Card</strong>
+                      <small>{workspaceIdentityCard.hospital?.address || "Location not configured"}</small>
+                      <small>Tel: {workspaceIdentityCard.hospital?.phone || "Phone not configured"}</small>
+                    </div>
+                    {workspaceIdentityCard.qrImageUrl ? (
+                      <img src={workspaceIdentityCard.qrImageUrl} alt="Patient identity QR code" className="patient-id-card-header-qr" style={{ width: 44, height: 44 }} />
+                    ) : null}
+                  </div>
+                  <div className="patient-id-card-body">
+                    {workspaceIdentityCard.photoUrl ? (
+                      <img src={resolveAssetUrl(workspaceIdentityCard.photoUrl)} alt="Patient" className="patient-id-card-photo" />
+                    ) : (
+                      <div className="patient-id-card-photo patient-id-card-photo-empty">
+                        {String(workspaceIdentityCard.name || "P").slice(0, 1).toUpperCase()}
+                      </div>
+                    )}
+                    <div className="patient-id-card-fields">
+                      <div><span>Patient name</span><strong>{workspaceIdentityCard.name || "Patient"}</strong></div>
+                      <div><span>Medical record number</span><strong>{workspaceIdentityCard.mrn || "—"}</strong></div>
+                      <div><span>Date of birth</span><strong>{workspaceIdentityCard.dateOfBirth ? new Date(workspaceIdentityCard.dateOfBirth).toLocaleDateString() : "Not captured"}</strong></div>
+                      <div><span>Patient phone</span><strong>{workspaceIdentityCard.phone || "Not captured"}</strong></div>
+                      <div><span>Sex</span><strong>{workspaceIdentityCard.gender || "Not captured"}</strong></div>
+                    </div>
+                  </div>
+                  <div className="patient-id-card-actions">
+                    <button type="button" className="patient-workspace-submit" onClick={printIdentityCard}>
+                      Print / Save ID Card
+                    </button>
+                  </div>
+                </div>
+              ) : null}
+
               <div className="patient-workspace-footer patient-workspace-span">
                 <button type="button" className="patient-workspace-submit" onClick={handleWorkspaceSubmit}>
                   {workspaceAction === "insurance"
@@ -2437,7 +2607,9 @@ function PatientsView() {
                         ? "Save Patient Photo"
                         : workspaceAction === "vulnerability"
                           ? "Save Vulnerability Flags"
-                          : "Record Merge Review"}
+                          : workspaceAction === "identity-card"
+                            ? "Prepare ID Card"
+                            : "Record Merge Review"}
                 </button>
                 {workspaceStatus ? <strong>{workspaceStatus}</strong> : null}
               </div>
@@ -2448,9 +2620,9 @@ function PatientsView() {
       )}
 
       <div className="pv-table-meta">
-        <div className="pv-title pv-table-title">Today Registered Patients</div>
+        <div className="pv-title pv-table-title">{tableFilterLabel}</div>
         <span className="pv-badge">
-          {todayPatients.length} today
+          {tablePatients.length} {patientTableFilter === "today" ? "today" : "records"}
         </span>
       </div>
 
@@ -2474,13 +2646,13 @@ function PatientsView() {
                   Loading patients...
                 </td>
               </tr>
-            ) : todayPatientsPage.length === 0 ? (
+            ) : tablePatientsPage.length === 0 ? (
               <tr>
                 <td colSpan={7} className="pv-empty">
-                  No patients registered today.
+                  No patients found for this view.
                 </td>
               </tr>
-            ) : todayPatientsPage.map((p) => (
+            ) : tablePatientsPage.map((p) => (
                   <tr key={p.id} className="patient-row-clickable" onClick={() => setSelectedPatient(p)}>
                 <td className="pv-code">#{p.regNo || p.id.slice(0, 8).toUpperCase()}</td>
                 <td className="pv-name">
@@ -2558,15 +2730,15 @@ function PatientsView() {
         </table>
         <div className="pv-table-footer">
           <span>
-            Showing {todayPatients.length === 0 ? 0 : todayPage * 10 + 1}-
-            {Math.min(todayPatients.length, todayPage * 10 + todayPatientsPage.length)} of {todayPatients.length}
+            Showing {tablePatients.length === 0 ? 0 : todayPage * 10 + 1}-
+            {Math.min(tablePatients.length, todayPage * 10 + tablePatientsPage.length)} of {tablePatients.length}
           </span>
           <div className="patient-table-pager">
             <button type="button" disabled={todayPage === 0} onClick={() => setTodayPage((page) => Math.max(0, page - 1))}>
               Back
             </button>
-            <span>Page {todayPage + 1} of {todayTotalPages}</span>
-            <button type="button" disabled={todayPage >= todayTotalPages - 1} onClick={() => setTodayPage((page) => Math.min(todayTotalPages - 1, page + 1))}>
+            <span>Page {todayPage + 1} of {tableTotalPages}</span>
+            <button type="button" disabled={todayPage >= tableTotalPages - 1} onClick={() => setTodayPage((page) => Math.min(tableTotalPages - 1, page + 1))}>
               Next
             </button>
           </div>
@@ -2876,119 +3048,15 @@ function PatientsView() {
       ) : null}
 
       {selectedPatient && (
-        <>
-          <div className="patient-drawer-backdrop" onClick={() => setSelectedPatient(null)} />
-          <aside className="patient-drawer-shell">
-            <div className="patient-drawer-header">
-              <div className="patient-drawer-head-row">
-                <div className="patient-drawer-identity">
-                  <div className="patient-drawer-avatar">
-                    {selectedPatient.name.split(" ")[0]?.[0] || "P"}
-                    {selectedPatient.name.split(" ").slice(-1)[0]?.[0] || ""}
-                  </div>
-                  <div>
-                    <p className="patient-drawer-kicker">Patient Profile</p>
-                    <h2>{selectedPatient.name}</h2>
-                    <p className="patient-drawer-mrn">#{selectedPatient.regNo || selectedPatient.id}</p>
-                    <div className="patient-drawer-tags">
-                      <span className={`patient-drawer-tag ${selectedPatient.gender === "Male" ? "is-male" : "is-female"}`}>
-                        {selectedPatient.gender}
-                      </span>
-                      {(selectedPatient as any).bloodGroup ? (
-                        <span className="patient-drawer-tag is-blood">{(selectedPatient as any).bloodGroup}</span>
-                      ) : null}
-                      <span className={`patient-drawer-tag ${selectedPatient.id === checkedInPatientId ? "is-checked-in" : "is-not-checked-in"}`}>
-                        {selectedPatient.id === checkedInPatientId ? "Checked in" : "Not checked in"}
-                      </span>
-                    </div>
-                  </div>
-                </div>
-                <button className="patient-drawer-close" onClick={() => setSelectedPatient(null)}>
-                  ×
-                </button>
-              </div>
-            </div>
-
-            <div className="patient-drawer-body">
-              <section className="patient-drawer-card">
-                <h3><Icon type="person" size={15} /> Personal Information</h3>
-                <div className="patient-drawer-info-list">
-                  <div className="patient-drawer-info-row"><span>Age</span><strong>{selectedPatient.age || "—"} years</strong></div>
-                  <div className="patient-drawer-info-row"><span>Date of Birth</span><strong>{(selectedPatient as any).dateOfBirth ? new Date((selectedPatient as any).dateOfBirth).toLocaleDateString() : "—"}</strong></div>
-                  <div className="patient-drawer-info-row"><span>Phone</span><strong>{selectedPatient.phone || "—"}</strong></div>
-                  <div className="patient-drawer-info-row"><span>Email</span><strong>{(selectedPatient as any).email || "—"}</strong></div>
-                  <div className="patient-drawer-info-row"><span>National ID</span><strong>{selectedPatient.nationalId || (selectedPatient as any).idNumber || "—"}</strong></div>
-                  <div className="patient-drawer-info-row"><span>Address</span><strong>{(selectedPatient as any).address || (selectedPatient as any).addressLine1 || "—"}</strong></div>
-                </div>
-              </section>
-
-              <section className="patient-drawer-summary">
-                <div><Icon type="shield" size={17} /><span>ID</span><strong>{selectedPatient.nationalId || "Not captured"}</strong></div>
-                <div><Icon type="users" size={17} /><span>Phone</span><strong>{selectedPatient.phone || "Not captured"}</strong></div>
-                <div><Icon type="calendar" size={17} /><span>County</span><strong>{(selectedPatient as any).county || "Not captured"}</strong></div>
-              </section>
-
-              <section className="patient-drawer-card">
-                <h3><Icon type="ehr" size={15} /> Medical Details</h3>
-                <div className="patient-drawer-info-list">
-                  <div className="patient-drawer-info-row"><span>Blood Group</span><strong>{(selectedPatient as any).bloodGroup || "—"}</strong></div>
-                  <div className="patient-drawer-info-row"><span>Allergies</span><strong>{(selectedPatient as any).allergies || "—"}</strong></div>
-                  <div className="patient-drawer-info-row"><span>Insurance Provider</span><strong>{(selectedPatient as any).insuranceProvider || "—"}</strong></div>
-                  <div className="patient-drawer-info-row"><span>SHA / Insurance No.</span><strong>{(selectedPatient as any).insuranceNumber || (selectedPatient as any).shaNumber || "—"}</strong></div>
-                </div>
-              </section>
-
-              <section className="patient-drawer-card">
-                <h3><Icon type="users" size={15} /> Next of Kin</h3>
-                <div className="patient-drawer-info-list">
-                  <div className="patient-drawer-info-row"><span>Name</span><strong>{(selectedPatient as any).nextOfKinName || "—"}</strong></div>
-                  <div className="patient-drawer-info-row"><span>Phone</span><strong>{(selectedPatient as any).nextOfKinPhone || "—"}</strong></div>
-                  <div className="patient-drawer-info-row"><span>Relationship</span><strong>{(selectedPatient as any).nextOfKinRelationship || "—"}</strong></div>
-                </div>
-              </section>
-
-              <section className="patient-drawer-card">
-                <h3><Icon type="calendar" size={15} /> Recent Visits</h3>
-                {(selectedPatient as any).visits?.length ? (
-                  <div className="patient-drawer-visit-list">
-                    {(selectedPatient as any).visits.slice(0, 5).map((visit: any) => (
-                      <div className="patient-drawer-visit" key={visit.id}>
-                        <div>
-                          <p>{visit.visitType || visit.type || "General Visit"}</p>
-                          <small>{visit.createdAt ? new Date(visit.createdAt).toLocaleDateString() : "—"}</small>
-                        </div>
-                        <span>{visit.status || "ACTIVE"}</span>
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <div className="patient-drawer-empty"><p>No visits recorded yet.</p></div>
-                )}
-              </section>
-            </div>
-
-            <div className="patient-drawer-footer">
-              <button
-                className="patient-drawer-edit-btn"
-                disabled={!canEditPatientRecord(selectedPatient)}
-                title={
-                  isPatientQueuedFromThisModule(selectedPatient) && !isSuperAdmin
-                    ? "Patient already queued. Only Super Admin can edit."
-                    : selectedPatient.id === checkedInPatientId || isSuperAdmin
-                      ? "Edit patient"
-                      : "Check in this patient before editing"
-                }
-                onClick={() => {
-                  void openPatientForEdit(selectedPatient);
-                  setSelectedPatient(null);
-                }}
-              >
-                Edit Patient
-              </button>
-              <button className="patient-drawer-secondary-btn" onClick={() => setSelectedPatient(null)}>Close</button>
-            </div>
-          </aside>
-        </>
+        <PatientDrawer
+          patient={selectedPatient}
+          canEdit={canEditPatientRecord(selectedPatient)}
+          onClose={() => setSelectedPatient(null)}
+          onEdit={() => {
+            void openPatientForEdit(selectedPatient);
+            setSelectedPatient(null);
+          }}
+        />
       )}
 
       {deleteId && (
