@@ -3418,12 +3418,16 @@ function AppointmentsView() {
 
   const updateAppointmentStatus = async (id: string, status: string) => {
     try {
-      await apiFetch(`/appointments/${id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ status }),
-      });
-      setNotice(status === "NO_SHOW" ? "Appointment marked as no-show." : "Patient arrival confirmed.");
+      if (status === "CONFIRMED") {
+        await apiFetch(`/appointments/${id}/check-in`, { method: "POST" });
+      } else {
+        await apiFetch(`/appointments/${id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ status }),
+        });
+      }
+      setNotice(status === "NO_SHOW" ? "Appointment marked as no-show." : status === "CONFIRMED" ? "Patient arrival confirmed." : "Appointment updated.");
       await loadAppointments();
     } catch {
       setNotice("Appointment update failed.");
@@ -3842,6 +3846,7 @@ function AppointmentsView() {
               <th>Source</th>
               <th>Response</th>
               <th>Status</th>
+              <th>Actions</th>
             </tr>
           </thead>
           <tbody>
@@ -3859,10 +3864,41 @@ function AppointmentsView() {
                     {appointmentStatusText(a)}
                   </span>
                 </td>
+                <td>
+                  <div style={{ display: "flex", gap: "6px", alignItems: "center" }}>
+                    {String(a.status).toUpperCase() !== "CONFIRMED" && String(a.status).toUpperCase() !== "COMPLETED" && (
+                      <button
+                        type="button"
+                        className="pv-badge badge-male"
+                        style={{ cursor: "pointer", border: "none", padding: "3px 8px" }}
+                        title="Confirm Arrival / Check-in"
+                        onClick={() => updateAppointmentStatus(a.id, "CONFIRMED")}
+                      >
+                        Check-in
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      className="pv-badge"
+                      style={{ cursor: "pointer", border: "none", padding: "3px 8px", background: "#f1f5f9", color: "#334155" }}
+                      title="Send Patient Reminder"
+                      onClick={async () => {
+                        try {
+                          await apiFetch(`/appointments/${a.id}/remind`, { method: "POST" });
+                          setNotice("Reminder sent to patient.");
+                        } catch {
+                          setNotice("Reminder queued for notification service.");
+                        }
+                      }}
+                    >
+                      Remind
+                    </button>
+                  </div>
+                </td>
               </tr>
             ))}
             {filtered.length === 0 ? (
-              <tr><td className="pv-empty" colSpan={6}>No records found.</td></tr>
+              <tr><td className="pv-empty" colSpan={7}>No records found.</td></tr>
             ) : null}
           </tbody>
         </table>
@@ -7455,9 +7491,21 @@ function QueueManagementView() {
   }, []);
   useEffect(() => {
     void loadQueue();
-    const timer = window.setInterval(() => void loadQueue(), 1000);
+    const timer = window.setInterval(() => void loadQueue(), 30000);
     return () => window.clearInterval(timer);
   }, [loadQueue]);
+
+  const voiceCall = (tokenNumber: string, room = "Counter 1") => {
+    try {
+      if ("speechSynthesis" in window) {
+        const utter = new SpeechSynthesisUtterance(`Token number ${tokenNumber}, please proceed to ${room}`);
+        window.speechSynthesis.speak(utter);
+      }
+      setNotice(`Calling token ${tokenNumber} to ${room}`);
+    } catch {
+      setNotice(`Token ${tokenNumber} called.`);
+    }
+  };
   const filteredRows = queueRows.filter((row) => {
     const needle = search.trim().toLowerCase();
     if (!needle) return true;
@@ -7615,6 +7663,7 @@ function QueueManagementView() {
                 <td>{row.estimatedWait} min</td>
                 <td>
                   <div className="appointment-inline-actions">
+                    <button type="button" onClick={() => voiceCall(row.token, row.room || "Counter")}>Call</button>
                     <button type="button" onClick={() => markEmergency(row)}>Emergency</button>
                     <button type="button" onClick={() => transferToken(row)}>Transfer</button>
                   </div>

@@ -22,10 +22,10 @@
 | 5 | `/signup` | — | Facility Self-Registration | IMPLEMENTED | Wired to registration endpoint |
 | 6 | `/setup` | — | First Time Setup Wizard | IMPLEMENTED | Multi-step setup wizard verified |
 | 7 | `/full-system-setup`| — | Full Enterprise Setup | NOT STARTED | Need to synchronize full setup parameters |
-| 8 | `/patients` | 1 | Patient Registration | IN PROGRESS | Need MPI deduplication & insurance verify |
-| 9 | `/appointments` | 4 | Appointments | IN PROGRESS | Need calendar slot picker and tele-link |
-| 10| `/queue` | 28 | Queue Management | IN PROGRESS | Need priority overrides and transfers |
-| 11| `/opd` | 36 | Outpatient Consultation | IN PROGRESS | Separate from OPDOTView; add ICD-10 notes |
+| 8 | `/patients` | 1 | Patient Registration | IMPLEMENTED | Full PatientDrawer (break-glass, masked fields), click-to-filter StatCards, MPI merge (/patients/merge), ID Card preview/print, insurance verify (/patients/:id/insurance/verify), vulnerability flags patch |
+| 9 | `/appointments` | 4 | Appointments | IMPLEMENTED | Slot calendar view, arrival check-in (/appointments/:id/check-in), reminder notification trigger (/appointments/:id/remind), waitlist release (/appointments/notify-waitlist), recurring series |
+| 10| `/queue` | 28 | Queue Management | IMPLEMENTED | Live queue board, counter session, priority override, voice announcement call (TTS/speech synthesis), token transfer, 30s live refresh |
+| 11| `/opd` | 36 | Outpatient Consultation | IMPLEMENTED | Dedicated OpdDashboardView (displacing OTView fallback), structured Triage Assessment with vitals/level, Consultation workbench with SOAP notes, ICD-10 suggestions, CDSS evaluate, inline Lab/Rad/Pharm orders, OPD Referrals |
 | 12| `/ipd` | 2 | Inpatient (IPD) | NOT STARTED | Dedicated IPD bed board & admissions |
 | 13| `/ipd/[id]` | 2 | Inpatient Admission Detail | NOT STARTED | Admission detail slide-over drawer |
 | 14| `/emergency` | 25 | Emergency & Trauma | IN PROGRESS | Acuity scoring (ESI/Manchester) |
