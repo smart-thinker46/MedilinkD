@@ -35,3 +35,4 @@ export const setPatientQueueStatus = (
   window.localStorage.setItem(PATIENT_QUEUE_STATUS_STORAGE_KEY, JSON.stringify(next));
   window.dispatchEvent(new CustomEvent("hmis:patient-queue-status", { detail: next[status.patientId] }));
 };
+

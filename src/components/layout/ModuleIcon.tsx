@@ -135,3 +135,4 @@ export function ModuleIcon({
   const Icon = ICONS[name] ?? Sparkles;
   return <Icon className={className} />;
 }
+

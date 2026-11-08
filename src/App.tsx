@@ -8,6 +8,12 @@ import { DesktopTopbar } from "./components/layout/DesktopTopbar";
 import { DesktopAppShell } from "./components/layout/DesktopAppShell";
 import { PatientDrawer } from "./components/patients/PatientDrawer";
 import { OpdDashboardView } from "./views/OpdDashboardView";
+import IcuView from "./views/IcuView";
+import CdssView from "./views/CdssView";
+import MaternityView from "./views/MaternityView";
+import NicuView from "./views/NicuView";
+import DentalView from "./views/DentalView";
+import ReferralsView from "./views/ReferralsView";
 import { MODULE_BY_ID } from "./lib/moduleCatalog";
 import {
   WORKFLOW_MODULE_BY_ID,
@@ -15986,6 +15992,30 @@ export default function App() {
 
         if (module.id === 36) {
           return <OpdDashboardView />;
+        }
+
+        if (module.id === 37) {
+          return <MaternityView />;
+        }
+
+        if (module.id === 38) {
+          return <IcuView />;
+        }
+
+        if (module.id === 48) {
+          return <CdssView />;
+        }
+
+        if (module.id === 51) {
+          return <NicuView />;
+        }
+
+        if (module.id === 52) {
+          return <DentalView />;
+        }
+
+        if (module.id === 55) {
+          return <ReferralsView />;
         }
 
         if (module.id === 4) {
