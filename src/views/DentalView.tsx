@@ -687,3 +687,4 @@ function DentalModal({ tone = "success", title, subtitle, onClose, onSubmit, sav
     </div>
   );
 }
+
