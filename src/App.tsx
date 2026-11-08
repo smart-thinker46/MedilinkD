@@ -3,6 +3,10 @@ import "./App.css";
 import { useAppStore, type Patient } from "./store/appStore";
 import { DesktopUpdater } from "./components/DesktopUpdater";
 import { MigrationCenterView } from "./components/MigrationCenterView";
+import { DesktopSidebar } from "./components/layout/DesktopSidebar";
+import { DesktopTopbar } from "./components/layout/DesktopTopbar";
+import { DesktopAppShell } from "./components/layout/DesktopAppShell";
+import { MODULE_BY_ID } from "./lib/moduleCatalog";
 import {
   WORKFLOW_MODULE_BY_ID,
   WORKFLOW_MODULES,
@@ -16004,388 +16008,48 @@ export default function App() {
           </section>
         </div>
       ) : null}
-      <aside
-        className={`sidebar ${sidebarCollapsed ? "sidebar-collapsed" : ""}`}
-      >
-        <div className="sidebar-brand-top brand">
-          <img
-            src="/MedilinkHMIS.png"
-            alt="Medilink HMIS"
-            className="brand-logo-main"
-          />
-          <button
-            type="button"
-            className="sidebar-collapse-btn"
-            onClick={toggleSidebar}
-            aria-label={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
-            title={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
-          >
-            <Icon type={sidebarCollapsed ? "panel_open" : "panel_close"} size={18} />
-          </button>
-        </div>
-
-        <nav className="sidebar-form-section" aria-label="Module workspace">
-          {!sidebarCollapsed && (
-            <div className="sidebar-section-heading">
-              <span>Workspace</span>
-              <small>{activeSidebarTitle}</small>
-            </div>
-          )}
-          {activeSidebarModuleId === 1 ? (
-            <div className="sidebar-workspace-tools">
-              {[
-                ["monitor", "Monitor Patient", "users"],
-                ["vulnerability", "Vulnerability Flags", "shield2"],
-                ["merge", "Patient Merge", "sync"],
-              ].map(([action, label, icon]) => (
-                <button
-                  key={action}
-                  type="button"
-                  className="sidebar-workspace-btn"
-                  title={label}
-                  onClick={() => {
-                    setActiveWorkflowModuleId(null);
-                    setActiveNav(1);
-                    window.setTimeout(() => {
-                      window.dispatchEvent(
-                        new CustomEvent("hmis:patient-workspace-action", {
-                          detail: { action },
-                        }),
-                      );
-                    }, 0);
-                  }}
-                >
-                  <Icon type={icon} size={16} />
-                  {!sidebarCollapsed && <span>{label}</span>}
-                </button>
-              ))}
-              {patientModuleState?.hasCheckedInPatient ? (
-                <button
-                  type="button"
-                  className="sidebar-workspace-btn"
-                  title="Queue Patient"
-                  onClick={() => {
-                    setActiveWorkflowModuleId(null);
-                    setActiveNav(1);
-                    window.setTimeout(() => {
-                      window.dispatchEvent(
-                        new CustomEvent("hmis:patient-workspace-action", {
-                          detail: { action: "queue" },
-                        }),
-                      );
-                    }, 80);
-                  }}
-                >
-                  <Icon type="send" size={16} />
-                  {!sidebarCollapsed && <span>Queue Patient</span>}
-                </button>
-              ) : null}
-            </div>
-          ) : activeSidebarModuleId === 4 ? (
-            <div className="sidebar-workspace-tools">
-              {[
-                ["recurring", "Recurring Series", "calendar"],
-                ["waitlist", "Release Waitlist", "users"],
-                ["no-show", "Mark No-Show", "bell"],
-              ].map(([action, label, icon]) => (
-                <button
-                  key={action}
-                  type="button"
-                  className="sidebar-workspace-btn"
-                  title={label}
-                  onClick={() => {
-                    setActiveWorkflowModuleId(null);
-                    setActiveNav(3);
-                    window.setTimeout(() => {
-                      window.dispatchEvent(
-                        new CustomEvent("hmis:appointment-sidebar-action", {
-                          detail: { action },
-                        }),
-                      );
-                    }, 80);
-                  }}
-                >
-                  <Icon type={icon} size={16} />
-                  {!sidebarCollapsed && <span>{label}</span>}
-                </button>
-              ))}
-              <button
-                type="button"
-                className="sidebar-workspace-btn"
-                title="Open Waiting List"
-                onClick={() => {
-                  window.dispatchEvent(
-                    new CustomEvent("hmis:open-module-waiting-list", {
-                      detail: {
-                        moduleId: activeSidebarModuleId,
-                        departmentId: "APPOINTMENTS",
-                      },
-                    }),
-                  );
-                }}
-              >
-                <Icon type="users" size={16} />
-                {!sidebarCollapsed && (
-                  <span>
-                    Open Waiting List
-                    <small className="sidebar-waiting-count">{sidebarWaitingCount}</small>
-                  </span>
-                )}
-              </button>
-            </div>
-          ) : sidebarWaitingConfig ? (
-            <div className="sidebar-workspace-tools">
-              <button
-                type="button"
-                className="sidebar-workspace-btn"
-                title="Open Waiting List"
-                onClick={() => {
-                  window.dispatchEvent(
-                    new CustomEvent("hmis:open-module-waiting-list", {
-                      detail: {
-                        moduleId: activeSidebarModuleId,
-                        departmentId: sidebarWaitingConfig.departmentId,
-                      },
-                    }),
-                  );
-                }}
-              >
-                <Icon type="users" size={16} />
-                {!sidebarCollapsed && (
-                  <span>
-                    Open Waiting List
-                    <small className="sidebar-waiting-count">{sidebarWaitingCount}</small>
-                  </span>
-                )}
-              </button>
-            </div>
-          ) : (
-            <div className="sidebar-empty-state" title="Module tools">
-              <Icon type="briefcase" size={18} />
-              {!sidebarCollapsed && (
-                <p>{activeSidebarModuleId ? "Module tools will appear here." : "Open a module to use workspace tools here."}</p>
-              )}
-            </div>
-          )}
-        </nav>
-
-        {roleKey === "hospital_admin" && !isSidebarModuleOpen && (
-          <div className="sidebar-upgrade-wrap">
-            <button
-              className={`sidebar-upgrade-btn ${activeNav === 40 ? "is-active" : ""}`}
-              onClick={() => {
-                setActiveWorkflowModuleId(null);
-                setActiveNav(40);
-              }}
-            >
-              <CrownIcon size={14} />
-              <span>Upgrade</span>
-            </button>
-          </div>
-        )}
-        <div className="sidebar-help-wrap">
-          <button
-            className={`sidebar-help-btn ${helpWidgetOpen ? "is-active" : ""}`}
-            onClick={() => setHelpWidgetOpen(true)}
-          >
-            <Icon type="support" size={16} />
-            <span>Help AI</span>
-          </button>
-        </div>
-        {!isSidebarModuleOpen ? (
-          <div className="sidebar-hospital-card sidebar-hospital-profile">
-            <img
-              src={sidebarFacilityLogo}
-              className="sidebar-hospital-logo"
-              alt={`${sidebarFacilityName} logo`}
-              title={sidebarFacilityName}
-            />
-            {!sidebarCollapsed && (
-              <div className="sidebar-hospital-copy">
-                <span>Active Facility</span>
-                <strong title={sidebarFacilityName}>{sidebarFacilityName}</strong>
-              </div>
-            )}
-          </div>
-        ) : null}
-      </aside>
+      <DesktopSidebar
+        collapsed={sidebarCollapsed}
+        onToggleCollapsed={toggleSidebar}
+        activeNav={activeNav}
+        activeWorkflowModuleId={activeWorkflowModuleId}
+        onNavigateModule={(id) => {
+          setActiveWorkflowModuleId(id);
+          setActiveNav(99);
+        }}
+        onNavigateNav={(idx) => {
+          setActiveWorkflowModuleId(null);
+          setActiveNav(idx);
+        }}
+        userRole={String(user?.role || "hospital_admin")}
+        allowedModuleIds={allowedModuleSet}
+        facilityName={String(dashboardFacilityName || facility?.name || "MediLink HMIS")}
+        facilityLogo={resolveAssetUrl(facilityLogo) || null}
+        onOpenHelpAi={() => setHelpWidgetOpen(true)}
+      />
 
           <div className="main">
-        <header className="topbar">
-          <div className="topbar-left">
-            {activeNav !== 0 && (
-              <div className="topbar-module-title">
-                <button className="topbar-back-btn" onClick={goToDashboard}>
-                  <Icon type="arrow_back" size={16} />
-                  Back
-                </button>
-              </div>
-            )}
-              <form
-                className={`search-wrap ${moduleSearch.trim() ? "has-value" : "is-empty"}`}
-                onSubmit={handleModuleSearchSubmit}
-              >
-                <svg
-                  width="16"
-                  height="16"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="rgba(255, 255, 255, 0.92)"
-                  strokeWidth="2"
-                  style={{
-                    position: "absolute",
-                    left: 14,
-                    top: "50%",
-                    transform: "translateY(-50%)",
-                  }}
-                >
-                  <circle cx="11" cy="11" r="8" />
-                  <path d="M21 21l-4.35-4.35" />
-                </svg>
-                <input
-                  className="search-input"
-                  type="text"
-                  placeholder="Search modules..."
-                  aria-label="Search modules"
-                  value={moduleSearch}
-                  onChange={(e) => setModuleSearch(e.target.value)}
-                  onFocus={() => setModuleSearchFocused(true)}
-                  onBlur={() => window.setTimeout(() => setModuleSearchFocused(false), 140)}
-                />
-                {moduleSearchFocused && moduleSearch.trim() && (
-                  <div className="module-search-panel">
-                    {moduleSearchResults.length > 0 ? (
-                      moduleSearchResults.map((module) => (
-                        <button
-                          key={module.id}
-                          type="button"
-                          className="module-search-result"
-                          onMouseDown={(event) => event.preventDefault()}
-                          onClick={() => openModuleFromSearch(module.id)}
-                        >
-                          <Icon type={module.iconType} size={16} />
-                          <span>
-                            <strong>{module.name}</strong>
-                            <small>{module.premium ? "Premium module" : "Core module"}</small>
-                          </span>
-                        </button>
-                      ))
-                    ) : (
-                      <p className="module-search-empty">No module found.</p>
-                    )}
-                  </div>
-                )}
-              </form>
-          </div>
-          <div className="topbar-right">
-            <button
-              className="topbar-icon-btn"
-              onClick={() => setActiveNav(12)}
-              title="Settings"
-              aria-label="Open settings"
-            >
-              <Icon type="gears" size={17} />
-            </button>
-            <div className="topbar-popover-wrap">
-              <button
-                className="topbar-icon-btn topbar-notification-btn"
-                onClick={() => {
-                  setNotificationsOpen((open) => !open);
-                  setProfileOpen(false);
-                }}
-                title="Notifications"
-                aria-label="Open notifications"
-              >
-                <Icon type="bell" size={17} />
-                {queueNotices.length > 0 && <span className="topbar-alert-count">{queueNotices.length}</span>}
-              </button>
-              {notificationsOpen && (
-                <div className="topbar-panel notification-panel">
-                  <div className="topbar-panel-header">
-                    <div>
-                      <strong>Queue Notifications</strong>
-                      <span>{activeWorkflowModule?.name || "All active modules"}</span>
-                    </div>
-                    <button type="button" onClick={() => setNotificationsOpen(false)}>×</button>
-                  </div>
-                  <div className="notification-list">
-                    {queueNotices.length > 0 ? (
-                      queueNotices.map((notice) => (
-                        <div key={notice.id} className="notification-item">
-                          <div>
-                            <strong>{notice.name}</strong>
-                            <span>{notice.token} queued for HMIS service</span>
-                          </div>
-                          <small>{notice.status}</small>
-                        </div>
-                      ))
-                    ) : (
-                      <p className="topbar-panel-empty">No patient queued for this module right now.</p>
-                    )}
-                  </div>
-                </div>
-              )}
-            </div>
-            <button className="topbar-logout-btn" onClick={() => setLogoutConfirmOpen(true)}>
-              <Icon type="logout" size={15} />
-              Logout
-            </button>
-            <div className="topbar-popover-wrap">
-            <button
-              type="button"
-              className="user-pill"
-              onClick={() => {
-                setProfileOpen((open) => !open);
-                setNotificationsOpen(false);
-              }}
-            >
-              <div className="avatar">{(user?.name || "Hospital Admin").charAt(0).toUpperCase()}</div>
-              <div>
-                <div className="user-name">{user?.name || "Hospital Admin"}</div>
-              </div>
-            </button>
-            {profileOpen && (
-              <div className="topbar-panel profile-panel">
-                <div className="profile-hero">
-                  <div className="profile-hero-main">
-                    <div className="profile-panel-avatar">
-                      <Icon type="person" size={38} />
-                    </div>
-                    <div className="profile-hero-copy">
-                      <span className="profile-kicker">Logged-in HMIS user</span>
-                      <strong>{user?.name || "Hospital Admin"}</strong>
-                      <small>{user?.email || "No email available"}</small>
-                    </div>
-                  </div>
-                  <button type="button" className="profile-close-btn" onClick={() => setProfileOpen(false)}>×</button>
-                </div>
-                <div className="profile-status-row">
-                  <span className="profile-status-dot" />
-                  <strong>Active session</strong>
-                  <small>{dashboardFacilityName || "Current facility"}</small>
-                </div>
-                <dl className="profile-details">
-                  <div>
-                    <dt>Role</dt>
-                    <dd>{user?.role || "Hospital Admin"}</dd>
-                  </div>
-                  <div>
-                    <dt>Facility ID</dt>
-                    <dd>{facility?.id || dashboardFacilityName || "Current facility"}</dd>
-                  </div>
-                  <div>
-                    <dt>Status</dt>
-                    <dd>Active</dd>
-                  </div>
-                </dl>
-              </div>
-            )}
-            </div>
-          </div>
-        </header>
-        {renderMain()}
+        <DesktopTopbar
+          activeNav={activeNav}
+          onGoBack={goToDashboard}
+          onOpenSettings={() => setActiveNav(12)}
+          userName={String(user?.name || "Admin")}
+          userRole={String(user?.role || "Hospital Admin")}
+          onLogout={handleLogout}
+          queueNotices={queueNotices}
+          moduleSearch={moduleSearch}
+          onModuleSearchChange={setModuleSearch}
+          moduleSearchFocused={moduleSearchFocused}
+          onModuleSearchFocus={() => setModuleSearchFocused(true)}
+          onModuleSearchBlur={() => window.setTimeout(() => setModuleSearchFocused(false), 140)}
+          moduleSearchResults={moduleSearchResults}
+          onModuleSearchSubmit={handleModuleSearchSubmit}
+          onOpenModule={openModuleFromSearch}
+        />
+        <DesktopAppShell activeModuleId={activeWorkflowModuleId}>
+          {renderMain()}
+        </DesktopAppShell>
       </div>
-
       {helpWidgetOpen && (
         <div className="help-widget-overlay" onClick={() => setHelpWidgetOpen(false)}>
           <div className="help-widget-panel" onClick={(e) => e.stopPropagation()}>

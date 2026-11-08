@@ -343,33 +343,48 @@ export async function loginStaff(payload: { email: string; password: string }) {
   });
 }
 
+let refreshInFlight: Promise<boolean> | null = null;
+
 export async function refreshAccessToken(): Promise<boolean> {
-  const refreshToken = getRefreshToken();
-  if (!refreshToken) {
-    return false;
-  }
+  if (refreshInFlight) return refreshInFlight;
 
-  const csrfToken = await getCsrfToken();
-  const headers: Record<string, string> = { "Content-Type": "application/json" };
-  if (csrfToken) {
-    headers["X-CSRF-Token"] = csrfToken;
-  }
+  refreshInFlight = (async () => {
+    const refreshToken = getRefreshToken();
+    if (!refreshToken) {
+      return false;
+    }
 
-  const response = await fetch(`${API_BASE_URL}/auth/refresh`, {
-    method: "POST",
-    headers,
-    credentials: "include",
-    body: JSON.stringify({ refreshToken, deviceId: getDeviceId() }),
+    const csrfToken = await getCsrfToken();
+    const headers: Record<string, string> = { "Content-Type": "application/json" };
+    if (csrfToken) {
+      headers["X-CSRF-Token"] = csrfToken;
+    }
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/auth/refresh`, {
+        method: "POST",
+        headers,
+        credentials: "include",
+        body: JSON.stringify({ refreshToken, deviceId: getDeviceId() }),
+      });
+
+      const body = await parseJsonSafe(response);
+      if (!response.ok) {
+        clearTokens();
+        return false;
+      }
+
+      setTokens(body);
+      return true;
+    } catch {
+      clearTokens();
+      return false;
+    }
+  })().finally(() => {
+    refreshInFlight = null;
   });
 
-  const body = await parseJsonSafe(response);
-  if (!response.ok) {
-    clearTokens();
-    return false;
-  }
-
-  setTokens(body);
-  return true;
+  return refreshInFlight;
 }
 
 export async function logoutUser(): Promise<void> {
