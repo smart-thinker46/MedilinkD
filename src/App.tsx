@@ -14,6 +14,15 @@ import MaternityView from "./views/MaternityView";
 import NicuView from "./views/NicuView";
 import DentalView from "./views/DentalView";
 import ReferralsView from "./views/ReferralsView";
+import OtView from "./views/OtView";
+import PhysiotherapyView from "./views/PhysiotherapyView";
+import NutritionView from "./views/NutritionView";
+import PaediatricsView from "./views/PaediatricsView";
+import InfectionControlView from "./views/InfectionControlView";
+import LaboratoryView from "./views/LaboratoryView";
+import RadiologyView from "./views/RadiologyView";
+import PharmacyView from "./views/PharmacyView";
+import PharmacyPosView from "./views/PharmacyPosView";
 import { MODULE_BY_ID } from "./lib/moduleCatalog";
 import {
   WORKFLOW_MODULE_BY_ID,
@@ -4610,369 +4619,7 @@ function WardView() {
   );
 }
 
-function LaboratoryView() {
-  const { patients, movePatient } = useAppStore();
-  const [search, setSearch] = useState("");
-  const [statusFilter, setStatusFilter] = useState("ALL");
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState("");
-  const [requests, setRequests] = useState<any[]>([]);
-  const [selected, setSelected] = useState<any>(null);
-
-  const loadLabRequests = useCallback(async () => {
-    setLoading(true);
-    setError("");
-    try {
-      const rows = await fetchLaboratoryRequests(
-        statusFilter !== "ALL" ? { status: statusFilter } : undefined,
-      );
-      setRequests(Array.isArray(rows) ? rows : []);
-    } catch (err: any) {
-      setRequests([]);
-      setError(String(err?.message || "Failed to load laboratory data."));
-    } finally {
-      setLoading(false);
-    }
-  }, [statusFilter]);
-
-  useEffect(() => {
-    void loadLabRequests();
-  }, [loadLabRequests]);
-
-  const fallbackRows = patients
-    .filter((p) => p.queueStatus === "LAB")
-    .map((patient) => ({
-      id: patient.id,
-      patientCode: patient.regNo,
-      patientName: patient.name,
-      patientId: patient.id,
-      nationalId: patient.nationalId,
-      phone: patient.phone,
-      testName: "Malaria Parasites / FBC",
-      orderedBy: "Dr. Almalick",
-      status: "PENDING",
-      source: "local",
-    }));
-
-  const sourceRows = requests.length > 0 ? requests : fallbackRows;
-  const filtered = sourceRows.filter((row) => {
-    const status = String(row?.status || "").toUpperCase();
-    const q = search.trim().toLowerCase();
-    if (statusFilter !== "ALL" && status !== statusFilter) return false;
-    if (!q) return true;
-    return [
-      row?.patientName,
-      row?.patientCode,
-      row?.patientId,
-      row?.nationalId,
-      row?.phone,
-      row?.testName,
-      row?.testCode,
-      row?.status,
-    ]
-      .join(" ")
-      .toLowerCase()
-      .includes(q);
-  });
-  const hasStatus = (row: any, statuses: string[]) => {
-    const status = String(row?.status || "")
-      .trim()
-      .toUpperCase()
-      .replace(/[\s-]+/g, "_");
-    return statuses.includes(status);
-  };
-  const labStats = [
-    { label: "Total Orders", value: sourceRows.length, color: "#1e3a8a" },
-    {
-      label: "Sample Collected",
-      value: sourceRows.filter((row) =>
-        hasStatus(row, ["COLLECTED", "SAMPLE_COLLECTED", "VERIFIED", "RELEASED", "RESULT_ENTERED"]),
-      ).length,
-      color: "#0d9488",
-    },
-    {
-      label: "In Process",
-      value: sourceRows.filter((row) =>
-        hasStatus(row, ["IN_PROCESS", "INPROCESS", "PROCESSING", "RUNNING", "ANALYSING", "ANALYZING"]),
-      ).length,
-      color: "#f59e0b",
-    },
-    {
-      label: "Results Entered",
-      value: sourceRows.filter((row) =>
-        hasStatus(row, ["RESULT_ENTERED", "RESULTS_ENTERED", "VERIFIED", "RELEASED", "COMPLETED"]),
-      ).length,
-      color: "#16a34a",
-    },
-  ];
-
-  return (
-    <div className="patients-view">
-      <div className="pv-header">
-        <div>
-          <h2 className="pv-title">Lab Services Terminal</h2>
-          <p className="pv-subtitle">
-            Process diagnostic tests and upload results
-          </p>
-        </div>
-      </div>
-
-      <div className="pv-stats">
-        {labStats.map((stat) => (
-          <article
-            key={stat.label}
-            className="pv-stat-card"
-            style={{ borderLeftColor: stat.color }}
-          >
-            <p className="pv-stat-label">{stat.label}</p>
-            <p className="pv-stat-value">{loading ? "..." : stat.value}</p>
-          </article>
-        ))}
-      </div>
-
-      <div className="pv-search-bar laboratory-search-row">
-        <div className="pv-search-wrap">
-          <svg
-            className="pv-search-icon"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            aria-hidden="true"
-          >
-            <circle cx="11" cy="11" r="8" />
-            <path d="m21 21-4.3-4.3" />
-          </svg>
-          <input
-            className="pv-search"
-            placeholder="Search Patient (ID / Reg No / Name / Phone)"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-          />
-        </div>
-        <select
-          value={statusFilter}
-          onChange={(e) => setStatusFilter(e.target.value)}
-          className="form-input laboratory-status-filter"
-        >
-          {["ALL", "PENDING", "COLLECTED", "IN_PROCESS", "VERIFIED", "RELEASED", "CANCELLED"].map((status) => (
-            <option key={status} value={status}>
-              {status}
-            </option>
-          ))}
-        </select>
-      </div>
-
-      {error ? <div className="workflow-notice is-error">{error}</div> : null}
-
-      <div className="pv-table-wrap">
-        <table className="pv-table">
-          <thead>
-            <tr>
-              <th>Reg No</th>
-              <th>Patient</th>
-              <th>Test Requested</th>
-              <th>Ordered By</th>
-              <th>Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {loading ? (
-              <tr>
-                <td colSpan={5} className="pv-empty">
-                  Loading lab requests...
-                </td>
-              </tr>
-            ) : filtered.length === 0 ? (
-              <tr>
-                <td colSpan={5} className="pv-empty">
-                  No patients in Lab Queue. Try searching...
-                </td>
-              </tr>
-            ) : (
-              filtered.map((row) => (
-                <tr key={row.id}>
-                  <td className="pv-code">{row.patientCode || row.patientId || "—"}</td>
-                  <td className="pv-name">{row.patientName || "Patient"}</td>
-                  <td>{row.testName || row.testCode || "—"}</td>
-                  <td>{row.orderedBy || row.doctorName || "—"}</td>
-                  <td>
-                    <button
-                      onClick={() => setSelected(row)}
-                      className="btn-primary"
-                    >
-                      Record Results
-                    </button>
-                  </td>
-                </tr>
-              ))
-            )}
-          </tbody>
-        </table>
-      </div>
-
-      {selected && (
-        <div className="modal-overlay">
-          <div className="modal-box">
-            <div className="modal-header">
-              <h3>Lab Results: {selected.patientName || selected.name || "Patient"}</h3>
-              <button className="modal-close" onClick={() => setSelected(null)}>
-                ×
-              </button>
-            </div>
-            <div className="modal-form">
-              <label>
-                Sample Type{" "}
-                <input
-                  className="form-input"
-                  placeholder="Blood / Urine / Swab"
-                />
-              </label>
-              <label>
-                Test Findings{" "}
-                <textarea
-                  className="form-input"
-                  style={{ height: 80 }}
-                  placeholder="Describe findings..."
-                />
-              </label>
-              <label>
-                Result Value{" "}
-                <input
-                  className="form-input"
-                  placeholder="Positive / Negative / 12.4"
-                />
-              </label>
-              <button
-                className="btn-primary"
-                onClick={() => {
-                  movePatient(selected.id, "PHARMACY");
-                  setSelected(null);
-                }}
-              >
-                Submit & Finalize
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
-function PharmacyView() {
-  const { patients, movePatient } = useAppStore();
-  const [search, setSearch] = useState("");
-  const [selected, setSelected] = useState<any>(null);
-
-  const filtered = patients.filter(
-    (p) =>
-      p.queueStatus === "PHARMACY" &&
-      (p.name.toLowerCase().includes(search.toLowerCase()) ||
-        p.regNo.toLowerCase().includes(search.toLowerCase())),
-  );
-
-  return (
-    <div className="patients-view">
-      <div className="pv-header">
-        <div>
-          <h2 className="pv-title">Pharmacy Dispensing</h2>
-          <p className="pv-subtitle">
-            Fulfill prescriptions and manage patient medication
-          </p>
-        </div>
-      </div>
-
-      <div className="pv-search-wrap" style={{ marginBottom: 16 }}>
-        <input
-          className="pv-search"
-          placeholder="Search by ID / Name / Reg No"
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          style={{ width: "100%", maxWidth: "none" }}
-        />
-      </div>
-
-      <div className="pv-table-wrap">
-        <table className="pv-table">
-          <thead>
-            <tr>
-              <th>Patient</th>
-              <th>Medication</th>
-              <th>Instructions</th>
-              <th>Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {filtered.length === 0 ? (
-              <tr>
-                <td colSpan={4} className="pv-empty">
-                  No pending prescriptions in Pharmacy.
-                </td>
-              </tr>
-            ) : (
-              filtered.map((p) => (
-                <tr key={p.id}>
-                  <td className="pv-name">{p.name}</td>
-                  <td>Amoxicillin 500mg</td>
-                  <td>1 x 3 days</td>
-                  <td>
-                    <button
-                      onClick={() => setSelected(p)}
-                      className="btn-primary"
-                    >
-                      Dispense
-                    </button>
-                  </td>
-                </tr>
-              ))
-            )}
-          </tbody>
-        </table>
-      </div>
-
-      {selected && (
-        <div className="modal-overlay">
-          <div className="modal-box">
-            <div className="modal-header">
-              <h3>Dispense Medication: {selected.name}</h3>
-              <button className="modal-close" onClick={() => setSelected(null)}>
-                ×
-              </button>
-            </div>
-            <div className="modal-form">
-              <p style={{ fontSize: 13, color: "#64748b" }}>
-                Stock Level: 450 units available
-              </p>
-              <label>
-                Medication{" "}
-                <input
-                  className="form-input"
-                  defaultValue="Amoxicillin 500mg"
-                  disabled
-                />
-              </label>
-              <label>
-                Batch No <input className="form-input" placeholder="BN-9920" />
-              </label>
-              <button
-                className="btn-primary"
-                onClick={() => {
-                  movePatient(selected.id, "COMPLETED");
-                  setSelected(null);
-                }}
-              >
-                Finalize Dispensing
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
+// LaboratoryView and PharmacyView are now imported from ./views
 
 function InventoryView() {
   const [inventory] = useState([
@@ -15838,7 +15485,7 @@ export default function App() {
       case 7:
         return <LaboratoryView />;
       case 8:
-        return <DiagnosticsView type="Radiology" />;
+        return <RadiologyView />;
       case 9:
         return <BillingView />;
       case 10:
@@ -16016,6 +15663,42 @@ export default function App() {
 
         if (module.id === 55) {
           return <ReferralsView />;
+        }
+
+        if (module.id === 8) {
+          return <LaboratoryView />;
+        }
+
+        if (module.id === 9) {
+          return <RadiologyView />;
+        }
+
+        if (module.id === 10) {
+          return <PharmacyView />;
+        }
+
+        if (module.id === 35) {
+          return <PharmacyPosView />;
+        }
+
+        if (module.id === 11) {
+          return <OtView />;
+        }
+
+        if (module.id === 49) {
+          return <PhysiotherapyView />;
+        }
+
+        if (module.id === 50) {
+          return <NutritionView />;
+        }
+
+        if (module.id === 53) {
+          return <InfectionControlView />;
+        }
+
+        if (module.id === 59) {
+          return <PaediatricsView />;
         }
 
         if (module.id === 4) {
