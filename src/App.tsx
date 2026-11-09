@@ -5173,7 +5173,7 @@ function AuthLanding({
             />
           </div>
           <div className="landing-stat-card stat-a">
-            <strong>35+</strong>
+            <strong>60+</strong>
             <span>Operational Modules</span>
           </div>
           <div className="landing-stat-card stat-b">

@@ -49198,3 +49198,36 @@ html[data-theme="dark"] .welcome p span { border-left-color: #475569; }
   border-color: rgba(239, 68, 68, 0.35);
   color: #991b1b;
 }
+
+/* Squared Corners for Auth, Login, and License Verify Forms */
+.auth-card,
+.auth-login,
+.auth-card.auth-login {
+  border-radius: 0px !important;
+}
+
+.auth-card .auth-input,
+.auth-card input,
+.auth-card select,
+.auth-card textarea,
+.auth-card .auth-password-wrap,
+.auth-card .auth-password-toggle {
+  border-radius: 0px !important;
+}
+
+.auth-card .splash-btn-primary,
+.auth-card .splash-btn-secondary,
+.auth-card button {
+  border-radius: 0px !important;
+}
+
+.auth-card .auth-error,
+.auth-card .license-info,
+.auth-card .auth-mfa-panel,
+.auth-card .auth-mfa-panel code {
+  border-radius: 0px !important;
+}
+
+.license-info {
+  border-radius: 0px !important;
+}
