@@ -38,6 +38,10 @@ import HelpdeskView from "./views/HelpdeskView";
 import CanteenView from "./views/CanteenView";
 import PatientFeedbackView from "./views/PatientFeedbackView";
 import QualityAssuranceView from "./views/QualityAssuranceView";
+import InventoryView from "./views/InventoryView";
+import ProcurementView from "./views/ProcurementView";
+import HrView from "./views/HrView";
+import FinanceView from "./views/FinanceView";
 import { MODULE_BY_ID } from "./lib/moduleCatalog";
 import {
   WORKFLOW_MODULE_BY_ID,
@@ -4219,165 +4223,7 @@ function EHRView() {
 
 // LaboratoryView and PharmacyView are now imported from ./views
 
-function InventoryView() {
-  const [inventory] = useState([
-    { id: "1", name: "Amoxicillin", batch: "BN-001", stock: 450 },
-    { id: "2", name: "Paracetamol", batch: "BN-042", stock: 1200 },
-    { id: "3", name: "Insulin", batch: "BN-099", stock: 15 },
-  ]);
-
-  return (
-    <div className="inventory-view">
-      <div className="pv-header">
-        <div>
-          <h2 className="pv-title">Stock Inventory</h2>
-          <p className="pv-subtitle">
-            Monitor pharmaceutical supplies and stock levels
-          </p>
-        </div>
-      </div>
-      <div className="pv-table-wrap">
-        <table className="pv-table">
-          <thead>
-            <tr>
-              <th>Medication</th>
-              <th>Batch</th>
-              <th>Stock</th>
-              <th>Status</th>
-            </tr>
-          </thead>
-          <tbody>
-            {inventory.map((i) => (
-              <tr key={i.id}>
-                <td className="pv-name">{i.name}</td>
-                <td>{i.batch}</td>
-                <td>{i.stock}</td>
-                <td>
-                  <span
-                    className={`pv-badge ${i.stock < 50 ? "badge-female" : "badge-male"}`}
-                  >
-                    {i.stock < 50 ? "Low" : "OK"}
-                  </span>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    </div>
-  );
-}
-
-function OTView() {
-  const [bookings] = useState([
-    {
-      id: "1",
-      procedure: "Appendectomy",
-      date: "2024-02-23",
-      status: "SCHEDULED",
-    },
-    {
-      id: "2",
-      procedure: "Hernia Repair",
-      date: "2024-02-24",
-      status: "COMPLETED",
-    },
-  ]);
-
-  return (
-    <div className="ot-view">
-      <div className="pv-header">
-        <div>
-          <h2 className="pv-title">Theatre Dashboard</h2>
-          <p className="pv-subtitle">
-            Monitor surgical schedules and theatre occupancy
-          </p>
-        </div>
-      </div>
-      <div className="pv-table-wrap">
-        <table className="pv-table">
-          <thead>
-            <tr>
-              <th>Procedure</th>
-              <th>Date</th>
-              <th>Status</th>
-              <th>Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {bookings.map((b) => (
-              <tr key={b.id}>
-                <td className="pv-name">{b.procedure}</td>
-                <td>{b.date}</td>
-                <td>
-                  <span
-                    className={`pv-badge ${b.status === "SCHEDULED" ? "badge-female" : "badge-male"}`}
-                  >
-                    {b.status}
-                  </span>
-                </td>
-                <td>
-                  <button className="pv-del">
-                    {b.status === "SCHEDULED" ? "Pre-Op" : "View"}
-                  </button>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    </div>
-  );
-}
-
-function BloodBankView() {
-  const [stock] = useState([
-    { group: "A+", units: 12 },
-    { group: "B+", units: 4 },
-    { group: "O+", units: 25 },
-    { group: "AB-", units: 1 },
-  ]);
-
-  return (
-    <div className="blood-bank-view">
-      <div className="pv-header">
-        <div>
-          <h2 className="pv-title">Blood Inventory</h2>
-          <p className="pv-subtitle">
-            Real-time monitoring of blood group reserves
-          </p>
-        </div>
-      </div>
-      <div className="pv-table-wrap">
-        <table className="pv-table">
-          <thead>
-            <tr>
-              <th>Blood Group</th>
-              <th>Available Units</th>
-              <th>Status</th>
-            </tr>
-          </thead>
-          <tbody>
-            {stock.map((s) => (
-              <tr key={s.group}>
-                <td className="pv-name">{s.group}</td>
-                <td className="font-bold">{s.units} Units</td>
-                <td>
-                  <span
-                    className={`pv-badge ${s.units < 5 ? "badge-female" : "badge-male"}`}
-                  >
-                    {s.units < 5 ? "Critical" : "Stable"}
-                  </span>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    </div>
-  );
-}
-void BloodBankView;
+// InventoryView is now imported from ./views
 
 // TelemedicineView is now imported from ./views
 
@@ -6966,105 +6812,7 @@ function FacilityView() {
   );
 }
 
-function HRView() {
-  const [staff] = useState([
-    { id: "1", name: "Dr. Alice M.", role: "Lead Surgeon", status: "ACTIVE" },
-    { id: "2", name: "Nurse John D.", role: "Senior Nurse", status: "ACTIVE" },
-    { id: "3", name: "Sarah K.", role: "Administrator", status: "ON LEAVE" },
-  ]);
-
-  return (
-    <div className="hr-view">
-      <div className="pv-header">
-        <div>
-          <h2 className="pv-title">Human Resources</h2>
-          <p className="pv-subtitle">
-            Manage staff registry, attendance, and payroll
-          </p>
-        </div>
-      </div>
-      <div className="pv-table-wrap">
-        <table className="pv-table">
-          <thead>
-            <tr>
-              <th>Name</th>
-              <th>Role</th>
-              <th>Status</th>
-              <th>Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {staff.map((s) => (
-              <tr key={s.id}>
-                <td className="pv-name">{s.name}</td>
-                <td>{s.role}</td>
-                <td>
-                  <span
-                    className={`pv-badge ${s.status === "ACTIVE" ? "badge-male" : "badge-female"}`}
-                  >
-                    {s.status}
-                  </span>
-                </td>
-                <td>
-                  <button className="pv-del">Profile</button>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    </div>
-  );
-}
-
-function ProcurementView() {
-  const [items] = useState([
-    { id: "1", name: "Surgical Gloves", category: "Consumables", qty: 2400 },
-    { id: "2", name: "Syringes (5ml)", category: "Consumables", qty: 450 },
-    { id: "3", name: "Patient Gowns", category: "Linen", qty: 120 },
-  ]);
-
-  return (
-    <div className="procurement-view">
-      <div className="pv-header">
-        <div>
-          <h2 className="pv-title">Supply Chain Hub</h2>
-          <p className="pv-subtitle">
-            Manage facility-wide non-medicine procurement
-          </p>
-        </div>
-      </div>
-      <div className="pv-table-wrap">
-        <table className="pv-table">
-          <thead>
-            <tr>
-              <th>Item</th>
-              <th>Category</th>
-              <th>Quantity</th>
-              <th>Status</th>
-            </tr>
-          </thead>
-          <tbody>
-            {items.map((i) => (
-              <tr key={i.id}>
-                <td className="pv-name">{i.name}</td>
-                <td>{i.category}</td>
-                <td className="font-bold">{i.qty}</td>
-                <td>
-                  <span
-                    className={`pv-badge ${i.qty < 500 ? "badge-female" : "badge-male"}`}
-                  >
-                    {i.qty < 500 ? "Reorder" : "Stable"}
-                  </span>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    </div>
-  );
-}
+// HrView and ProcurementView are now imported from ./views
 
 // BillingView and InsuranceView are now imported from ./views
 
@@ -11636,7 +11384,7 @@ export default function App() {
             />
           </React.Suspense>
         ) : (
-          <HRView />
+          <HrView />
         );
       }
       case 17: {
@@ -11849,6 +11597,18 @@ export default function App() {
 
         if (module.id === 12) {
           return <BloodBankView />;
+        }
+
+        if (module.id === 15) {
+          return <InventoryView />;
+        }
+
+        if (module.id === 16) {
+          return <HrView />;
+        }
+
+        if (module.id === 39) {
+          return <FinanceView />;
         }
 
         if (module.id === 61) {
