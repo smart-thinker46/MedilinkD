@@ -1,5 +1,5 @@
-
 import { useEffect, useMemo, useState } from "react";
+
 import {
   Activity,
   AlertTriangle,
@@ -24,17 +24,6 @@ import { api } from "../lib/api";
 import { PrescriptionForm } from "../components/clinical/PrescriptionForm";
 import { LabRequestForm } from "../components/clinical/LabRequestForm";
 import { AdmissionForm } from "../components/clinical/AdmissionForm";
-
-
-
-import { useEffect, useMemo, useState } from "react";
-
-
-
-
-
-
-
 type TabKey = "timeline" | "notes" | "orders" | "vitals" | "ai";
 
 const NOTE_TEMPLATES = [
@@ -770,17 +759,6 @@ function VitalTrend({ title, metric, rows, unit }: { title: string; metric: stri
     </div>
   );
 }
-
-
-
-
-import { useMemo, useState, useEffect } from "react";
-
-
-
-
-
-
 function EhrIndexList({ onSelectPatient }: { onSelectPatient: (id: string) => void }) {
   
   const [patients, setPatients] = useState<any[]>([]);
