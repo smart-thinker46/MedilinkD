@@ -52,6 +52,7 @@ export function notifyLiveDataChanged(detail: Record<string, unknown> = {}) {
 type LoginPayload = {
   email: string;
   password: string;
+  otp?: string;
   audience?: "hospital_admin" | "staff";
   deviceId?: string;
 };

@@ -49073,3 +49073,128 @@ html[data-theme="dark"] .welcome p span { border-left-color: #475569; }
   .exec-detail { grid-template-columns: 1fr; }
   .exec-detail-group { grid-column: auto; }
 }
+
+/* Authentication MFA Panel */
+.auth-mfa-panel {
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid rgba(37, 99, 235, 0.22);
+  border-radius: 8px;
+  background: rgba(239, 246, 255, 0.88);
+  color: #1e3a8a;
+  font-size: 0.78rem;
+}
+
+.auth-mfa-panel strong {
+  color: #0f172a;
+  font-size: 0.84rem;
+}
+
+.auth-mfa-panel code {
+  padding: 8px;
+  border: 1px solid rgba(37, 99, 235, 0.2);
+  border-radius: 6px;
+  background: #ffffff;
+  color: #0f172a;
+  word-break: break-all;
+}
+
+.auth-mfa-panel a {
+  color: #1d4ed8;
+  font-weight: 800;
+  text-decoration: none;
+}
+
+.auth-mfa-panel a:hover {
+  text-decoration: underline;
+}
+
+/* Setup Congrats & License Info Enhancements */
+.setup-congrats {
+  min-height: 560px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+}
+
+.setup-congrats .auth-title-logo {
+  width: 116px;
+  margin-bottom: 18px;
+}
+
+.setup-congrats-icon {
+  width: 68px;
+  height: 68px;
+  margin-bottom: 12px;
+  color: #16a34a;
+}
+
+.setup-congrats .splash-btn-primary {
+  margin-top: 22px;
+  gap: 8px;
+  display: inline-flex;
+  align-items: center;
+}
+
+.setup-actions .splash-btn-primary,
+.setup-actions .splash-btn-secondary,
+.setup-congrats .splash-btn-primary {
+  transition:
+    transform 180ms ease,
+    box-shadow 180ms ease,
+    filter 180ms ease,
+    background 180ms ease;
+}
+
+.setup-actions .splash-btn-primary:hover,
+.setup-congrats .splash-btn-primary:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 16px 30px rgba(19, 216, 2, 0.22);
+  filter: saturate(1.08);
+}
+
+.setup-actions .splash-btn-secondary:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 14px 26px rgba(15, 23, 42, 0.12);
+}
+
+.setup-actions .splash-btn-primary:active,
+.setup-actions .splash-btn-secondary:active,
+.setup-congrats .splash-btn-primary:active {
+  transform: translateY(0) scale(0.98);
+}
+
+.license-info {
+  display: grid;
+  gap: 6px;
+  margin: 6px 0 12px;
+  padding: 9px 10px;
+  border-radius: 10px;
+  background: rgba(15, 23, 42, 0.06);
+  color: #0f172a;
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  font-size: 0.8rem;
+  font-weight: 600;
+  text-align: left;
+}
+
+.license-info strong {
+  font-weight: 700;
+}
+
+.license-info.license-active {
+  background: rgba(16, 185, 129, 0.12);
+  border-color: rgba(16, 185, 129, 0.35);
+  color: #065f46;
+}
+
+.license-info.license-expired,
+.license-info.license-revoked,
+.license-info.license-inactive {
+  background: rgba(239, 68, 68, 0.12);
+  border-color: rgba(239, 68, 68, 0.35);
+  color: #991b1b;
+}

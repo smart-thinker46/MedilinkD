@@ -1,4 +1,17 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from "react";
+import { api } from "./lib/api";
+import {
+  Building2,
+  CheckCircle2,
+  ChevronLeft,
+  ChevronRight,
+  Eye,
+  EyeOff,
+  Hospital,
+  MapPin,
+  Upload,
+  UserRoundPlus,
+} from "lucide-react";
 import "./App.css";
 import { useAppStore, type Patient } from "./store/appStore";
 import { DesktopUpdater } from "./components/DesktopUpdater";
@@ -5182,16 +5195,28 @@ type SetupField = {
   required?: boolean;
 };
 
+type SetupStep = {
+  title: string;
+  subtitle: string;
+  icon: typeof Building2;
+  fields: SetupField[];
+};
+
 const setupCounties = [
-  "Baringo", "Bomet", "Bungoma", "Busia", "Embu", "Garissa", "Kiambu", "Kilifi", "Kisii", "Kisumu",
-  "Machakos", "Makueni", "Mombasa", "Nairobi", "Nakuru", "Nyeri", "Uasin Gishu", "Vihiga", "West Pokot",
+  "Baringo", "Bomet", "Bungoma", "Busia", "Elgeyo Marakwet", "Embu", "Garissa", "Homa Bay",
+  "Isiolo", "Kajiado", "Kakamega", "Kericho", "Kiambu", "Kilifi", "Kirinyaga", "Kisii",
+  "Kisumu", "Kitui", "Kwale", "Laikipia", "Lamu", "Machakos", "Makueni", "Mandera",
+  "Marsabit", "Meru", "Migori", "Mombasa", "Murang'a", "Nairobi", "Nakuru", "Nandi",
+  "Narok", "Nyamira", "Nyandarua", "Nyeri", "Samburu", "Siaya", "Taita Taveta",
+  "Tana River", "Tharaka Nithi", "Trans Nzoia", "Turkana", "Uasin Gishu", "Vihiga",
+  "Wajir", "West Pokot",
 ];
 
-const desktopSetupSteps: Array<{ title: string; subtitle: string; icon: string; fields: SetupField[] }> = [
+const desktopSetupSteps: SetupStep[] = [
   {
     title: "Facility Identity",
     subtitle: "Tell Medilink who the hospital is.",
-    icon: "briefcase",
+    icon: Building2,
     fields: [
       { name: "legalName", label: "Facility full legal name", placeholder: "Nakuru Level Five County Referral Hospital", required: true },
       { name: "shortName", label: "Facility short / trading name", placeholder: "Nakuru L5 Hospital", required: true },
@@ -5205,7 +5230,7 @@ const desktopSetupSteps: Array<{ title: string; subtitle: string; icon: string; 
   {
     title: "Facility Profile",
     subtitle: "Simple classification details for reports and routing.",
-    icon: "home",
+    icon: Hospital,
     fields: [
       { name: "ownershipType", label: "Ownership type", type: "select", options: ["Public", "Private for Profit", "Private Not-for-Profit", "NGO", "Parastatal"], required: true },
       { name: "facilityLevel", label: "MOH facility level", type: "select", options: ["Level 2", "Level 3", "Level 4", "Level 5", "Level 6"], required: true },
@@ -5217,7 +5242,7 @@ const desktopSetupSteps: Array<{ title: string; subtitle: string; icon: string; 
   {
     title: "Location and Contacts",
     subtitle: "Where patients and referral partners find you.",
-    icon: "calendar",
+    icon: MapPin,
     fields: [
       { name: "physicalAddress", label: "Physical address", type: "textarea", placeholder: "Building, street, estate or area", required: true },
       { name: "county", label: "County", type: "select", options: setupCounties, required: true },
@@ -5233,7 +5258,7 @@ const desktopSetupSteps: Array<{ title: string; subtitle: string; icon: string; 
   {
     title: "Working Hours",
     subtitle: "Use quick choices instead of long configuration forms.",
-    icon: "calendar",
+    icon: CheckCircle2,
     fields: [
       { name: "openDays", label: "Open days", type: "checkboxes", options: ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"] },
       { name: "weekdayOpen", label: "Weekday opening time", type: "select", options: ["06:00", "07:00", "08:00", "09:00", "24 hours"] },
@@ -5245,7 +5270,7 @@ const desktopSetupSteps: Array<{ title: string; subtitle: string; icon: string; 
   {
     title: "Departments",
     subtitle: "Create the first patient routing areas. More can be added later.",
-    icon: "briefcase",
+    icon: Hospital,
     fields: [
       { name: "departments", label: "Initial departments", type: "checkboxes", options: ["Reception", "Outpatient", "Emergency", "Billing", "Pharmacy", "Laboratory", "Radiology", "Maternity", "Inpatient", "Theatre"] },
       { name: "primaryDepartment", label: "Main patient entry department", type: "select", options: ["Reception", "Outpatient", "Emergency"] },
@@ -5254,7 +5279,7 @@ const desktopSetupSteps: Array<{ title: string; subtitle: string; icon: string; 
   {
     title: "Hospital Admin",
     subtitle: "Create the first admin account that will manage the system.",
-    icon: "person",
+    icon: UserRoundPlus,
     fields: [
       { name: "adminName", label: "Hospital admin full name", placeholder: "Jane Wanjiku", required: true },
       { name: "adminEmail", label: "Admin login email", type: "email", placeholder: "admin@hospital.co.ke", required: true },
@@ -5276,31 +5301,38 @@ function FirstTimeSetupScreen({
   landingTheme: "enterprise" | "clinical" | "luxury";
 }) {
   const [activeStep, setActiveStep] = useState(0);
+  const [showPassword, setShowPassword] = useState(false);
   const [values, setValues] = useState<Record<string, string>>({});
+  const [files, setFiles] = useState<Record<string, string>>({});
+  const [fileObjects, setFileObjects] = useState<Record<string, File>>({});
   const [checked, setChecked] = useState<Record<string, string[]>>({
     openDays: ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"],
     departments: ["Reception", "Outpatient", "Billing"],
   });
-  const [fileNames, setFileNames] = useState<Record<string, string>>({});
-  const [fileObjects, setFileObjects] = useState<Record<string, File>>({});
-  const [showPassword, setShowPassword] = useState(false);
   const [completed, setCompleted] = useState(false);
   const [setupResult, setSetupResult] = useState<any>(null);
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
+
   const step = desktopSetupSteps[activeStep];
   const completion = Math.round(((completed ? desktopSetupSteps.length + 1 : activeStep + 1) / (desktopSetupSteps.length + 1)) * 100);
 
-  const setValue = (name: string, value: string) => setValues((current) => ({ ...current, [name]: value }));
+  const setValue = (name: string, value: string) =>
+    setValues((current) => ({ ...current, [name]: value }));
+
   const toggleChecked = (name: string, option: string) => {
     setChecked((current) => {
       const list = current[name] || [];
-      return { ...current, [name]: list.includes(option) ? list.filter((item) => item !== option) : [...list, option] };
+      return {
+        ...current,
+        [name]: list.includes(option) ? list.filter((item) => item !== option) : [...list, option],
+      };
     });
   };
+
   const onFileChange = (name: string, file?: File | null) => {
     if (!file) return;
-    setFileNames((current) => ({ ...current, [name]: file.name }));
+    setFiles((current) => ({ ...current, [name]: file.name }));
     setFileObjects((current) => ({ ...current, [name]: file }));
   };
 
@@ -5310,14 +5342,16 @@ function FirstTimeSetupScreen({
         <label className="setup-file-picker" key={field.name}>
           <span>{field.label}</span>
           <input type="file" accept="image/png,image/jpeg,image/svg+xml" onChange={(event) => onFileChange(field.name, event.target.files?.[0])} />
-          <b><Icon type="upload" size={16} /> {fileNames[field.name] || "Choose image"}</b>
+          <b><Upload size={16} /> {files[field.name] || "Choose image"}</b>
           <small>PNG, JPG, or SVG</small>
         </label>
       );
     }
+
     if (field.type === "select") {
       return (
-        <label key={field.name}>{field.label}
+        <label key={field.name}>
+          {field.label}
           <select required={field.required} value={values[field.name] || ""} onChange={(event) => setValue(field.name, event.target.value)}>
             <option value="">Select...</option>
             {field.options?.map((option) => <option key={option} value={option}>{option}</option>)}
@@ -5325,25 +5359,53 @@ function FirstTimeSetupScreen({
         </label>
       );
     }
+
     if (field.type === "checkboxes") {
       return (
         <fieldset className="setup-choice-field" key={field.name}>
           <legend>{field.label}</legend>
-          <div>{field.options?.map((option) => (
-            <label key={option}><input type="checkbox" checked={(checked[field.name] || []).includes(option)} onChange={() => toggleChecked(field.name, option)} />{option}</label>
-          ))}</div>
+          <div>
+            {field.options?.map((option) => (
+              <label key={option}>
+                <input
+                  type="checkbox"
+                  checked={(checked[field.name] || []).includes(option)}
+                  onChange={() => toggleChecked(field.name, option)}
+                />
+                {option}
+              </label>
+            ))}
+          </div>
         </fieldset>
       );
     }
+
     if (field.type === "textarea") {
-      return <label key={field.name}>{field.label}<textarea required={field.required} placeholder={field.placeholder} value={values[field.name] || ""} onChange={(event) => setValue(field.name, event.target.value)} /></label>;
+      return (
+        <label key={field.name}>
+          {field.label}
+          <textarea required={field.required} placeholder={field.placeholder} value={values[field.name] || ""} onChange={(event) => setValue(field.name, event.target.value)} />
+        </label>
+      );
     }
+
     const isPassword = field.type === "password";
     return (
-      <label key={field.name}>{field.label}
+      <label key={field.name}>
+        {field.label}
         <span className={isPassword ? "setup-password-wrap" : undefined}>
-          <input type={isPassword && showPassword ? "text" : field.type || "text"} required={field.required} placeholder={field.placeholder} value={values[field.name] || ""} onChange={(event) => setValue(field.name, event.target.value)} />
-          {isPassword && <button type="button" onClick={() => setShowPassword((value) => !value)}>{showPassword ? "Hide" : "Show"}</button>}
+          <input
+            type={isPassword && showPassword ? "text" : field.type || "text"}
+            required={field.required}
+            placeholder={field.placeholder}
+            value={values[field.name] || ""}
+            onChange={(event) => setValue(field.name, event.target.value)}
+          />
+          {isPassword ? (
+            <button type="button" onClick={() => setShowPassword((value) => !value)} aria-label={showPassword ? "Hide password" : "Show password"}>
+              {showPassword ? <EyeOff size={15} /> : <Eye size={15} />}
+            </button>
+          ) : null}
         </span>
       </label>
     );
@@ -5363,6 +5425,7 @@ function FirstTimeSetupScreen({
       setError("Admin password must be at least 6 characters and contain no spaces.");
       return;
     }
+
     setSubmitting(true);
     try {
       const formData = new FormData();
@@ -5370,12 +5433,28 @@ function FirstTimeSetupScreen({
       Object.entries(checked).forEach(([key, value]) => formData.append(key, JSON.stringify(value)));
       if (fileObjects.logo) formData.append("logo", fileObjects.logo);
       if (fileObjects.stamp) formData.append("stamp", fileObjects.stamp);
+
       const response = await completeFacilitySetup(formData);
-      localStorage.setItem(SETUP_STORAGE_KEY, JSON.stringify({ values, checked, fileNames, savedFacility: response?.facility || null, branding: response?.branding || null, completedAt: new Date().toISOString() }));
+      localStorage.setItem(
+        SETUP_STORAGE_KEY,
+        JSON.stringify({
+          values,
+          files,
+          checked,
+          savedFacility: response?.facility || null,
+          branding: response?.branding || null,
+          completedAt: new Date().toISOString(),
+        }),
+      );
+      localStorage.setItem("hmis_setup_wizard_seen", new Date().toISOString());
       setSetupResult(response);
       setCompleted(true);
     } catch (setupError: any) {
-      setError(String(setupError?.message || "Setup could not be saved. Check that the HMIS backend is running."));
+      setError(
+        setupError?.response?.data?.message ||
+          setupError?.message ||
+          "Setup could not be saved. Check that the HMIS backend is running.",
+      );
     } finally {
       setSubmitting(false);
     }
@@ -5388,14 +5467,22 @@ function FirstTimeSetupScreen({
         <div className="splash-glow splash-glow-2" />
         <section className="setup-landing-shell setup-congrats">
           <img src="/Loginlogo.png" alt="MediLink HMIS" className="auth-title-logo" />
+          <CheckCircle2 className="setup-congrats-icon" />
           <p className="setup-eyebrow">Setup Complete</p>
           <h1>Congratulations, your hospital is ready.</h1>
-          <p className="setup-copy">Thank you for setting up Medilink HMIS. Use the Hospital Admin credentials you created to login and continue configuring users, modules, billing, wards, integrations, and go-live readiness.</p>
-          <button type="button" className="splash-btn-primary" onClick={() => onComplete(setupResult || {}, values)}>Continue to Admin Login</button>
+          <p className="setup-copy">
+            Thank you for setting up Medilink HMIS. Use the Hospital Admin credentials you created to login and continue configuring users, modules, billing, wards, integrations, and go-live readiness.
+          </p>
+          <button type="button" className="splash-btn-primary" onClick={() => onComplete(setupResult || {}, values)}>
+            Continue to Admin Login
+            <ChevronRight size={17} />
+          </button>
         </section>
       </div>
     );
   }
+
+  const StepIcon = step.icon;
 
   return (
     <div className={`splash-root landing-theme-${landingTheme}`}>
@@ -5403,33 +5490,58 @@ function FirstTimeSetupScreen({
       <div className="splash-glow splash-glow-2" />
       <main className="setup-landing-shell">
         <header className="setup-landing-header">
-          <img src="/Loginlogo.png" alt="MediLink HMIS" className="auth-title-logo" />
-          <div>
-            <p className="setup-eyebrow">First-Time Hospital Registration</p>
-            <h1>Complete Medilink HMIS Setup</h1>
-            <p className="setup-copy">A short guided setup for the Hospital Admin. Advanced configuration stays inside HMIS after login.</p>
+          <div className="setup-brand-lockup">
+            <img src="/Loginlogo.png" alt="MediLink HMIS" className="auth-title-logo" />
+            <span>Hospital information, beautifully connected.</span>
           </div>
-          <div className="setup-progress"><span>{completion}%</span><div><i style={{ width: `${completion}%` }} /></div></div>
+          <div className="setup-heading-copy">
+            <p className="setup-eyebrow">First-time hospital registration</p>
+            <h1>Build your facility workspace</h1>
+            <p className="setup-copy">A guided setup for the Hospital Admin. You can refine advanced clinical, financial, and operational settings after signing in.</p>
+          </div>
+          <div className="setup-verified-badge"><CheckCircle2 size={17} /><span>License verified</span></div>
         </header>
-        <div className="setup-pill-row">
-          {desktopSetupSteps.map((item, index) => (
-            <button key={item.title} type="button" className={index === activeStep ? "setup-pill is-active" : "setup-pill"} onClick={() => setActiveStep(index)}>
-              <Icon type={item.icon} size={16} /><span>{item.title}</span>
-            </button>
-          ))}
+
+        <div className="setup-workspace">
+          <aside className="setup-step-rail" aria-label="Setup steps">
+            <div className="setup-rail-intro"><span>SETUP JOURNEY</span><strong>{activeStep + 1} <i>/ {desktopSetupSteps.length}</i></strong></div>
+            <nav>
+              {desktopSetupSteps.map((item, index) => {
+                const Icon = item.icon;
+                const isComplete = index < activeStep;
+                return (
+                  <button key={item.title} type="button" className={`setup-rail-step ${index === activeStep ? "is-active" : ""} ${isComplete ? "is-complete" : ""}`} onClick={() => setActiveStep(index)}>
+                    <span className="setup-step-number">{isComplete ? <CheckCircle2 size={15} /> : index + 1}</span>
+                    <span className="setup-rail-label"><b>{item.title}</b><small>{item.subtitle}</small></span>
+                    <Icon className="setup-rail-icon" size={17} />
+                  </button>
+                );
+              })}
+            </nav>
+            <div className="setup-rail-footer"><span>Configuration progress</span><strong>{completion}%</strong><div className="setup-progress"><i style={{ width: `${completion}%` }} /></div></div>
+          </aside>
+
+          <form className="setup-form-card" onSubmit={(event) => { event.preventDefault(); void goNext(); }}>
+            <div className="setup-form-topline"><span>STEP {String(activeStep + 1).padStart(2, "0")}</span><span>{activeStep === desktopSetupSteps.length - 1 ? "Final review" : "In progress"}</span></div>
+            <div className="setup-panel-heading">
+              <div className="setup-panel-icon"><StepIcon className="setup-panel-svg" size={24} /></div>
+              <div><h2>{step.title}</h2><span>{step.subtitle}</span></div>
+            </div>
+
+            <div className="setup-field-grid">{step.fields.map(renderField)}</div>
+            {error ? <div className="auth-error" role="alert">{error}</div> : null}
+
+            <div className="setup-actions">
+              <button type="button" className="splash-btn-secondary" onClick={() => activeStep === 0 ? onBack() : setActiveStep((value) => Math.max(0, value - 1))} disabled={submitting}>
+                <ChevronLeft size={17} />Back
+              </button>
+              <button type="submit" className="splash-btn-primary" disabled={submitting}>
+                {submitting ? "Saving Setup..." : activeStep === desktopSetupSteps.length - 1 ? "Finish Setup" : "Continue"}
+                <ChevronRight size={17} />
+              </button>
+            </div>
+          </form>
         </div>
-        <form className="setup-form-card" onSubmit={(event) => { event.preventDefault(); void goNext(); }}>
-          <div className="setup-panel-heading">
-            <div className="setup-panel-icon"><Icon type={step.icon} size={24} /></div>
-            <div><p>Step {activeStep + 1} of {desktopSetupSteps.length}</p><h2>{step.title}</h2><span>{step.subtitle}</span></div>
-          </div>
-          <div className="setup-field-grid">{step.fields.map(renderField)}</div>
-          {error ? <div className="auth-error">{error}</div> : null}
-          <div className="setup-actions">
-            <button type="button" className="splash-btn-secondary" onClick={() => activeStep === 0 ? onBack() : setActiveStep((value) => Math.max(0, value - 1))}>Back</button>
-            <button type="submit" className="splash-btn-primary" disabled={submitting}>{submitting ? "Saving..." : activeStep === desktopSetupSteps.length - 1 ? "Finish Setup" : "Continue"}</button>
-          </div>
-        </form>
       </main>
     </div>
   );
@@ -5450,34 +5562,95 @@ function HospitalLoginScreen({
   password: string;
   setEmail: (v: string) => void;
   setPassword: (v: string) => void;
-  onSubmit: (e: React.FormEvent) => void;
+  onSubmit: (e: React.FormEvent, otp?: string) => void;
   onBack: () => void;
   error: string;
   loading: boolean;
   landingTheme: "enterprise" | "clinical" | "luxury";
 }) {
   const [showPassword, setShowPassword] = useState(false);
+  const [otp, setOtp] = useState("");
+  const [mfaSecret, setMfaSecret] = useState("");
+  const [mfaUrl, setMfaUrl] = useState("");
+  const [localError, setLocalError] = useState("");
+  const [submittingMfa, setSubmittingMfa] = useState(false);
+
+  const setupMfa = async () => {
+    setLocalError("");
+    setMfaSecret("");
+    setMfaUrl("");
+    if (!email.trim() || !password) {
+      setLocalError("Enter your email and password first, then set up MFA.");
+      return;
+    }
+    setSubmittingMfa(true);
+    try {
+      const response = await api.post("/auth/mfa/bootstrap", {
+        email: email.trim().toLowerCase(),
+        password,
+      });
+      if (response.data?.enrolled) {
+        setLocalError("MFA is already enrolled. Enter your authenticator code to login.");
+      } else if (response.data?.secret) {
+        setMfaSecret(response.data.secret);
+        setMfaUrl(response.data.otpauthUrl || "");
+      } else {
+        setLocalError("MFA is not required for this account.");
+      }
+    } catch (mfaError: any) {
+      setLocalError(mfaError?.response?.data?.message || mfaError?.message || "MFA setup failed.");
+    } finally {
+      setSubmittingMfa(false);
+    }
+  };
+
+  const confirmMfa = async () => {
+    setLocalError("");
+    if (!email.trim() || !otp.trim()) {
+      setLocalError("Enter your authenticator code to confirm MFA.");
+      return;
+    }
+    setSubmittingMfa(true);
+    try {
+      await api.post("/auth/mfa/confirm", {
+        email: email.trim().toLowerCase(),
+        otp: otp.trim(),
+      });
+      setMfaSecret("");
+      setMfaUrl("");
+      setLocalError("MFA enabled. Click Login to continue.");
+    } catch (mfaError: any) {
+      setLocalError(mfaError?.response?.data?.message || mfaError?.message || "MFA confirmation failed.");
+    } finally {
+      setSubmittingMfa(false);
+    }
+  };
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    onSubmit(e, otp.trim() || undefined);
+  };
 
   return (
     <div className={`splash-root landing-theme-${landingTheme}`}>
       <div className="splash-glow splash-glow-1" />
       <div className="splash-glow splash-glow-2" />
-      <form className="auth-card auth-login" onSubmit={onSubmit}>
+      <form className="auth-card auth-login" onSubmit={handleSubmit}>
         <img
           src="/Loginlogo.png"
           alt="MediLink HMIS"
           className="auth-title-logo"
         />
-        <p>Login with the Hospital Admin account created during registration.</p>
-        {error && <div className="auth-error">{error}</div>}
+        <p>Login with the Hospital Admin account created during onboarding.</p>
         <label>
           Admin Email
           <input
             className="auth-input"
             type="email"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
             required
+            value={email}
+            onChange={(event) => setEmail(event.target.value)}
+            autoComplete="username"
           />
         </label>
         <label>
@@ -5486,27 +5659,54 @@ function HospitalLoginScreen({
             <input
               className="auth-input"
               type={showPassword ? "text" : "password"}
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
               required
+              value={password}
+              onChange={(event) => setPassword(event.target.value)}
               autoComplete="current-password"
             />
             <button
               type="button"
               className="auth-password-toggle"
-              onClick={() => setShowPassword((v) => !v)}
+              onClick={() => setShowPassword((value) => !value)}
               aria-label={showPassword ? "Hide password" : "Show password"}
             >
               {showPassword ? "Hide" : "Show"}
             </button>
           </div>
         </label>
+        <label>
+          MFA Code
+          <input
+            className="auth-input"
+            type="text"
+            inputMode="numeric"
+            value={otp}
+            onChange={(event) => setOtp(event.target.value)}
+            autoComplete="one-time-code"
+            placeholder="6-digit authenticator code"
+          />
+        </label>
+        {mfaSecret ? (
+          <div className="auth-mfa-panel">
+            <strong>Set up MFA</strong>
+            <span>Add this secret to Google Authenticator or Microsoft Authenticator:</span>
+            <code>{mfaSecret}</code>
+            {mfaUrl ? <a href={mfaUrl}>Open authenticator setup link</a> : null}
+            <button type="button" className="splash-btn-secondary" onClick={confirmMfa} disabled={submittingMfa}>
+              Confirm MFA Code
+            </button>
+          </div>
+        ) : null}
+        {(error || localError) && <div className="auth-error">{error || localError}</div>}
         <div className="auth-actions">
           <button type="button" className="splash-btn-secondary" onClick={onBack}>
             Back
           </button>
+          <button type="button" className="splash-btn-secondary" onClick={setupMfa} disabled={loading || submittingMfa}>
+            Set up MFA
+          </button>
           <button type="submit" className="splash-btn-primary" disabled={loading}>
-            {loading ? "Signing in..." : "Login"}
+            {loading ? "Logging in..." : "Login"}
           </button>
         </div>
       </form>
@@ -5529,37 +5729,98 @@ function StaffLoginScreen({
   password: string;
   setEmail: (v: string) => void;
   setPassword: (v: string) => void;
-  onSubmit: (e: React.FormEvent) => void;
+  onSubmit: (e: React.FormEvent, otp?: string) => void;
   onBack: () => void;
   error: string;
   loading: boolean;
   landingTheme: "enterprise" | "clinical" | "luxury";
 }) {
   const [showPassword, setShowPassword] = useState(false);
+  const [otp, setOtp] = useState("");
+  const [mfaSecret, setMfaSecret] = useState("");
+  const [mfaUrl, setMfaUrl] = useState("");
+  const [localError, setLocalError] = useState("");
+  const [submittingMfa, setSubmittingMfa] = useState(false);
+
+  const setupMfa = async () => {
+    setLocalError("");
+    setMfaSecret("");
+    setMfaUrl("");
+    if (!email.trim() || !password) {
+      setLocalError("Enter your staff email and password first, then set up MFA.");
+      return;
+    }
+    setSubmittingMfa(true);
+    try {
+      const response = await api.post("/auth/mfa/bootstrap", {
+        email: email.trim().toLowerCase(),
+        password,
+      });
+      if (response.data?.enrolled) {
+        setLocalError("MFA is already enrolled. Enter your authenticator code to login.");
+      } else if (response.data?.secret) {
+        setMfaSecret(response.data.secret);
+        setMfaUrl(response.data.otpauthUrl || "");
+      } else {
+        setLocalError("MFA is not required for this account.");
+      }
+    } catch (mfaError: any) {
+      setLocalError(mfaError?.response?.data?.message || mfaError?.message || "MFA setup failed.");
+    } finally {
+      setSubmittingMfa(false);
+    }
+  };
+
+  const confirmMfa = async () => {
+    setLocalError("");
+    if (!email.trim() || !otp.trim()) {
+      setLocalError("Enter your authenticator code to confirm MFA.");
+      return;
+    }
+    setSubmittingMfa(true);
+    try {
+      await api.post("/auth/mfa/confirm", {
+        email: email.trim().toLowerCase(),
+        otp: otp.trim(),
+      });
+      setMfaSecret("");
+      setMfaUrl("");
+      setLocalError("MFA enabled. Click Login to continue.");
+    } catch (mfaError: any) {
+      setLocalError(mfaError?.response?.data?.message || mfaError?.message || "MFA confirmation failed.");
+    } finally {
+      setSubmittingMfa(false);
+    }
+  };
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    onSubmit(e, otp.trim() || undefined);
+  };
 
   return (
     <div className={`splash-root landing-theme-${landingTheme}`}>
       <div className="splash-glow splash-glow-1" />
       <div className="splash-glow splash-glow-2" />
-      <form className="auth-card auth-login" onSubmit={onSubmit}>
+      <form className="auth-card auth-login" onSubmit={handleSubmit}>
         <img
           src="/Loginlogo.png"
           alt="MediLink HMIS"
           className="auth-title-logo"
         />
         <p>
-          Doctors, nurses, lab, pharmacy, and cashiers login here using accounts
-          created by Hospital Admin in User Management.
+          Hospital Admins and clinical staff can sign in here using their MediLink
+          account credentials.
         </p>
-        {error && <div className="auth-error">{error}</div>}
         <label>
-          Staff Email
+          Staff or Admin Email
           <input
             className="auth-input"
             type="email"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
             required
+            value={email}
+            onChange={(event) => setEmail(event.target.value)}
+            autoComplete="username"
           />
         </label>
         <label>
@@ -5568,27 +5829,54 @@ function StaffLoginScreen({
             <input
               className="auth-input"
               type={showPassword ? "text" : "password"}
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
               required
+              value={password}
+              onChange={(event) => setPassword(event.target.value)}
               autoComplete="current-password"
             />
             <button
               type="button"
               className="auth-password-toggle"
-              onClick={() => setShowPassword((v) => !v)}
+              onClick={() => setShowPassword((value) => !value)}
               aria-label={showPassword ? "Hide password" : "Show password"}
             >
               {showPassword ? "Hide" : "Show"}
             </button>
           </div>
         </label>
+        <label>
+          MFA Code
+          <input
+            className="auth-input"
+            type="text"
+            inputMode="numeric"
+            value={otp}
+            onChange={(event) => setOtp(event.target.value)}
+            autoComplete="one-time-code"
+            placeholder="6-digit authenticator code"
+          />
+        </label>
+        {mfaSecret ? (
+          <div className="auth-mfa-panel">
+            <strong>Set up MFA</strong>
+            <span>Add this secret to Google Authenticator or Microsoft Authenticator:</span>
+            <code>{mfaSecret}</code>
+            {mfaUrl ? <a href={mfaUrl}>Open authenticator setup link</a> : null}
+            <button type="button" className="splash-btn-secondary" onClick={confirmMfa} disabled={submittingMfa}>
+              Confirm MFA Code
+            </button>
+          </div>
+        ) : null}
+        {(error || localError) && <div className="auth-error">{error || localError}</div>}
         <div className="auth-actions">
           <button type="button" className="splash-btn-secondary" onClick={onBack}>
             Back
           </button>
+          <button type="button" className="splash-btn-secondary" onClick={setupMfa} disabled={loading || submittingMfa}>
+            Set up MFA
+          </button>
           <button type="submit" className="splash-btn-primary" disabled={loading}>
-            {loading ? "Signing in..." : "Login"}
+            {loading ? "Logging in..." : "Login"}
           </button>
         </div>
       </form>
@@ -5615,19 +5903,6 @@ function LicenseActivationScreen({
   status: LicenseState | null;
   landingTheme: "enterprise" | "clinical" | "luxury";
 }) {
-  const statusLabel = status?.status
-    ? String(status.status).toUpperCase()
-    : status?.active
-      ? "ACTIVE"
-      : "INACTIVE";
-  const expiryText = status?.expiresAt
-    ? new Date(status.expiresAt).toLocaleDateString("en-KE", {
-        year: "numeric",
-        month: "short",
-        day: "numeric",
-      })
-    : "";
-
   return (
     <div className={`splash-root landing-theme-${landingTheme}`}>
       <div className="splash-glow splash-glow-1" />
@@ -5638,21 +5913,15 @@ function LicenseActivationScreen({
           alt="MediLink HMIS"
           className="auth-title-logo"
         />
-        <p>
-          Enter your 16-character HMIS license key to activate this facility.
-        </p>
-        {status && (
-          <div className={`license-info license-${statusLabel.toLowerCase()}`}>
-            <div>
-              <strong>Status:</strong> {statusLabel}
-            </div>
-            {expiryText && (
-              <div>
-                <strong>Expires:</strong> {expiryText}
-              </div>
-            )}
+        <p>Enter the HMIS license key issued from the MediLink HMIS Org.</p>
+        <div className="license-info">
+          <div>
+            <strong>Source:</strong> Only keys issued from the MediLink HMIS Org are accepted.
           </div>
-        )}
+          <div>
+            <strong>Format:</strong> 8 blocks of 4 characters.
+          </div>
+        </div>
         {error && <div className="auth-error">{error}</div>}
         <label>
           License Key
@@ -5660,16 +5929,16 @@ function LicenseActivationScreen({
             className="auth-input"
             value={licenseKey}
             onChange={(e) => setLicenseKey(e.target.value)}
-            placeholder="XXXX-XXXX-XXXX-XXXX"
+            placeholder="XXXX-XXXX-XXXX-XXXX-XXXX-XXXX-XXXX-XXXX"
             required
           />
         </label>
         <div className="auth-actions">
           <button type="button" className="splash-btn-secondary" onClick={onBack}>
-            Back to Login
+            Back
           </button>
           <button type="submit" className="splash-btn-primary" disabled={loading}>
-            {loading ? "Activating..." : "Activate License"}
+            {loading ? "Verifying..." : "Verify License"}
           </button>
         </div>
         <div className="auth-link-row">
@@ -8568,7 +8837,7 @@ export default function App() {
     }
   };
 
-  const handleHospitalAdminLogin = async (e: React.FormEvent) => {
+  const handleHospitalAdminLogin = async (e: React.FormEvent, otp?: string) => {
     e.preventDefault();
     const raw = localStorage.getItem(ACCOUNT_STORAGE_KEY);
     let saved: FacilityRegistration | null = null;
@@ -8586,6 +8855,7 @@ export default function App() {
         email: loginEmail.trim(),
         password: loginPassword,
         audience: "hospital_admin",
+        otp: otp || undefined,
       })) as any;
 
       const token = getAccessToken();
@@ -8728,13 +8998,14 @@ export default function App() {
     }
   };
 
-  const handleStaffLogin = async (e: React.FormEvent) => {
+  const handleStaffLogin = async (e: React.FormEvent, otp?: string) => {
     e.preventDefault();
     setAuthLoading(true);
     try {
       const loginResponse = (await loginStaff({
         email: loginEmail.trim(),
         password: loginPassword,
+        otp: otp || undefined,
       })) as any;
 
       const token = getAccessToken();
