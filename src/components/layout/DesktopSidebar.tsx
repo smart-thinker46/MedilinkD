@@ -1,13 +1,11 @@
-import React, { useMemo, useState, useEffect } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import {
   AlertTriangle,
-  ArrowRightLeft,
-  Briefcase,
+  Bot,
+  Building2,
   Cable,
   CalendarClock,
   CheckCircle2,
-  ChevronDown,
-  ChevronRight,
   ClipboardList,
   Crown,
   Droplets,
@@ -16,7 +14,6 @@ import {
   GraduationCap,
   Handshake,
   HeartPulse,
-  HelpCircle,
   IdCard,
   ListChecks,
   MapPin,
@@ -24,7 +21,6 @@ import {
   Navigation,
   PanelLeftClose,
   PanelLeftOpen,
-  Search,
   Send,
   Settings2,
   ShieldAlert,
@@ -33,146 +29,430 @@ import {
   Users,
   UserX,
   Volume2,
-  X,
 } from "lucide-react";
-import { MODULE_CATALOG, MODULE_SECTIONS, type ModuleCatalogItem } from "../../lib/moduleCatalog";
+import { MODULE_CATALOG } from "../../lib/moduleCatalog";
 import { apiFetch } from "../../lib/apiClient";
+import { useAppStore } from "../../store/appStore";
 
 type DesktopSidebarProps = {
   collapsed: boolean;
   onToggleCollapsed: () => void;
+  onRequestCollapse?: () => void;
   activeNav: number;
   activeWorkflowModuleId: number | null;
-  onNavigateModule: (moduleId: number) => void;
   onNavigateNav: (navIndex: number) => void;
-  userRole?: string;
-  allowedModuleIds: Set<number>;
-  facilityName: string;
-  facilityLogo: string | null;
+  onNavigateUpgrade: () => void;
   onOpenHelpAi: () => void;
+  facilityName?: string;
+  facilityLogo?: string | null;
 };
 
-const orderReceivingModules: Record<number, string> = {
-  2: "INPATIENT",
-  8: "LABORATORY",
-  9: "RADIOLOGY",
-  10: "PHARMACY",
+const patientWorkspaceTools = [
+  { id: "monitor", label: "Monitor Patient", icon: ClipboardList },
+  { id: "duplicates", label: "Duplicate Review", icon: AlertTriangle },
+  { id: "identity-card", label: "ID Card / QR", icon: IdCard },
+  { id: "documents", label: "Patient Documents", icon: FileText },
+  { id: "audit", label: "Identity Audit", icon: ShieldCheck },
+  { id: "status", label: "Lifecycle Status", icon: ListChecks },
+  { id: "vulnerability", label: "Vulnerability Flags", icon: HeartPulse },
+  { id: "merge", label: "Patient Merge", icon: GitMerge },
+] as const;
+
+const appointmentWorkspaceTools = [
+  { id: "recurring", label: "Recurring Series", icon: CalendarClock },
+  { id: "waitlist", label: "Release Waitlist", icon: ListChecks },
+  { id: "no-show", label: "Mark No-Show", icon: UserX },
+] as const;
+
+const communityHealthWorkspaceTools = [
+  { id: "chw", label: "Register CHW", icon: Users },
+  { id: "visit", label: "Log Field Visit", icon: ClipboardList },
+  { id: "referral", label: "Issue Referral", icon: Send },
+  { id: "attendance", label: "Referral Feedback", icon: Handshake },
+  { id: "surveillance", label: "Surveillance Return", icon: ShieldAlert },
+  { id: "operations", label: "Operational Registers", icon: Settings2 },
+] as const;
+
+const homeCareWorkspaceTools = [
+  { id: "dispatch", label: "Dispatch Route", icon: Navigation },
+  { id: "checkin", label: "GPS Check In", icon: MapPin },
+  { id: "checkout", label: "Complete Visit", icon: CheckCircle2 },
+  { id: "visitStatus", label: "Visit Status", icon: ListChecks },
+  { id: "escalation", label: "Escalate Patient", icon: AlertTriangle },
+  { id: "operation", label: "Care Records", icon: ClipboardList },
+] as const;
+
+const opdWorkspaceTools = [
+  { id: "monitor-patient", label: "Monitor Patient", icon: ClipboardList },
+  { id: "queue-patient", label: "Queue Patient", icon: Send },
+  { id: "orders", label: "Orders", icon: ShoppingCart },
+] as const;
+
+const orderReceivingModules: Record<string, string> = {
+  ipd: "INPATIENT",
+  lab: "LABORATORY",
+  radiology: "RADIOLOGY",
+  pharmacy: "PHARMACY",
+};
+
+const ipdWorkspaceTools = [
+  { id: "monitor-patient", label: "Monitor Patient", icon: ClipboardList },
+  { id: "queue-patient", label: "Queue Patient", icon: Send },
+] as const;
+
+const emergencyWorkspaceTools = [
+  { id: "monitor-patient", label: "Monitor Patient", icon: ClipboardList },
+  { id: "queue-patient", label: "Queue Patient", icon: Send },
+] as const;
+
+const maternityWorkspaceTools = [
+  { id: "monitor-patient", label: "Monitor Patient", icon: ClipboardList },
+  { id: "queue-patient", label: "Queue Patient", icon: Send },
+] as const;
+
+const icuWorkspaceTools = [
+  { id: "monitor-patient", label: "Monitor Patient", icon: ClipboardList },
+  { id: "queue-patient", label: "Queue Patient", icon: Send },
+] as const;
+
+const nicuWorkspaceTools = [
+  { id: "monitor-patient", label: "Monitor Patient", icon: ClipboardList },
+  { id: "queue-patient", label: "Queue Patient", icon: Send },
+] as const;
+
+const otWorkspaceTools = [
+  { id: "monitor-patient", label: "Monitor Patient", icon: ClipboardList },
+  { id: "queue-patient", label: "Queue Patient", icon: Send },
+] as const;
+
+const laboratoryWorkspaceTools = [
+  { id: "monitor-patient", label: "Monitor Patient", icon: ClipboardList },
+  { id: "queue-patient", label: "Queue Patient", icon: Send },
+] as const;
+
+const radiologyWorkspaceTools = [
+  { id: "monitor-patient", label: "Monitor Patient", icon: ClipboardList },
+  { id: "queue-patient", label: "Queue Patient", icon: Send },
+] as const;
+
+const pharmacyWorkspaceTools = [
+  { id: "monitor-patient", label: "Monitor Patient", icon: ClipboardList },
+  { id: "queue-patient", label: "Queue Patient", icon: Send },
+] as const;
+
+const bloodBankWorkspaceTools = [
+  { id: "monitor-patient", label: "Monitor Patient", icon: ClipboardList },
+  { id: "queue-patient", label: "Queue Patient", icon: Send },
+  { id: "donor-registration", label: "Donor Registration", icon: Users },
+  { id: "record-donation", label: "Record Donation", icon: Droplets },
+  { id: "blood-request", label: "Blood Request", icon: ClipboardList },
+] as const;
+
+const queueWorkspaceTools = [
+  { id: "monitor-patients", label: "Monitor Patients", icon: ClipboardList },
+  { id: "voice-call-token", label: "Voice Call Token", icon: Volume2 },
+  { id: "call-next-patient", label: "Call Next Patient", icon: Megaphone },
+] as const;
+
+const nursingWorkspaceTools = [
+  { id: "monitor-patient", label: "Monitor Patient", icon: ClipboardList },
+  { id: "queue-patient", label: "Queue Patient", icon: Send },
+  { id: "handover", label: "Nursing Handover", icon: Handshake },
+  { id: "fluid", label: "Fluid Balance Chart", icon: Droplets },
+  { id: "braden", label: "Pressure Injury Braden Scale", icon: ShieldAlert },
+] as const;
+
+const physiotherapyWorkspaceTools = [
+  { id: "monitor-patient", label: "Monitor Patient", icon: ClipboardList },
+  { id: "queue-patient", label: "Queue Patient", icon: Send },
+] as const;
+
+const nutritionWorkspaceTools = [
+  { id: "monitor-patient", label: "Monitor Patient", icon: ClipboardList },
+  { id: "queue-patient", label: "Queue Patient", icon: Send },
+] as const;
+
+const dentalWorkspaceTools = [
+  { id: "monitor-patient", label: "Monitor Patient", icon: ClipboardList },
+  { id: "queue-patient", label: "Queue Patient", icon: Send },
+] as const;
+
+const paediatricsWorkspaceTools = [
+  { id: "monitor-patient", label: "Monitor Patient", icon: ClipboardList },
+  { id: "queue-patient", label: "Queue Patient", icon: Send },
+] as const;
+
+const infectionControlWorkspaceTools = [
+  { id: "monitor-patient", label: "Monitor Patient", icon: ClipboardList },
+  { id: "queue-patient", label: "Queue Patient", icon: Send },
+] as const;
+
+const biomedicalWorkspaceTools = [
+  { id: "calibration", label: "Calibration", icon: Settings2 },
+  { id: "interface", label: "Analyser Interface", icon: Cable },
+  { id: "training", label: "Equipment Training", icon: GraduationCap },
+  { id: "recall", label: "Device Recall", icon: ShieldAlert },
+  { id: "safety", label: "Safety Hold", icon: ShieldAlert },
+  { id: "commission", label: "Commission Device", icon: ListChecks },
+  { id: "transfer", label: "Transfer Device", icon: GitMerge },
+  { id: "incident", label: "Report Incident", icon: AlertTriangle },
+] as const;
+
+const normalizeQueueDepartmentId = (value: string) =>
+  value
+    .toUpperCase()
+    .replace(/&/g, " AND ")
+    .replace(/[^A-Z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "")
+    .slice(0, 48);
+
+const moduleQueueDepartmentOverride: Record<string, string> = {
+  appointments: "APPOINTMENTS",
+  outpatient: "OPD",
+  "outpatient / opd": "OPD",
+  emergency: "EMERGENCY",
+  laboratory: "LABORATORY",
+  radiology: "RADIOLOGY",
+  pharmacy: "PHARMACY",
+  billing: "BILLING",
+  inpatient: "INPATIENT",
+  maternity: "MATERNITY",
+  icu: "ICU",
+  nicu: "NICU",
+  nursing: "NURSING",
+  "nursing admin": "NURSING",
+  dental: "DENTAL",
+  paediatrics: "PAEDIATRICS",
+  physiotherapy: "PHYSIOTHERAPY",
+  "physiotherapy & rehabilitation": "PHYSIOTHERAPY",
+  "nutrition & dietetics": "NUTRITION",
+  "infection control & cssd": "INFECTION_CONTROL",
+  "operating theatre": "THEATRE",
+};
+
+const nonPatientQueueModules = new Set([
+  "hr",
+  "payroll",
+  "doctors",
+  "workforce-planning",
+  "revenue",
+  "accounting",
+  "cost-accounting",
+  "biomedical",
+  "reports",
+  "executive",
+  "blockchain",
+  "users",
+  "patient-portal",
+  "portal",
+  "ict",
+  "integrations",
+  "migration",
+  "operations",
+  "community-health",
+]);
+
+const moduleQueueConfig: Record<string, { departmentId: string; label: string }> = MODULE_CATALOG
+  .filter((module) => module.id !== 1 && !nonPatientQueueModules.has(module.path.replace(/^\//, "").replace(/\//g, "-")))
+  .reduce<Record<string, { departmentId: string; label: string }>>((acc, module) => {
+    const moduleKey = module.path.replace(/^\//, "").replace(/\//g, "-");
+    const nameKey = module.name.toLowerCase();
+    acc[moduleKey] = {
+      departmentId: moduleQueueDepartmentOverride[nameKey] || normalizeQueueDepartmentId(module.name),
+      label: "Open Waiting List",
+    };
+    return acc;
+  }, {});
+
+const navToModuleKeyMap: Record<number, string> = {
+  0: "",
+  1: "patients",
+  2: "opd",
+  3: "appointments",
+  4: "ehr",
+  5: "nursing",
+  6: "wards",
+  7: "lab",
+  8: "radiology",
+  9: "billing",
+  10: "pharmacy",
+  11: "inventory",
+  12: "settings",
+  13: "facilities",
+  14: "insurance",
+  15: "procurement",
+  16: "hr",
+  17: "doctors",
+  18: "facilities",
+  19: "analytics",
+  20: "users",
+  21: "telemedicine",
+  22: "blockchain",
+  24: "portal",
+  25: "emergency",
+  26: "ambulance",
+  27: "mortuary",
+  28: "queue",
+  29: "helpdesk",
+  30: "canteen",
+  31: "feedback",
+  33: "quality-assurance",
+  34: "integrations",
+  35: "reports",
+  36: "icu",
+  37: "maternity",
+  38: "nicu",
+  39: "dental",
+  41: "cdss",
+  42: "migration",
+  43: "ot",
+  44: "physiotherapy",
+  45: "nutrition",
+  46: "paediatrics",
+  47: "infection-control",
+  48: "blood-bank",
+  49: "biomedical",
+  50: "pharmacy",
+};
+
+const formatModuleName = (moduleKey: string) =>
+  moduleKey
+    .split("-")
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+
+const readPatientModuleState = () => {
+  if (typeof window === "undefined") {
+    return { hasCheckedInPatient: false, isQueued: false };
+  }
+  try {
+    const states = JSON.parse(window.localStorage.getItem("hmis_patient_module_states") || "{}");
+    return states?.patients || { hasCheckedInPatient: false, isQueued: false };
+  } catch {
+    return { hasCheckedInPatient: false, isQueued: false };
+  }
 };
 
 export function DesktopSidebar({
   collapsed,
   onToggleCollapsed,
+  onRequestCollapse,
   activeNav,
   activeWorkflowModuleId,
-  onNavigateModule,
   onNavigateNav,
-  userRole = "Hospital Admin",
-  allowedModuleIds,
-  facilityName,
-  facilityLogo,
+  onNavigateUpgrade,
   onOpenHelpAi,
+  facilityName = "Hospital Facility",
+  facilityLogo = null,
 }: DesktopSidebarProps) {
-  const [search, setSearch] = useState("");
-  const [openSections, setOpenSections] = useState<Record<string, boolean>>({
-    "Patient Journey": true,
-    Clinical: true,
-    Administration: false,
-    "Technology & Intelligence": false,
-    "Support Services": false,
-  });
-  const [sidebarWaitingCount, setSidebarWaitingCount] = useState(0);
+  const { facility } = useAppStore();
+  const [waitingCount, setWaitingCount] = useState(0);
+  const [orderCount, setOrderCount] = useState(0);
+  const [patientModuleState, setPatientModuleState] = useState<any>(() => readPatientModuleState());
 
-  // Active module determination
-  const activeModuleItem = useMemo(() => {
+  const moduleKey = useMemo(() => {
     if (activeWorkflowModuleId) {
-      return MODULE_CATALOG.find((m) => m.id === activeWorkflowModuleId) || null;
+      const mod = MODULE_CATALOG.find((m) => m.id === activeWorkflowModuleId);
+      if (mod) return mod.path.replace(/^\//, "").replace(/\//g, "-");
     }
-    const navToModuleMap: Record<number, number> = {
-      1: 1,   // Patients
-      3: 4,   // Appointments
-      4: 6,   // EHR
-      5: 7,   // Nursing
-      6: 5,   // Wards
-      7: 8,   // Lab
-      8: 9,   // Radiology
-      9: 13,  // Billing
-      10: 10, // Pharmacy
-      11: 15, // Inventory
-      14: 14, // Insurance
-      15: 15, // Procurement
-      16: 16, // HR
-      17: 17, // Doctor
-      18: 18, // Facility
-      19: 19, // Analytics
-      20: 20, // Users
-      21: 21, // Telemedicine
-      22: 22, // Blockchain
-      23: 23, // AI Suite
-      24: 24, // Patient Portal
-      25: 25, // Emergency
-      26: 26, // Ambulance
-      27: 27, // Mortuary
-      28: 28, // Queue
-      29: 29, // Helpdesk
-      30: 30, // Canteen
-      31: 31, // Patient Feedback
-      33: 33, // QA
-      34: 34, // Integrations
-      42: 64, // Migration
-    };
-    const modId = navToModuleMap[activeNav];
-    return modId ? MODULE_CATALOG.find((m) => m.id === modId) || null : null;
+    return navToModuleKeyMap[activeNav] || "";
   }, [activeNav, activeWorkflowModuleId]);
 
-  const activeModuleId = activeModuleItem?.id || null;
+  const isModuleOpen = Boolean(moduleKey);
+  const activeModuleTitle = moduleKey ? formatModuleName(moduleKey) : "Current Module";
+  const waitingConfig = moduleQueueConfig[moduleKey];
+  const orderDestination = orderReceivingModules[moduleKey];
 
-  // Filter modules based on search and permissions
-  const filteredSections = useMemo(() => {
-    const q = search.trim().toLowerCase();
-    return MODULE_SECTIONS.map((section) => ({
-      layer: section.layer,
-      items: section.items.filter((item) => {
-        const matchesPermission = allowedModuleIds.size === 0 || allowedModuleIds.has(item.id);
-        const matchesSearch = !q || item.name.toLowerCase().includes(q);
-        return matchesPermission && matchesSearch;
-      }),
-    })).filter((section) => section.items.length > 0);
-  }, [search, allowedModuleIds]);
-
-  const toggleSection = (layer: string) => {
-    setOpenSections((prev) => ({ ...prev, [layer]: !prev[layer] }));
+  const collapseAfterAction = (action: () => void) => {
+    action();
+    if (isModuleOpen) onRequestCollapse?.();
   };
 
-  // Check waiting list count when activeModule changes
   useEffect(() => {
-    if (!activeModuleId) {
-      setSidebarWaitingCount(0);
-      return;
-    }
+    const handlePatientState = (event: Event) => {
+      setPatientModuleState((event as CustomEvent).detail || readPatientModuleState());
+    };
+    const syncPatientState = () => setPatientModuleState(readPatientModuleState());
+    window.addEventListener("hmis:patient-module-state", handlePatientState);
+    const timer = window.setInterval(syncPatientState, 1000);
+    return () => {
+      window.removeEventListener("hmis:patient-module-state", handlePatientState);
+      window.clearInterval(timer);
+    };
+  }, []);
+
+  // Waiting count
+  useEffect(() => {
     let cancelled = false;
-    const fetchWaiting = async () => {
+    const loadWaitingCount = async () => {
+      if (!waitingConfig) {
+        setWaitingCount(0);
+        return;
+      }
       try {
-        const res = await apiFetch(`/queue/board?moduleId=${activeModuleId}`);
-        const data = await res.json().catch(() => ({}));
-        if (!cancelled && typeof data?.waitingCount === "number") {
-          setSidebarWaitingCount(data.waitingCount);
-        }
+        const response = await apiFetch(`/outpatient/queue/board?departmentId=${waitingConfig.departmentId}`);
+        const data = await response.json().catch(() => null);
+        const tokens = Array.isArray(data?.tokens)
+          ? data.tokens
+          : Array.isArray(data?.data?.tokens)
+          ? data.data.tokens
+          : Array.isArray(data)
+          ? data
+          : [];
+        if (!cancelled) setWaitingCount(tokens.length);
       } catch {
-        if (!cancelled) setSidebarWaitingCount(0);
+        if (!cancelled) setWaitingCount(0);
       }
     };
-    void fetchWaiting();
+    void loadWaitingCount();
+    const handleQueued = () => void loadWaitingCount();
+    window.addEventListener("hmis:patient-queued", handleQueued);
     return () => {
       cancelled = true;
+      window.removeEventListener("hmis:patient-queued", handleQueued);
     };
-  }, [activeModuleId]);
+  }, [waitingConfig?.departmentId]);
 
-  const isHospitalAdmin = String(userRole).toLowerCase().includes("admin");
+  // Order count
+  useEffect(() => {
+    let cancelled = false;
+    const loadOrderCount = async () => {
+      if (!orderDestination) {
+        setOrderCount(0);
+        return;
+      }
+      try {
+        const response = await apiFetch(
+          `/orchestration/orders?destinationModule=${orderDestination}&status=ORDERED,SUBMITTED,ROUTED,RECEIVED,ACKNOWLEDGED,READY,SCHEDULED,IN_PROGRESS`
+        );
+        const data = await response.json().catch(() => null);
+        const rows = Array.isArray(data?.data) ? data.data : Array.isArray(data) ? data : [];
+        if (!cancelled) setOrderCount(rows.length);
+      } catch {
+        if (!cancelled) setOrderCount(0);
+      }
+    };
+    void loadOrderCount();
+    const refresh = () => void loadOrderCount();
+    window.addEventListener("hmis:clinical-order-created", refresh);
+    window.addEventListener("hmis:clinical-order-updated", refresh);
+    const timer = window.setInterval(refresh, 30000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+      window.removeEventListener("hmis:clinical-order-created", refresh);
+      window.removeEventListener("hmis:clinical-order-updated", refresh);
+    };
+  }, [orderDestination]);
+
+  const hospitalName = facilityName || facility?.name || "MediLink General Hospital";
+  const hospitalLogo = facilityLogo || "/MedilinkHMIS.png";
 
   return (
-    <aside className={`sidebar ${collapsed ? "sidebar-collapsed" : ""}`}>
+    <aside className={`sidebar custom-scrollbar ${collapsed ? "sidebar-collapsed" : ""}`}>
       {/* Brand Header */}
-      <div className="sidebar-brand-top brand">
+      <div className="sidebar-brand-top">
         <img
           src="/MedilinkHMIS.png"
           alt="Medilink HMIS"
@@ -191,271 +471,1193 @@ export function DesktopSidebar({
         </button>
       </div>
 
-      {/* Module Search Filter (when expanded) */}
-      {!collapsed && (
-        <div className="sidebar-search-container" style={{ padding: "8px 12px" }}>
-          <div
-            style={{
-              position: "relative",
-              display: "flex",
-              alignItems: "center",
-              background: "rgba(255, 255, 255, 0.08)",
-              borderRadius: "8px",
-              padding: "4px 8px",
-            }}
-          >
-            <Search size={14} style={{ color: "rgba(255, 255, 255, 0.6)", marginRight: 6 }} />
-            <input
-              type="text"
-              placeholder="Search modules..."
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              style={{
-                background: "transparent",
-                border: "none",
-                outline: "none",
-                color: "#ffffff",
-                fontSize: "0.78rem",
-                width: "100%",
-              }}
-            />
-            {search && (
+      {/* Module Workspace Navigation */}
+      <nav className="sidebar-form-section" aria-label="Module workspace">
+        {!collapsed && isModuleOpen && (
+          <div className="sidebar-section-heading">
+            <span>Workspace</span>
+            <small>{activeModuleTitle}</small>
+          </div>
+        )}
+
+        {moduleKey === "patients" ? (
+          <div className="sidebar-workspace-tools">
+            {patientWorkspaceTools.map(({ id, label, icon: Icon }) => (
+              <button
+                key={id}
+                type="button"
+                className="sidebar-workspace-btn"
+                title={label}
+                onClick={() =>
+                  collapseAfterAction(() =>
+                    window.dispatchEvent(
+                      new CustomEvent("hmis:patient-workspace-action", {
+                        detail: { action: id },
+                      })
+                    )
+                  )
+                }
+              >
+                <Icon size={16} />
+                {!collapsed && <span>{label}</span>}
+              </button>
+            ))}
+            {patientModuleState?.hasCheckedInPatient ? (
               <button
                 type="button"
-                onClick={() => setSearch("")}
-                style={{
-                  background: "none",
-                  border: "none",
-                  color: "rgba(255, 255, 255, 0.6)",
-                  cursor: "pointer",
-                  padding: 2,
-                }}
+                className="sidebar-workspace-btn"
+                title="Queue Patient"
+                onClick={() =>
+                  collapseAfterAction(() =>
+                    window.dispatchEvent(
+                      new CustomEvent("hmis:patient-workspace-action", {
+                        detail: { action: "queue" },
+                      })
+                    )
+                  )
+                }
               >
-                <X size={12} />
+                <Send size={16} />
+                {!collapsed && <span>Queue Patient</span>}
               </button>
+            ) : null}
+          </div>
+        ) : moduleKey === "opd" ? (
+          <div className="sidebar-workspace-tools">
+            {opdWorkspaceTools.map(({ id, label, icon: Icon }) => (
+              <button
+                key={id}
+                type="button"
+                className="sidebar-workspace-btn"
+                title={label}
+                onClick={() =>
+                  collapseAfterAction(() =>
+                    window.dispatchEvent(
+                      new CustomEvent("hmis:opd-sidebar-action", {
+                        detail: { action: id },
+                      })
+                    )
+                  )
+                }
+              >
+                <Icon size={16} />
+                {!collapsed && <span>{label}</span>}
+              </button>
+            ))}
+            <button
+              type="button"
+              className="sidebar-workspace-btn"
+              title="Open Waiting List"
+              onClick={() =>
+                collapseAfterAction(() =>
+                  window.dispatchEvent(
+                    new CustomEvent("hmis:opd-sidebar-action", {
+                      detail: { action: "open-waiting-list" },
+                    })
+                  )
+                )
+              }
+            >
+              <ListChecks size={16} />
+              {!collapsed && <span>Open Waiting List</span>}
+            </button>
+          </div>
+        ) : moduleKey === "emergency" ? (
+          <div className="sidebar-workspace-tools">
+            {emergencyWorkspaceTools.map(({ id, label, icon: Icon }, index) => (
+              <button
+                key={`${id}-${index}`}
+                type="button"
+                className="sidebar-workspace-btn"
+                title={label}
+                onClick={() =>
+                  collapseAfterAction(() =>
+                    window.dispatchEvent(
+                      new CustomEvent(
+                        id.includes("Form") ? "hmis:open-module-form" : "hmis:emergency-sidebar-action",
+                        {
+                          detail: id.includes("Form")
+                            ? { moduleKey, formName: id }
+                            : { action: id },
+                        }
+                      )
+                    )
+                  )
+                }
+              >
+                <Icon size={16} />
+                {!collapsed && <span>{label}</span>}
+              </button>
+            ))}
+            {waitingConfig ? (
+              <button
+                type="button"
+                className="sidebar-workspace-btn"
+                title={waitingConfig.label}
+                onClick={() =>
+                  collapseAfterAction(() =>
+                    window.dispatchEvent(
+                      new CustomEvent("hmis:open-module-waiting-list", {
+                        detail: {
+                          moduleKey,
+                          departmentId: waitingConfig.departmentId,
+                        },
+                      })
+                    )
+                  )
+                }
+              >
+                <Users size={16} />
+                {!collapsed && (
+                  <span>
+                    {waitingConfig.label}
+                    <small className="sidebar-waiting-count">{waitingCount}</small>
+                  </span>
+                )}
+              </button>
+            ) : null}
+          </div>
+        ) : moduleKey === "maternity" ? (
+          <div className="sidebar-workspace-tools">
+            {maternityWorkspaceTools.map(({ id, label, icon: Icon }) => (
+              <button
+                key={id}
+                type="button"
+                className="sidebar-workspace-btn"
+                title={label}
+                onClick={() =>
+                  collapseAfterAction(() =>
+                    window.dispatchEvent(
+                      new CustomEvent("hmis:maternity-sidebar-action", {
+                        detail: { action: id },
+                      })
+                    )
+                  )
+                }
+              >
+                <Icon size={16} />
+                {!collapsed && <span>{label}</span>}
+              </button>
+            ))}
+            {waitingConfig ? (
+              <button
+                type="button"
+                className="sidebar-workspace-btn"
+                title="Open Waiting List"
+                onClick={() =>
+                  collapseAfterAction(() =>
+                    window.dispatchEvent(
+                      new CustomEvent("hmis:open-module-waiting-list", {
+                        detail: { moduleKey, departmentId: waitingConfig.departmentId },
+                      })
+                    )
+                  )
+                }
+              >
+                <Users size={16} />
+                {!collapsed && (
+                  <span>
+                    Open Waiting List
+                    <small className="sidebar-waiting-count">{waitingCount}</small>
+                  </span>
+                )}
+              </button>
+            ) : null}
+          </div>
+        ) : moduleKey === "ipd" ? (
+          <div className="sidebar-workspace-tools">
+            {ipdWorkspaceTools.map(({ id, label, icon: Icon }) => (
+              <button
+                key={id}
+                type="button"
+                className="sidebar-workspace-btn"
+                title={label}
+                onClick={() =>
+                  collapseAfterAction(() =>
+                    window.dispatchEvent(
+                      new CustomEvent("hmis:ipd-sidebar-action", {
+                        detail: { action: id },
+                      })
+                    )
+                  )
+                }
+              >
+                <Icon size={16} />
+                {!collapsed && <span>{label}</span>}
+              </button>
+            ))}
+            <button
+              type="button"
+              className="sidebar-workspace-btn"
+              title="Orders"
+              onClick={() =>
+                collapseAfterAction(() =>
+                  window.dispatchEvent(
+                    new CustomEvent("hmis:open-module-orders", {
+                      detail: { destinationModule: "INPATIENT" },
+                    })
+                  )
+                )
+              }
+            >
+              <ShoppingCart size={16} />
+              {!collapsed && (
+                <span>
+                  Orders<small className="sidebar-waiting-count">{orderCount}</small>
+                </span>
+              )}
+            </button>
+            {waitingConfig ? (
+              <button
+                type="button"
+                className="sidebar-workspace-btn"
+                title={waitingConfig.label}
+                onClick={() =>
+                  collapseAfterAction(() =>
+                    window.dispatchEvent(
+                      new CustomEvent("hmis:open-module-waiting-list", {
+                        detail: { moduleKey, departmentId: waitingConfig.departmentId },
+                      })
+                    )
+                  )
+                }
+              >
+                <Users size={16} />
+                {!collapsed && (
+                  <span>
+                    {waitingConfig.label}
+                    <small className="sidebar-waiting-count">{waitingCount}</small>
+                  </span>
+                )}
+              </button>
+            ) : null}
+          </div>
+        ) : moduleKey === "appointments" ? (
+          <div className="sidebar-workspace-tools">
+            {appointmentWorkspaceTools.map(({ id, label, icon: Icon }) => (
+              <button
+                key={id}
+                type="button"
+                className="sidebar-workspace-btn"
+                title={label}
+                onClick={() =>
+                  collapseAfterAction(() =>
+                    window.dispatchEvent(
+                      new CustomEvent("hmis:appointment-sidebar-action", {
+                        detail: { action: id },
+                      })
+                    )
+                  )
+                }
+              >
+                <Icon size={16} />
+                {!collapsed && <span>{label}</span>}
+              </button>
+            ))}
+            {waitingConfig ? (
+              <button
+                type="button"
+                className="sidebar-workspace-btn"
+                title={waitingConfig.label}
+                onClick={() =>
+                  collapseAfterAction(() =>
+                    window.dispatchEvent(
+                      new CustomEvent("hmis:open-module-waiting-list", {
+                        detail: { moduleKey, departmentId: waitingConfig.departmentId },
+                      })
+                    )
+                  )
+                }
+              >
+                <Users size={16} />
+                {!collapsed && (
+                  <span>
+                    {waitingConfig.label}
+                    <small className="sidebar-waiting-count">{waitingCount}</small>
+                  </span>
+                )}
+              </button>
+            ) : null}
+          </div>
+        ) : moduleKey === "queue" ? (
+          <div className="sidebar-workspace-tools">
+            {queueWorkspaceTools.map(({ id, label, icon: Icon }) => (
+              <button
+                key={id}
+                type="button"
+                className="sidebar-workspace-btn"
+                title={label}
+                onClick={() =>
+                  collapseAfterAction(() =>
+                    window.dispatchEvent(
+                      new CustomEvent("hmis:queue-sidebar-action", {
+                        detail: { action: id },
+                      })
+                    )
+                  )
+                }
+              >
+                <Icon size={16} />
+                {!collapsed && <span>{label}</span>}
+              </button>
+            ))}
+            {waitingConfig ? (
+              <button
+                type="button"
+                className="sidebar-workspace-btn"
+                title={waitingConfig.label}
+                onClick={() =>
+                  collapseAfterAction(() =>
+                    window.dispatchEvent(
+                      new CustomEvent("hmis:open-module-waiting-list", {
+                        detail: { moduleKey, departmentId: waitingConfig.departmentId },
+                      })
+                    )
+                  )
+                }
+              >
+                <Users size={16} />
+                {!collapsed && (
+                  <span>
+                    {waitingConfig.label}
+                    <small className="sidebar-waiting-count">{waitingCount}</small>
+                  </span>
+                )}
+              </button>
+            ) : null}
+          </div>
+        ) : moduleKey === "icu" ? (
+          <div className="sidebar-workspace-tools">
+            {icuWorkspaceTools.map(({ id, label, icon: Icon }) => (
+              <button
+                key={id}
+                type="button"
+                className="sidebar-workspace-btn"
+                title={label}
+                onClick={() =>
+                  collapseAfterAction(() =>
+                    window.dispatchEvent(
+                      new CustomEvent("hmis:icu-sidebar-action", {
+                        detail: { action: id },
+                      })
+                    )
+                  )
+                }
+              >
+                <Icon size={16} />
+                {!collapsed && <span>{label}</span>}
+              </button>
+            ))}
+            {waitingConfig ? (
+              <button
+                type="button"
+                className="sidebar-workspace-btn"
+                title="Open Waiting List"
+                onClick={() =>
+                  collapseAfterAction(() =>
+                    window.dispatchEvent(
+                      new CustomEvent("hmis:open-module-waiting-list", {
+                        detail: { moduleKey, departmentId: waitingConfig.departmentId },
+                      })
+                    )
+                  )
+                }
+              >
+                <Users size={16} />
+                {!collapsed && (
+                  <span>
+                    Open Waiting List
+                    <small className="sidebar-waiting-count">{waitingCount}</small>
+                  </span>
+                )}
+              </button>
+            ) : null}
+          </div>
+        ) : moduleKey === "nicu" ? (
+          <div className="sidebar-workspace-tools">
+            {nicuWorkspaceTools.map(({ id, label, icon: Icon }) => (
+              <button
+                key={id}
+                type="button"
+                className="sidebar-workspace-btn"
+                title={label}
+                onClick={() =>
+                  collapseAfterAction(() =>
+                    window.dispatchEvent(
+                      new CustomEvent("hmis:nicu-sidebar-action", {
+                        detail: { action: id },
+                      })
+                    )
+                  )
+                }
+              >
+                <Icon size={16} />
+                {!collapsed && <span>{label}</span>}
+              </button>
+            ))}
+            {waitingConfig ? (
+              <button
+                type="button"
+                className="sidebar-workspace-btn"
+                title="Open Waiting List"
+                onClick={() =>
+                  collapseAfterAction(() =>
+                    window.dispatchEvent(
+                      new CustomEvent("hmis:open-module-waiting-list", {
+                        detail: { moduleKey, departmentId: waitingConfig.departmentId },
+                      })
+                    )
+                  )
+                }
+              >
+                <Users size={16} />
+                {!collapsed && (
+                  <span>
+                    Open Waiting List
+                    <small className="sidebar-waiting-count">{waitingCount}</small>
+                  </span>
+                )}
+              </button>
+            ) : null}
+          </div>
+        ) : moduleKey === "ot" ? (
+          <div className="sidebar-workspace-tools">
+            {otWorkspaceTools.map(({ id, label, icon: Icon }) => (
+              <button
+                key={id}
+                type="button"
+                className="sidebar-workspace-btn"
+                title={label}
+                onClick={() =>
+                  collapseAfterAction(() =>
+                    window.dispatchEvent(
+                      new CustomEvent("hmis:ot-sidebar-action", {
+                        detail: { action: id },
+                      })
+                    )
+                  )
+                }
+              >
+                <Icon size={16} />
+                {!collapsed && <span>{label}</span>}
+              </button>
+            ))}
+            {waitingConfig ? (
+              <button
+                type="button"
+                className="sidebar-workspace-btn"
+                title="Open Waiting List"
+                onClick={() =>
+                  collapseAfterAction(() =>
+                    window.dispatchEvent(
+                      new CustomEvent("hmis:open-module-waiting-list", {
+                        detail: { moduleKey, departmentId: waitingConfig.departmentId },
+                      })
+                    )
+                  )
+                }
+              >
+                <Users size={16} />
+                {!collapsed && (
+                  <span>
+                    Open Waiting List
+                    <small className="sidebar-waiting-count">{waitingCount}</small>
+                  </span>
+                )}
+              </button>
+            ) : null}
+          </div>
+        ) : moduleKey === "lab" ? (
+          <div className="sidebar-workspace-tools">
+            {laboratoryWorkspaceTools.map(({ id, label, icon: Icon }) => (
+              <button
+                key={id}
+                type="button"
+                className="sidebar-workspace-btn"
+                title={label}
+                onClick={() =>
+                  collapseAfterAction(() =>
+                    window.dispatchEvent(
+                      new CustomEvent("hmis:lab-sidebar-action", {
+                        detail: { action: id },
+                      })
+                    )
+                  )
+                }
+              >
+                <Icon size={16} />
+                {!collapsed && <span>{label}</span>}
+              </button>
+            ))}
+            <button
+              type="button"
+              className="sidebar-workspace-btn"
+              title="Orders"
+              onClick={() =>
+                collapseAfterAction(() =>
+                  window.dispatchEvent(
+                    new CustomEvent("hmis:open-module-orders", {
+                      detail: { destinationModule: "LABORATORY" },
+                    })
+                  )
+                )
+              }
+            >
+              <ShoppingCart size={16} />
+              {!collapsed && (
+                <span>
+                  Orders<small className="sidebar-waiting-count">{orderCount}</small>
+                </span>
+              )}
+            </button>
+            {waitingConfig ? (
+              <button
+                type="button"
+                className="sidebar-workspace-btn"
+                title="Open Waiting List"
+                onClick={() =>
+                  collapseAfterAction(() =>
+                    window.dispatchEvent(
+                      new CustomEvent("hmis:open-module-waiting-list", {
+                        detail: { moduleKey, departmentId: waitingConfig.departmentId },
+                      })
+                    )
+                  )
+                }
+              >
+                <Users size={16} />
+                {!collapsed && (
+                  <span>
+                    Open Waiting List
+                    <small className="sidebar-waiting-count">{waitingCount}</small>
+                  </span>
+                )}
+              </button>
+            ) : null}
+          </div>
+        ) : moduleKey === "radiology" ? (
+          <div className="sidebar-workspace-tools">
+            {radiologyWorkspaceTools.map(({ id, label, icon: Icon }) => (
+              <button
+                key={id}
+                type="button"
+                className="sidebar-workspace-btn"
+                title={label}
+                onClick={() =>
+                  collapseAfterAction(() =>
+                    window.dispatchEvent(
+                      new CustomEvent("hmis:radiology-sidebar-action", {
+                        detail: { action: id },
+                      })
+                    )
+                  )
+                }
+              >
+                <Icon size={16} />
+                {!collapsed && <span>{label}</span>}
+              </button>
+            ))}
+            <button
+              type="button"
+              className="sidebar-workspace-btn"
+              title="Orders"
+              onClick={() =>
+                collapseAfterAction(() =>
+                  window.dispatchEvent(
+                    new CustomEvent("hmis:open-module-orders", {
+                      detail: { destinationModule: "RADIOLOGY" },
+                    })
+                  )
+                )
+              }
+            >
+              <ShoppingCart size={16} />
+              {!collapsed && (
+                <span>
+                  Orders<small className="sidebar-waiting-count">{orderCount}</small>
+                </span>
+              )}
+            </button>
+            {waitingConfig ? (
+              <button
+                type="button"
+                className="sidebar-workspace-btn"
+                title="Open Waiting List"
+                onClick={() =>
+                  collapseAfterAction(() =>
+                    window.dispatchEvent(
+                      new CustomEvent("hmis:open-module-waiting-list", {
+                        detail: { moduleKey, departmentId: waitingConfig.departmentId },
+                      })
+                    )
+                  )
+                }
+              >
+                <Users size={16} />
+                {!collapsed && (
+                  <span>
+                    Open Waiting List
+                    <small className="sidebar-waiting-count">{waitingCount}</small>
+                  </span>
+                )}
+              </button>
+            ) : null}
+          </div>
+        ) : moduleKey === "pharmacy" ? (
+          <div className="sidebar-workspace-tools">
+            {pharmacyWorkspaceTools.map(({ id, label, icon: Icon }) => (
+              <button
+                key={id}
+                type="button"
+                className="sidebar-workspace-btn"
+                title={label}
+                onClick={() =>
+                  collapseAfterAction(() =>
+                    window.dispatchEvent(
+                      new CustomEvent("hmis:pharmacy-sidebar-action", {
+                        detail: { action: id },
+                      })
+                    )
+                  )
+                }
+              >
+                <Icon size={16} />
+                {!collapsed && <span>{label}</span>}
+              </button>
+            ))}
+            <button
+              type="button"
+              className="sidebar-workspace-btn"
+              title="Orders"
+              onClick={() =>
+                collapseAfterAction(() =>
+                  window.dispatchEvent(
+                    new CustomEvent("hmis:open-module-orders", {
+                      detail: { destinationModule: "PHARMACY" },
+                    })
+                  )
+                )
+              }
+            >
+              <ShoppingCart size={16} />
+              {!collapsed && (
+                <span>
+                  Orders<small className="sidebar-waiting-count">{orderCount}</small>
+                </span>
+              )}
+            </button>
+            {waitingConfig ? (
+              <button
+                type="button"
+                className="sidebar-workspace-btn"
+                title="Open Waiting List"
+                onClick={() =>
+                  collapseAfterAction(() =>
+                    window.dispatchEvent(
+                      new CustomEvent("hmis:open-module-waiting-list", {
+                        detail: { moduleKey, departmentId: waitingConfig.departmentId },
+                      })
+                    )
+                  )
+                }
+              >
+                <Users size={16} />
+                {!collapsed && (
+                  <span>
+                    Open Waiting List
+                    <small className="sidebar-waiting-count">{waitingCount}</small>
+                  </span>
+                )}
+              </button>
+            ) : null}
+          </div>
+        ) : moduleKey === "blood-bank" ? (
+          <div className="sidebar-workspace-tools">
+            {bloodBankWorkspaceTools.map(({ id, label, icon: Icon }) => (
+              <button
+                key={id}
+                type="button"
+                className="sidebar-workspace-btn"
+                title={label}
+                onClick={() =>
+                  collapseAfterAction(() =>
+                    window.dispatchEvent(
+                      new CustomEvent("hmis:open-module-form", {
+                        detail: {
+                          moduleKey,
+                          formName:
+                            id === "donor-registration"
+                              ? "Donor Registration Form"
+                              : id === "record-donation"
+                              ? "Blood Unit Collection Form"
+                              : id === "blood-request"
+                              ? "Blood Request Form"
+                              : label,
+                        },
+                      })
+                    )
+                  )
+                }
+              >
+                <Icon size={16} />
+                {!collapsed && <span>{label}</span>}
+              </button>
+            ))}
+            {waitingConfig ? (
+              <button
+                type="button"
+                className="sidebar-workspace-btn"
+                title="Open Waiting List"
+                onClick={() =>
+                  collapseAfterAction(() =>
+                    window.dispatchEvent(
+                      new CustomEvent("hmis:open-module-waiting-list", {
+                        detail: { moduleKey, departmentId: waitingConfig.departmentId },
+                      })
+                    )
+                  )
+                }
+              >
+                <Users size={16} />
+                {!collapsed && (
+                  <span>
+                    Open Waiting List
+                    <small className="sidebar-waiting-count">{waitingCount}</small>
+                  </span>
+                )}
+              </button>
+            ) : null}
+          </div>
+        ) : moduleKey === "nutrition" ? (
+          <div className="sidebar-workspace-tools">
+            {nutritionWorkspaceTools.map(({ id, label, icon: Icon }) => (
+              <button
+                key={id}
+                type="button"
+                className="sidebar-workspace-btn"
+                title={label}
+                onClick={() =>
+                  collapseAfterAction(() =>
+                    window.dispatchEvent(
+                      new CustomEvent("hmis:nutrition-sidebar-action", {
+                        detail: { action: id },
+                      })
+                    )
+                  )
+                }
+              >
+                <Icon size={16} />
+                {!collapsed && <span>{label}</span>}
+              </button>
+            ))}
+            {waitingConfig ? (
+              <button
+                type="button"
+                className="sidebar-workspace-btn"
+                title="Open Waiting List"
+                onClick={() =>
+                  collapseAfterAction(() =>
+                    window.dispatchEvent(
+                      new CustomEvent("hmis:open-module-waiting-list", {
+                        detail: { moduleKey, departmentId: waitingConfig.departmentId },
+                      })
+                    )
+                  )
+                }
+              >
+                <Users size={16} />
+                {!collapsed && (
+                  <span>
+                    Open Waiting List
+                    <small className="sidebar-waiting-count">{waitingCount}</small>
+                  </span>
+                )}
+              </button>
+            ) : null}
+          </div>
+        ) : moduleKey === "dental" ? (
+          <div className="sidebar-workspace-tools">
+            {dentalWorkspaceTools.map(({ id, label, icon: Icon }) => (
+              <button
+                key={id}
+                type="button"
+                className="sidebar-workspace-btn"
+                title={label}
+                onClick={() =>
+                  collapseAfterAction(() =>
+                    window.dispatchEvent(
+                      new CustomEvent("hmis:dental-sidebar-action", {
+                        detail: { action: id },
+                      })
+                    )
+                  )
+                }
+              >
+                <Icon size={16} />
+                {!collapsed && <span>{label}</span>}
+              </button>
+            ))}
+            {waitingConfig ? (
+              <button
+                type="button"
+                className="sidebar-workspace-btn"
+                title="Open Waiting List"
+                onClick={() =>
+                  collapseAfterAction(() =>
+                    window.dispatchEvent(
+                      new CustomEvent("hmis:open-module-waiting-list", {
+                        detail: { moduleKey, departmentId: waitingConfig.departmentId },
+                      })
+                    )
+                  )
+                }
+              >
+                <Users size={16} />
+                {!collapsed && (
+                  <span>
+                    Open Waiting List
+                    <small className="sidebar-waiting-count">{waitingCount}</small>
+                  </span>
+                )}
+              </button>
+            ) : null}
+          </div>
+        ) : moduleKey === "infection-control" ? (
+          <div className="sidebar-workspace-tools">
+            {infectionControlWorkspaceTools.map(({ id, label, icon: Icon }) => (
+              <button
+                key={id}
+                type="button"
+                className="sidebar-workspace-btn"
+                title={label}
+                onClick={() =>
+                  collapseAfterAction(() =>
+                    window.dispatchEvent(
+                      new CustomEvent("hmis:infection-control-sidebar-action", {
+                        detail: { action: id },
+                      })
+                    )
+                  )
+                }
+              >
+                <Icon size={16} />
+                {!collapsed && <span>{label}</span>}
+              </button>
+            ))}
+            {waitingConfig ? (
+              <button
+                type="button"
+                className="sidebar-workspace-btn"
+                title="Open Waiting List"
+                onClick={() =>
+                  collapseAfterAction(() =>
+                    window.dispatchEvent(
+                      new CustomEvent("hmis:open-module-waiting-list", {
+                        detail: { moduleKey, departmentId: waitingConfig.departmentId },
+                      })
+                    )
+                  )
+                }
+              >
+                <Users size={16} />
+                {!collapsed && (
+                  <span>
+                    Open Waiting List
+                    <small className="sidebar-waiting-count">{waitingCount}</small>
+                  </span>
+                )}
+              </button>
+            ) : null}
+          </div>
+        ) : moduleKey === "paediatrics" ? (
+          <div className="sidebar-workspace-tools">
+            {paediatricsWorkspaceTools.map(({ id, label, icon: Icon }) => (
+              <button
+                key={id}
+                type="button"
+                className="sidebar-workspace-btn"
+                title={label}
+                onClick={() =>
+                  collapseAfterAction(() =>
+                    window.dispatchEvent(
+                      new CustomEvent("hmis:paediatrics-sidebar-action", {
+                        detail: { action: id },
+                      })
+                    )
+                  )
+                }
+              >
+                <Icon size={16} />
+                {!collapsed && <span>{label}</span>}
+              </button>
+            ))}
+            {waitingConfig ? (
+              <button
+                type="button"
+                className="sidebar-workspace-btn"
+                title="Open Waiting List"
+                onClick={() =>
+                  collapseAfterAction(() =>
+                    window.dispatchEvent(
+                      new CustomEvent("hmis:open-module-waiting-list", {
+                        detail: { moduleKey, departmentId: waitingConfig.departmentId },
+                      })
+                    )
+                  )
+                }
+              >
+                <Users size={16} />
+                {!collapsed && (
+                  <span>
+                    Open Waiting List
+                    <small className="sidebar-waiting-count">{waitingCount}</small>
+                  </span>
+                )}
+              </button>
+            ) : null}
+          </div>
+        ) : moduleKey === "physiotherapy" ? (
+          <div className="sidebar-workspace-tools">
+            {physiotherapyWorkspaceTools.map(({ id, label, icon: Icon }) => (
+              <button
+                key={id}
+                type="button"
+                className="sidebar-workspace-btn"
+                title={label}
+                onClick={() =>
+                  collapseAfterAction(() =>
+                    window.dispatchEvent(
+                      new CustomEvent("hmis:physiotherapy-sidebar-action", {
+                        detail: { action: id },
+                      })
+                    )
+                  )
+                }
+              >
+                <Icon size={16} />
+                {!collapsed && <span>{label}</span>}
+              </button>
+            ))}
+            {waitingConfig ? (
+              <button
+                type="button"
+                className="sidebar-workspace-btn"
+                title="Open Waiting List"
+                onClick={() =>
+                  collapseAfterAction(() =>
+                    window.dispatchEvent(
+                      new CustomEvent("hmis:open-module-waiting-list", {
+                        detail: { moduleKey, departmentId: waitingConfig.departmentId },
+                      })
+                    )
+                  )
+                }
+              >
+                <Users size={16} />
+                {!collapsed && (
+                  <span>
+                    Open Waiting List
+                    <small className="sidebar-waiting-count">{waitingCount}</small>
+                  </span>
+                )}
+              </button>
+            ) : null}
+          </div>
+        ) : moduleKey === "community-health" ? (
+          <div className="sidebar-workspace-tools">
+            {communityHealthWorkspaceTools.map(({ id, label, icon: Icon }) => (
+              <button
+                key={id}
+                type="button"
+                className="sidebar-workspace-btn"
+                title={label}
+                onClick={() =>
+                  collapseAfterAction(() =>
+                    window.dispatchEvent(
+                      new CustomEvent("hmis:community-sidebar-action", {
+                        detail: { action: id },
+                      })
+                    )
+                  )
+                }
+              >
+                <Icon size={16} />
+                {!collapsed && <span>{label}</span>}
+              </button>
+            ))}
+          </div>
+        ) : moduleKey === "home-care" ? (
+          <div className="sidebar-workspace-tools">
+            {homeCareWorkspaceTools.map(({ id, label, icon: Icon }) => (
+              <button
+                key={id}
+                type="button"
+                className="sidebar-workspace-btn"
+                title={label}
+                onClick={() =>
+                  collapseAfterAction(() =>
+                    window.dispatchEvent(
+                      new CustomEvent("hmis:home-care-sidebar-action", {
+                        detail: { action: id },
+                      })
+                    )
+                  )
+                }
+              >
+                <Icon size={16} />
+                {!collapsed && <span>{label}</span>}
+              </button>
+            ))}
+          </div>
+        ) : moduleKey === "biomedical" ? (
+          <div className="sidebar-workspace-tools">
+            {biomedicalWorkspaceTools.map(({ id, label, icon: Icon }) => (
+              <button
+                key={id}
+                type="button"
+                className="sidebar-workspace-btn"
+                title={label}
+                onClick={() =>
+                  collapseAfterAction(() =>
+                    window.dispatchEvent(
+                      new CustomEvent("hmis:biomedical-sidebar-action", {
+                        detail: { action: id },
+                      })
+                    )
+                  )
+                }
+              >
+                <Icon size={16} />
+                {!collapsed && <span>{label}</span>}
+              </button>
+            ))}
+          </div>
+        ) : moduleKey === "nursing" ? (
+          <div className="sidebar-workspace-tools">
+            {nursingWorkspaceTools.map(({ id, label, icon: Icon }) => (
+              <button
+                key={id}
+                type="button"
+                className="sidebar-workspace-btn"
+                title={label}
+                onClick={() =>
+                  collapseAfterAction(() =>
+                    window.dispatchEvent(
+                      new CustomEvent("hmis:nursing-sidebar-action", {
+                        detail: { action: id },
+                      })
+                    )
+                  )
+                }
+              >
+                <Icon size={16} />
+                {!collapsed && <span>{label}</span>}
+              </button>
+            ))}
+            {waitingConfig ? (
+              <button
+                type="button"
+                className="sidebar-workspace-btn"
+                title={waitingConfig.label}
+                onClick={() =>
+                  collapseAfterAction(() =>
+                    window.dispatchEvent(
+                      new CustomEvent("hmis:open-module-waiting-list", {
+                        detail: { moduleKey, departmentId: waitingConfig.departmentId },
+                      })
+                    )
+                  )
+                }
+              >
+                <Users size={16} />
+                {!collapsed && (
+                  <span>
+                    {waitingConfig.label}
+                    <small className="sidebar-waiting-count">{waitingCount}</small>
+                  </span>
+                )}
+              </button>
+            ) : null}
+          </div>
+        ) : waitingConfig ? (
+          <div className="sidebar-workspace-tools">
+            <button
+              type="button"
+              className="sidebar-workspace-btn"
+              title={waitingConfig.label}
+              onClick={() =>
+                collapseAfterAction(() =>
+                  window.dispatchEvent(
+                    new CustomEvent("hmis:open-module-waiting-list", {
+                      detail: { moduleKey, departmentId: waitingConfig.departmentId },
+                    })
+                  )
+                )
+              }
+            >
+              <Users size={16} />
+              {!collapsed && (
+                <span>
+                  {waitingConfig.label}
+                  <small className="sidebar-waiting-count">{waitingCount}</small>
+                </span>
+              )}
+            </button>
+          </div>
+        ) : (
+          <div className="sidebar-empty-state" title="Module tools">
+            {collapsed ? <ClipboardList size={18} /> : <Building2 size={18} />}
+            {!collapsed && (
+              <p>
+                {moduleKey
+                  ? "Module tools will appear here."
+                  : "Open a module to use workspace tools here."}
+              </p>
             )}
           </div>
-        </div>
-      )}
-
-      {/* Navigation Sections */}
-      <nav
-        className="sidebar-nav-scroll custom-scrollbar"
-        style={{ flex: 1, overflowY: "auto", padding: "4px 8px" }}
-      >
-        {/* Core Quick Buttons */}
-        <div style={{ marginBottom: 8 }}>
-          <button
-            type="button"
-            className={`nav-item ${activeNav === 0 ? "active" : ""}`}
-            onClick={() => onNavigateNav(0)}
-            title="Dashboard Overview"
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: 8,
-              width: "100%",
-              padding: "7px 10px",
-              borderRadius: 6,
-              background: activeNav === 0 ? "var(--hmis-selected-bg, #d7fbe9)" : "transparent",
-              color: activeNav === 0 ? "var(--hmis-text, #111827)" : "inherit",
-              border: "none",
-              cursor: "pointer",
-              fontWeight: activeNav === 0 ? 800 : 600,
-              fontSize: "0.82rem",
-            }}
-          >
-            <Briefcase size={16} />
-            {!collapsed && <span>Dashboard Grid</span>}
-          </button>
-        </div>
-
-        {/* Grouped Layer Navigation */}
-        {filteredSections.map((section) => {
-          const isOpen = openSections[section.layer] ?? true;
-          return (
-            <div key={section.layer} style={{ marginBottom: 8 }}>
-              {!collapsed && (
-                <button
-                  type="button"
-                  onClick={() => toggleSection(section.layer)}
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "space-between",
-                    width: "100%",
-                    padding: "4px 8px",
-                    background: "none",
-                    border: "none",
-                    color: "rgba(255, 255, 255, 0.5)",
-                    fontSize: "0.68rem",
-                    fontWeight: 800,
-                    textTransform: "uppercase",
-                    letterSpacing: "0.6px",
-                    cursor: "pointer",
-                  }}
-                >
-                  <span>{section.layer}</span>
-                  {isOpen ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
-                </button>
-              )}
-
-              {(isOpen || collapsed) && (
-                <div style={{ display: "flex", flexDirection: "column", gap: 2, marginTop: 2 }}>
-                  {section.items.map((item) => {
-                    const IconComponent = item.icon;
-                    const isActive = activeModuleId === item.id;
-                    const receivingModule = orderReceivingModules[item.id];
-
-                    return (
-                      <div key={item.id} style={{ display: "flex", flexDirection: "column" }}>
-                        <button
-                          type="button"
-                          className={`nav-item ${isActive ? "active" : ""}`}
-                          onClick={() => onNavigateModule(item.id)}
-                          title={item.name}
-                          style={{
-                            display: "flex",
-                            alignItems: "center",
-                            justifyContent: "space-between",
-                            gap: 8,
-                            padding: "6px 8px",
-                            borderRadius: 6,
-                            background: isActive
-                              ? "var(--hmis-selected-bg, #d7fbe9)"
-                              : "transparent",
-                            color: isActive ? "#0f172a" : "inherit",
-                            border: "none",
-                            cursor: "pointer",
-                            fontSize: "0.8rem",
-                            fontWeight: isActive ? 800 : 500,
-                            textAlign: "left",
-                          }}
-                        >
-                          <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
-                            <IconComponent
-                              size={15}
-                              style={{
-                                flexShrink: 0,
-                                color: isActive ? "var(--hmis-primary, #13d802)" : "inherit",
-                              }}
-                            />
-                            {!collapsed && (
-                              <span
-                                style={{
-                                  overflow: "hidden",
-                                  textOverflow: "ellipsis",
-                                  whiteSpace: "nowrap",
-                                }}
-                              >
-                                {item.name}
-                              </span>
-                            )}
-                          </div>
-                          {!collapsed && item.premium && (
-                            <Crown size={11} style={{ color: "#f59e0b", flexShrink: 0 }} />
-                          )}
-                        </button>
-
-                        {/* Order Inbox trigger pill if active and order-receiving */}
-                        {!collapsed && isActive && receivingModule && (
-                          <button
-                            type="button"
-                            onClick={() =>
-                              window.dispatchEvent(
-                                new CustomEvent("hmis:open-module-orders", {
-                                  detail: { destinationModule: receivingModule },
-                                }),
-                              )
-                            }
-                            style={{
-                              display: "inline-flex",
-                              alignItems: "center",
-                              gap: 6,
-                              margin: "3px 6px 6px 24px",
-                              padding: "3px 8px",
-                              background: "#7c3aed",
-                              color: "#ffffff",
-                              borderRadius: 4,
-                              border: "none",
-                              fontSize: "0.68rem",
-                              fontWeight: 800,
-                              cursor: "pointer",
-                            }}
-                          >
-                            <ShoppingCart size={11} /> Orders Worklist
-                          </button>
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
-          );
-        })}
+        )}
       </nav>
 
-      {/* Upgrade & AI Help */}
-      <div style={{ padding: "8px 10px", borderTop: "1px solid rgba(255, 255, 255, 0.08)" }}>
-        {isHospitalAdmin && (
+      {/* Action Stack (Upgrade & AI Assistant) */}
+      <div className="sidebar-action-stack">
+        {!isModuleOpen ? (
           <button
             type="button"
             className="sidebar-upgrade-btn"
-            onClick={() => onNavigateNav(40)}
-            style={{ marginBottom: 6, width: "100%" }}
+            onClick={() => collapseAfterAction(onNavigateUpgrade)}
+            title="Upgrade"
           >
-            <Crown size={14} />
-            {!collapsed && <span>Upgrade Plan</span>}
+            <Crown size={16} />
+            {!collapsed && <span>Upgrade</span>}
           </button>
-        )}
+        ) : null}
         <button
           type="button"
           className="sidebar-help-btn"
-          onClick={onOpenHelpAi}
-          style={{ width: "100%" }}
+          onClick={() => collapseAfterAction(onOpenHelpAi)}
+          title="Open Medilink AI assistant"
         >
-          <HelpCircle size={15} />
-          {!collapsed && <span>Help AI</span>}
+          <Bot size={16} />
+          {!collapsed && <span>AI Assistant</span>}
         </button>
       </div>
 
-      {/* Facility Profile Card */}
-      <div className="sidebar-hospital-card sidebar-hospital-profile">
-        {facilityLogo ? (
+      {/* Active Facility Profile Card */}
+      {!isModuleOpen ? (
+        <div className="sidebar-hospital-profile">
           <img
-            src={facilityLogo}
+            src={hospitalLogo}
             className="sidebar-hospital-logo"
-            alt={`${facilityName} logo`}
-            title={facilityName}
+            alt="Hospital logo"
           />
-        ) : (
-          <div
-            style={{
-              width: 28,
-              height: 28,
-              borderRadius: "50%",
-              background: "#16a34a",
-              color: "#fff",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              fontWeight: 800,
-              fontSize: "0.75rem",
-              flexShrink: 0,
-            }}
-          >
-            {facilityName.slice(0, 1).toUpperCase()}
-          </div>
-        )}
-        {!collapsed && (
-          <div className="sidebar-hospital-copy">
-            <span>Active Facility</span>
-            <strong title={facilityName}>{facilityName}</strong>
-          </div>
-        )}
-      </div>
+          {!collapsed && (
+            <div className="sidebar-hospital-copy">
+              <span>Active Facility</span>
+              <strong title={hospitalName}>{hospitalName}</strong>
+            </div>
+          )}
+        </div>
+      ) : null}
     </aside>
   );
 }
-

@@ -49231,3 +49231,92 @@ html[data-theme="dark"] .welcome p span { border-left-color: #475569; }
 .license-info {
   border-radius: 0px !important;
 }
+
+
+/* =========================================================
+   PARITY ENHANCEMENTS: Topbar AI, Welcome & Module Grid Icons
+   ========================================================= */
+
+.topbar-ai-btn {
+  width: auto !important;
+  min-width: 78px !important;
+  height: 38px !important;
+  flex: 0 0 auto !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  gap: 5px !important;
+  padding: 0 10px !important;
+  border: 1px solid rgba(167, 243, 208, 0.55) !important;
+  border-radius: 999px !important;
+  background: linear-gradient(135deg, rgba(15, 118, 110, 0.9), rgba(37, 99, 235, 0.88)) !important;
+  color: #ecfdf5 !important;
+  box-shadow: 0 5px 16px rgba(15, 118, 110, 0.24) !important;
+  cursor: pointer !important;
+  transition: all 0.18s ease !important;
+}
+
+.topbar-ai-mark {
+  width: 24px;
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(167, 243, 208, 0.45);
+  border-radius: 7px;
+  background: rgba(2, 44, 34, 0.34);
+  color: #a7f3d0;
+}
+
+.topbar-ai-btn:hover {
+  border-color: #a7f3d0 !important;
+  background: linear-gradient(135deg, #0f766e, #2563eb) !important;
+  box-shadow: 0 8px 20px rgba(15, 118, 110, 0.34) !important;
+  transform: translateY(-1px) !important;
+}
+
+.topbar-ai-label {
+  color: #ffffff !important;
+  font-size: 0.68rem !important;
+  font-weight: 900 !important;
+  letter-spacing: 0.06em !important;
+}
+
+@media (max-width: 640px) {
+  .topbar-ai-btn { width: 72px !important; min-width: 72px !important; padding: 0 7px !important; }
+  .topbar-ai-label { display: inline !important; }
+}
+
+.welcome-icon {
+  display: inline-flex;
+  width: 34px;
+  height: 34px;
+  flex: 0 0 34px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  color: #ffffff;
+  background: linear-gradient(135deg, #0f766e, #0e7490);
+  box-shadow: 0 7px 14px rgba(15, 118, 110, 0.18);
+}
+
+.welcome-copy {
+  min-width: 0;
+}
+
+.welcome-kicker {
+  display: block;
+  margin-bottom: 2px;
+  color: #64748b;
+  font-size: 0.62rem;
+  font-weight: 850;
+  letter-spacing: 0.1em;
+}
+
+.module-icon-svg {
+  width: 32px;
+  height: 32px;
+  color: #6b7280;
+  opacity: 1;
+  filter: drop-shadow(0 3px 3px rgba(0, 0, 0, 0.25));
+}

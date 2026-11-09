@@ -28,10 +28,15 @@ interface AppState {
     email: string;
     facilityId?: string;
     tenantId?: string;
+    moduleIds?: number[];
   } | null;
+  facilitySettings: any | null;
+  activeModuleCategory: string;
   toggleTheme: () => void;
   setFacility: (facility: any) => void;
+  setFacilitySettings: (settings: any) => void;
   setUser: (user: any) => void;
+  setActiveModuleCategory: (category: string) => void;
   primaryColor: string;
   activeLayout: "modern" | "classic";
   facilityLogo: string | null;
@@ -50,7 +55,9 @@ interface AppState {
 export const useAppStore = create<AppState>((set) => ({
   theme: "light",
   facility: { id: "1", name: "MediLink General Hospital" },
+  facilitySettings: null,
   user: { name: "Dr. Almalick", role: "Super Admin", email: "admin@medilink.com" },
+  activeModuleCategory: "All",
   toggleTheme: () => set((state) => {
     const newTheme = state.theme === "light" ? "dark" : "light";
     if (typeof window !== "undefined") {
@@ -64,7 +71,9 @@ export const useAppStore = create<AppState>((set) => ({
     return { theme: newTheme };
   }),
   setFacility: (facility) => set({ facility }),
+  setFacilitySettings: (facilitySettings) => set({ facilitySettings }),
   setUser: (user) => set({ user }),
+  setActiveModuleCategory: (activeModuleCategory) => set({ activeModuleCategory }),
   primaryColor: "#3b82f6",
   activeLayout: "modern",
   facilityLogo: null,

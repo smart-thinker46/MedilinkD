@@ -5,6 +5,7 @@ import {
   CheckCircle2,
   ChevronLeft,
   ChevronRight,
+  Crown,
   Eye,
   EyeOff,
   Hospital,
@@ -64,7 +65,8 @@ import ReportsView from "./views/ReportsView";
 import DoctorsView, { DoctorView } from "./views/DoctorsView";
 import FacilitiesView, { FacilityView } from "./views/FacilitiesView";
 import EhrView, { EHRView } from "./views/EhrView";
-import { MODULE_BY_ID } from "./lib/moduleCatalog";
+import { MODULE_BY_ID, MODULE_SECTIONS, MODULE_CATALOG } from "./lib/moduleCatalog";
+import { getModuleIcon } from "./lib/moduleIconMap";
 import {
   WORKFLOW_MODULE_BY_ID,
   WORKFLOW_MODULES,
@@ -8178,7 +8180,16 @@ function SuperAdminDashboardView() {
 }
 
 export default function App() {
-  const { patients, user, facility, setUser, setFacility, setPatients } = useAppStore();
+  const {
+    patients,
+    user,
+    facility,
+    setUser,
+    setFacility,
+    setPatients,
+    activeModuleCategory,
+    setActiveModuleCategory,
+  } = useAppStore();
   const [authScreen, setAuthScreen] = useState<AuthScreen>("splash");
   const [authError, setAuthError] = useState("");
   const [loginEmail, setLoginEmail] = useState("");
@@ -8635,17 +8646,78 @@ export default function App() {
     };
   }, []);
 
-  const openModuleFromSearch = (moduleId: number) => {
+  const MODULE_ID_TO_NAV: Record<number, number> = {
+    1: 1,   // Patients
+    2: 2,   // Outpatient / OPD
+    3: 25,  // Emergency
+    4: 3,   // Appointments
+    5: 6,   // Wards
+    6: 4,   // Longitudinal EHR
+    7: 5,   // Nursing
+    8: 7,   // Laboratory
+    9: 8,   // Radiology
+    10: 10, // Pharmacy
+    11: 43, // Operating Theatre
+    12: 48, // Blood Bank
+    13: 9,  // Billing
+    14: 14, // Insurance
+    15: 11, // Inventory
+    16: 16, // HR
+    17: 17, // Doctors
+    18: 18, // Facilities
+    19: 19, // Analytics
+    20: 20, // Users
+    21: 21, // Telemedicine
+    22: 22, // Blockchain
+    24: 24, // Patient Portal
+    25: 25, // Emergency
+    26: 26, // Ambulance
+    27: 27, // Mortuary
+    28: 28, // Queue
+    29: 29, // Helpdesk
+    30: 30, // Canteen
+    31: 31, // Patient Feedback
+    33: 33, // Quality Assurance
+    34: 34, // Integrations
+    35: 35, // Reports
+    36: 36, // ICU
+    37: 37, // Maternity
+    38: 38, // NICU
+    39: 39, // Dental
+    41: 41, // CDSS
+    42: 42, // Migration
+    43: 43, // Operating Theatre
+    44: 44, // Physiotherapy
+    45: 45, // Nutrition
+    46: 46, // Paediatrics
+    47: 47, // Infection Control
+    48: 48, // Blood Bank
+    49: 49, // Biomedical
+    50: 50, // Pharmacy POS
+    64: 42, // Migration Center
+  };
+
+  const handleOpenModule = (moduleId: number) => {
     setModuleSearch("");
     setModuleSearchFocused(false);
-    setActiveWorkflowModuleId(moduleId);
-    setActiveNav(99);
+    const targetNav = MODULE_ID_TO_NAV[moduleId];
+    if (targetNav !== undefined) {
+      setActiveWorkflowModuleId(moduleId);
+      setActiveNav(targetNav);
+    } else {
+      setActiveWorkflowModuleId(moduleId);
+      setActiveNav(99);
+    }
+  };
+
+  const openModuleFromSearch = (moduleId: number) => {
+    handleOpenModule(moduleId);
   };
   const handleModuleSearchSubmit = (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const firstMatch = moduleSearchResults[0];
     if (firstMatch) {
-      openModuleFromSearch(firstMatch.id);
+      handleOpenModule(firstMatch.id);
     }
   };
 
@@ -8655,7 +8727,7 @@ export default function App() {
 
   const goToDashboard = () => {
     setActiveWorkflowModuleId(null);
-    setActiveNav(defaultNavIndex);
+    setActiveNav(0);
   };
 
   const handleLogout = () => {
@@ -9333,49 +9405,135 @@ export default function App() {
 
   const renderMain = () => {
     switch (activeNav) {
-      case 0:
+      case 0: {
+        const isAdmin = isAdminLikeRole(user?.role);
+        const accessFilteredModules =
+          isAdmin || allowedModuleSet.size === 0
+            ? MODULE_CATALOG
+            : MODULE_CATALOG.filter((m) => allowedModuleSet.has(m.id));
+        const visibleModules =
+          activeModuleCategory === "All"
+            ? accessFilteredModules
+            : accessFilteredModules.filter((mod) => mod.layer === activeModuleCategory);
+
         return (
           <>
-            <div className="welcome">
-              <h2>Welcome, {user?.name || "Hospital Admin"}</h2>
-              <p>
-                {dashboardFacilityName
-                  ? `${dashboardFacilityName} command center`
-                  : "Select a module to manage your facility"}
-              </p>
-            </div>
-            <div className={`module-grid ${compactDashboard ? "module-grid-compact" : ""}`}>
-              {roleFilteredModules.map((mod) => (
-                <button
-                  key={mod.id}
-                  onClick={() => {
-                    setActiveWorkflowModuleId(mod.id);
-                    setActiveNav(99);
-                  }}
-                  className={`module-card ${mod.premium ? "card-premium" : "card-free"}`}
-                >
-                  {mod.premium && (
-                    <div className="premium-pill">
-                      <CrownIcon size={11} />
-                      <span>PREMIUM</span>
-                    </div>
+            <section className="welcome" aria-label="Welcome to Medilink">
+              <div className="welcome-icon" aria-hidden="true">
+                <Building2 size={20} />
+              </div>
+              <div className="welcome-copy">
+                <span className="welcome-kicker">MEDILINK HMIS</span>
+                <h2>Welcome back, {user?.name || "Hospital Admin"}</h2>
+                <p>
+                  {dashboardFacilityName ? (
+                    <>
+                      <strong>{dashboardFacilityName}</strong>
+                      <span>Command center</span>
+                    </>
+                  ) : (
+                    "Select a module to manage your facility"
                   )}
-                  <div className="card-icon">
-                    <Icon type={mod.iconType} size={30} />
-                  </div>
-                  <span className="card-label">
-                    {mod.name.replace("\n", " ")}
+                </p>
+              </div>
+              {activeModuleCategory !== "All" && (
+                <div className="module-filter-row">
+                  <span className="module-filter-label">
+                    Showing: {activeModuleCategory}
                   </span>
-                </button>
-              ))}
-              {roleFilteredModules.length === 0 && (
-                <div className="p-4">
-                  No modules are assigned to your account. Contact your system administrator.
+                  <button
+                    type="button"
+                    className="module-filter-clear"
+                    onClick={() => setActiveModuleCategory("All")}
+                  >
+                    Clear Filter
+                  </button>
+                </div>
+              )}
+            </section>
+
+            {/* Category Filter Tabs */}
+            <div
+              className="module-category-row"
+              style={{
+                display: "flex",
+                gap: 8,
+                padding: "4px 16px 12px",
+                flexWrap: "wrap",
+                alignItems: "center",
+              }}
+            >
+              {[
+                "All",
+                "Patient Journey",
+                "Clinical",
+                "Administration",
+                "Technology & Intelligence",
+                "Support Services",
+              ].map((category) => {
+                const isSelected = activeModuleCategory === category;
+                return (
+                  <button
+                    key={category}
+                    type="button"
+                    onClick={() => setActiveModuleCategory(category)}
+                    style={{
+                      border: isSelected
+                        ? "1px solid var(--hmis-primary, #10c400)"
+                        : "1px solid rgba(148, 163, 184, 0.4)",
+                      background: isSelected ? "var(--hmis-selected-bg, #d7fbe9)" : "#ffffff",
+                      color: isSelected ? "#065f46" : "#475569",
+                      padding: "5px 12px",
+                      borderRadius: 999,
+                      fontSize: "0.74rem",
+                      fontWeight: 800,
+                      cursor: "pointer",
+                      transition: "all 0.16s ease",
+                    }}
+                  >
+                    {category}
+                  </button>
+                );
+              })}
+            </div>
+
+            <div className={`module-grid ${compactDashboard ? "module-grid-compact" : ""}`}>
+              {visibleModules.map((mod) => {
+                const IconComponent = getModuleIcon(mod.id);
+                return (
+                  <button
+                    key={`${mod.id}-${mod.path}`}
+                    type="button"
+                    onClick={() => handleOpenModule(mod.id)}
+                    className={`module-card ${mod.premium ? "card-premium" : "card-free"}`}
+                  >
+                    {mod.premium && (
+                      <div className="premium-pill">
+                        <Crown size={12} />
+                        <span>PREMIUM</span>
+                      </div>
+                    )}
+                    <div className="card-icon">
+                      <IconComponent className="module-icon-svg" />
+                    </div>
+                    <span className="card-label">
+                      {mod.name.replace("\n", " ")}
+                    </span>
+                  </button>
+                );
+              })}
+              {visibleModules.length === 0 && (
+                <div
+                  className="p-4"
+                  style={{ gridColumn: "1 / -1", color: "#64748b", textAlign: "center" }}
+                >
+                  No modules are assigned to your account for this category.
                 </div>
               )}
             </div>
           </>
         );
+      }
       case 1:
         return <PatientsView />;
       case 2:
@@ -9710,82 +9868,56 @@ export default function App() {
       }
     >
       <DesktopUpdater />
-      {logoutConfirmOpen ? (
-        <div
-          className="logout-confirm-backdrop"
-          role="presentation"
-          onClick={() => setLogoutConfirmOpen(false)}
-        >
-          <section
-            className="logout-confirm-dialog"
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="logout-confirm-title"
-            onClick={(event) => event.stopPropagation()}
-          >
-            <div className="logout-confirm-icon">
-              <Icon type="logout" size={22} />
-            </div>
-            <div className="logout-confirm-copy">
-              <h3 id="logout-confirm-title">Confirm Logout</h3>
-              <p>Are you sure you want to end this HMIS session?</p>
-            </div>
-            <div className="logout-confirm-actions">
-              <button
-                type="button"
-                className="logout-confirm-cancel"
-                onClick={() => setLogoutConfirmOpen(false)}
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                className="logout-confirm-submit"
-                onClick={handleLogout}
-              >
-                Logout
-              </button>
-            </div>
-          </section>
-        </div>
-      ) : null}
       <DesktopSidebar
         collapsed={sidebarCollapsed}
         onToggleCollapsed={toggleSidebar}
+        onRequestCollapse={() => setSidebarCollapsed(true)}
         activeNav={activeNav}
         activeWorkflowModuleId={activeWorkflowModuleId}
-        onNavigateModule={(id) => {
-          setActiveWorkflowModuleId(id);
-          setActiveNav(99);
-        }}
         onNavigateNav={(idx) => {
           setActiveWorkflowModuleId(null);
           setActiveNav(idx);
         }}
-        userRole={String(user?.role || "hospital_admin")}
-        allowedModuleIds={allowedModuleSet}
-        facilityName={String(dashboardFacilityName || facility?.name || "MediLink HMIS")}
-        facilityLogo={resolveAssetUrl(facilityLogo) || null}
+        onNavigateUpgrade={() => {
+          setActiveWorkflowModuleId(null);
+          setActiveNav(40);
+        }}
         onOpenHelpAi={() => setHelpWidgetOpen(true)}
+        facilityName={String(dashboardFacilityName || facility?.name || "MediLink General Hospital")}
+        facilityLogo={resolveAssetUrl(facilityLogo) || null}
       />
 
-          <div className="main">
+      <div className="main">
         <DesktopTopbar
           activeNav={activeNav}
+          activeWorkflowModuleId={activeWorkflowModuleId}
           onGoBack={goToDashboard}
-          onOpenSettings={() => setActiveNav(12)}
-          userName={String(user?.name || "Admin")}
-          userRole={String(user?.role || "Hospital Admin")}
+          onOpenSettings={(section) => {
+            setActiveWorkflowModuleId(null);
+            setActiveNav(12);
+          }}
+          onOpenHelpAi={() => setHelpWidgetOpen(true)}
+          onOpenFacilitySettings={() => {
+            setActiveWorkflowModuleId(null);
+            setActiveNav(18);
+          }}
+          onOpenHelpdesk={() => {
+            setActiveWorkflowModuleId(null);
+            setActiveNav(29);
+          }}
+          onNavigateQueue={() => {
+            setActiveWorkflowModuleId(null);
+            setActiveNav(28);
+          }}
           onLogout={handleLogout}
-          queueNotices={queueNotices}
-          moduleSearch={moduleSearch}
-          onModuleSearchChange={setModuleSearch}
-          moduleSearchFocused={moduleSearchFocused}
-          onModuleSearchFocus={() => setModuleSearchFocused(true)}
-          onModuleSearchBlur={() => window.setTimeout(() => setModuleSearchFocused(false), 140)}
-          moduleSearchResults={moduleSearchResults}
-          onModuleSearchSubmit={handleModuleSearchSubmit}
-          onOpenModule={openModuleFromSearch}
+          userName={String(user?.name || "Hospital Admin")}
+          userRole={String(user?.role || "Hospital Admin")}
+          userEmail={String(user?.email || "admin@medilink.com")}
+          facilityId={String(facility?.id || "facility")}
+          facilityName={String(dashboardFacilityName || facility?.name || "MediLink General Hospital")}
+          facilityLogo={resolveAssetUrl(facilityLogo) || null}
+          allowedModuleIds={allowedModuleSet}
+          onOpenModule={handleOpenModule}
         />
         <DesktopAppShell activeModuleId={activeWorkflowModuleId}>
           {renderMain()}
