@@ -67,6 +67,7 @@ import FacilitiesView, { FacilityView } from "./views/FacilitiesView";
 import EhrView, { EHRView } from "./views/EhrView";
 import { MODULE_BY_ID, MODULE_SECTIONS, MODULE_CATALOG } from "./lib/moduleCatalog";
 import { getModuleIcon } from "./lib/moduleIconMap";
+import { syncEngine } from "./lib/syncEngine";
 import {
   WORKFLOW_MODULE_BY_ID,
   WORKFLOW_MODULES,
@@ -1139,10 +1140,18 @@ function formatRoleLabel(role: string) {
 
 function firstNameForGreeting(value: unknown) {
   const name = String(value || "").trim();
-  if (!name || name.includes("@")) return "User";
-  const parts = name.split(/\s+/).filter(Boolean);
-  const title = /^(dr|mr|mrs|ms|prof)\.?$/i;
-  return parts.find((part) => !title.test(part)) || "User";
+  const lower = name.toLowerCase().replace(/[@._\d-]+/g, " ").trim();
+  if (lower.includes("almalick") || lower.includes("alimalick") || lower.includes("kweyu")) {
+    return "Almalick Kweyu";
+  }
+  if (!name || name.includes("@")) return "Hospital Admin";
+  return name
+    .replace(/[._-]+/g, " ")
+    .replace(/\d+$/, "")
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((w) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
+    .join(" ");
 }
 
 function toFrontendPatient(raw: any): Patient {
@@ -8294,6 +8303,13 @@ export default function App() {
     setSidebarCollapsed(activeWorkflowModuleId !== null);
   }, [activeWorkflowModuleId]);
 
+  useEffect(() => {
+    const tenantId = facility?.id || (user as any)?.facilityId || (user as any)?.tenantId;
+    if (tenantId) {
+      syncEngine.subscribeToTenantChannel("HOSPITAL", String(tenantId));
+    }
+  }, [facility?.id, (user as any)?.facilityId, (user as any)?.tenantId]);
+
   const [primaryColor, setPrimaryColor] = useState(
     () => localStorage.getItem("hmis_primary") || "#13d802",
   );
@@ -8694,7 +8710,7 @@ export default function App() {
   const dashboardFacilityName = pickHospitalName(
     setupFacilityNameFallback,
     facility?.name,
-  );
+  ) || "Medilink Hospital";
   const sidebarFacilityName = dashboardFacilityName;
   const sidebarFacilityLogo =
     resolveAssetUrl(facilityLogo) ||

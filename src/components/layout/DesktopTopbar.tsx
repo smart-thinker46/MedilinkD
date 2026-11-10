@@ -12,6 +12,7 @@ import { MODULE_CATALOG } from "../../lib/moduleCatalog";
 import { getModuleIcon } from "../../lib/moduleIconMap";
 import { apiFetch } from "../../lib/apiClient";
 import { useAppStore } from "../../store/appStore";
+import { useSyncState } from "../../lib/syncEngine";
 
 type QueueNotice = {
   id: string;
@@ -62,14 +63,28 @@ type DesktopTopbarProps = {
 
 const DEFAULT_USER_NAMES = new Set(["dr. almalick", "hospital admin", "user"]);
 
+function formatPrettyName(name: string): string {
+  const lower = name.toLowerCase().replace(/[@._\d-]+/g, " ").trim();
+  if (lower.includes("almalick") || lower.includes("alimalick") || lower.includes("kweyu")) {
+    return "Almalick Kweyu";
+  }
+  return name
+    .replace(/[._-]+/g, " ")
+    .replace(/\d+$/, "")
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((w) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
+    .join(" ");
+}
+
 const cleanDisplayName = (...values: Array<unknown>) => {
   for (const value of values) {
     const text = String(value || "").trim();
     if (!text || DEFAULT_USER_NAMES.has(text.toLowerCase())) continue;
-    return text;
+    return formatPrettyName(text);
   }
   const fallback = String(values.find((value) => String(value || "").trim()) || "").trim();
-  return fallback || "Hospital Admin";
+  return fallback ? formatPrettyName(fallback) : "Almalick Kweyu";
 };
 
 const isFacilityLevelLabel = (value?: unknown) =>
@@ -135,6 +150,7 @@ export function DesktopTopbar({
   const [logoutConfirmOpen, setLogoutConfirmOpen] = useState(false);
   const [loggingOut, setLoggingOut] = useState(false);
   const [profile, setProfile] = useState<ProfileSnapshot | null>(null);
+  const syncState = useSyncState();
 
   // Search state
   const [moduleSearch, setModuleSearch] = useState("");
@@ -400,6 +416,27 @@ export function DesktopTopbar({
       </div>
 
       <div className="topbar-right">
+        {/* Real-time Sync Status Indicator */}
+        <div
+          className={`topbar-sync-badge sync-${syncState.status}`}
+          title={
+            syncState.status === "online"
+              ? "HMIS Synchronized with Backend"
+              : syncState.status === "syncing"
+              ? "Synchronizing HMIS data..."
+              : `Offline (${syncState.queuedCount} mutations queued)`
+          }
+        >
+          <span className="sync-dot" />
+          <span className="sync-text">
+            {syncState.status === "online"
+              ? "Synced"
+              : syncState.status === "syncing"
+              ? "Syncing"
+              : `Offline${syncState.queuedCount ? ` (${syncState.queuedCount})` : ""}`}
+          </span>
+        </div>
+
         {/* Medilink AI Button */}
         <button
           type="button"

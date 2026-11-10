@@ -1,4 +1,5 @@
 import { WORKFLOW_MODULES } from "../modules/workflowCatalog";
+import { syncEngine } from "./syncEngine";
 
 export function normalizeBaseUrl(value: unknown, fallback = "") {
   const first =
@@ -482,6 +483,18 @@ export async function apiFetch(
   try {
     first = await request(headers);
   } catch (error) {
+    if (needsCsrf && !navigator.onLine) {
+      // Offline mutation queueing
+      const bodyStr = typeof init.body === "string" ? init.body : undefined;
+      const headersObj: Record<string, string> = {};
+      headers.forEach((val, key) => { headersObj[key] = val; });
+      syncEngine.enqueueMutation(path, method, bodyStr, headersObj);
+      return new Response(JSON.stringify({ queued: true, message: "Mutation queued for offline synchronization" }), {
+        status: 202,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+
     // Retrying a mutation risks duplicate clinical/financial operations. Only
     // retry one transient, non-user-cancelled read request.
     if ((method !== "GET" && method !== "HEAD") || init.signal?.aborted || isAbortError(error)) throw error;
@@ -514,10 +527,16 @@ export async function apiFetch(
       headers: retryHeaders,
       credentials: "include",
     });
+    if (retry.ok) {
+      notifyLiveDataChanged({ method, url: path, source: "desktop" });
+    }
     return retry;
   }
 
   if (first.status !== 401) {
+    if (first.ok && needsCsrf) {
+      notifyLiveDataChanged({ method, url: path, source: "desktop" });
+    }
     return first;
   }
 
@@ -543,6 +562,9 @@ export async function apiFetch(
     headers: retryHeaders,
     credentials: "include",
   });
+  if (retry.ok && needsCsrf) {
+    notifyLiveDataChanged({ method, url: path, source: "desktop" });
+  }
   return retry;
 }
 
