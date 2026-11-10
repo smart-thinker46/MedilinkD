@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Medilink HMIS",
+  "productName": "Medilink HMIS Desktop",
   "version": "1.0.0",
   "identifier": "com.almalick.desktop",
   "build": {
@@ -24,8 +24,12 @@
   },
   "bundle": {
     "active": true,
-    "targets": "all",
+    "targets": ["nsis"],
     "createUpdaterArtifacts": true,
+    "homepage": "https://github.com/smart-thinker46/MedilinkD",
+    "shortDescription": "Secure hospital information management desktop application.",
+    "longDescription": "Medilink HMIS Desktop provides secure, role-aware hospital information management workflows for clinical and administrative teams.",
+    "category": "Medical",
     "icon": [
       "icons/32x32.png",
       "icons/64x64.png",
@@ -34,7 +38,24 @@
       "icons/icon.png",
       "icons/icon.icns",
       "icons/icon.ico"
-    ]
+    ],
+    "windows": {
+      "allowDowngrades": false,
+      "webviewInstallMode": {
+        "type": "downloadBootstrapper",
+        "silent": true
+      },
+      "nsis": {
+        "headerImage": "installer/medilink-header.bmp",
+        "sidebarImage": "installer/medilink-sidebar.bmp",
+        "installerIcon": "icons/icon.ico",
+        "installMode": "both",
+        "languages": ["English"],
+        "compression": "lzma",
+        "startMenuFolder": "Medilink HMIS",
+        "installerHooks": "installer/medilink-hooks.nsh"
+      }
+    }
   },
   "plugins": {
     "updater": {
