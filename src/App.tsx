@@ -1137,6 +1137,14 @@ function formatRoleLabel(role: string) {
     .join(" ");
 }
 
+function firstNameForGreeting(value: unknown) {
+  const name = String(value || "").trim();
+  if (!name || name.includes("@")) return "User";
+  const parts = name.split(/\s+/).filter(Boolean);
+  const title = /^(dr|mr|mrs|ms|prof)\.?$/i;
+  return parts.find((part) => !title.test(part)) || "User";
+}
+
 function toFrontendPatient(raw: any): Patient {
   const nested = raw?.patient && typeof raw.patient === "object" ? raw.patient : {};
   const pick = (...values: any[]) =>
@@ -1247,6 +1255,9 @@ type HelpAssistantContext = {
 
 function PatientsView() {
   const createEmptyPatientForm = () => ({
+    registrationMode: "STANDARD",
+    estimatedAge: "",
+    arrivalSource: "Walk-in",
     firstName: "",
     middleName: "",
     lastName: "",
@@ -1254,6 +1265,8 @@ function PatientsView() {
     gender: "MALE" as "MALE" | "FEMALE" | "OTHER",
     maritalStatus: "",
     nationality: "",
+    countryOfBirth: "",
+    preferredLanguage: "",
     idType: "",
     idNumber: "",
     shaNumber: "",
@@ -1279,6 +1292,9 @@ function PatientsView() {
     nextOfKinAddress: "",
     nextOfKinIsPrimary: false,
     nextOfKinConsent: false,
+    guardianName: "",
+    guardianRelationship: "",
+    guardianAuthority: "",
     insuranceScheme: "",
     policyNumber: "",
     memberName: "",
@@ -1288,6 +1304,17 @@ function PatientsView() {
     policyExpiryDate: "",
     annualBenefitLimit: "",
     portalPhone: "",
+    portalAccessEnabled: true,
+    communicationPreferences: {
+      sms: true,
+      whatsapp: false,
+      email: true,
+      calls: true,
+      appointmentReminders: true,
+      resultsNotifications: false,
+      billingNotifications: false,
+    },
+    duplicateOverrideReason: "",
     vulnerabilityFlags: [] as string[],
     hasInsurance: false,
   });
@@ -1495,6 +1522,9 @@ function PatientsView() {
     const parts = duplicatePatient.name.split(" ");
     setForm((current) => ({
       ...current,
+      registrationMode: source.registrationMode || current.registrationMode,
+      estimatedAge: String(source.estimatedAge || ""),
+      arrivalSource: source.arrivalSource || current.arrivalSource,
       firstName: parts[0] || current.firstName,
       middleName: (duplicatePatient as any).middleName || current.middleName,
       lastName: parts.slice(1).join(" ") || current.lastName,
@@ -1639,6 +1669,8 @@ function PatientsView() {
       dateOfBirth: String(source.dateOfBirth || "").slice(0, 10),
       maritalStatus: source.maritalStatus || "",
       nationality: source.nationality || "",
+      countryOfBirth: source.countryOfBirth || "",
+      preferredLanguage: source.preferredLanguage || "",
       idType: source.idType || "",
       idNumber: source.nationalId || source.idNumber || "",
       shaNumber: source.shaNumber || "",
@@ -1664,6 +1696,9 @@ function PatientsView() {
       nextOfKinAddress: source.nextOfKinAddress || "",
       nextOfKinIsPrimary: Boolean(source.nextOfKinIsPrimary),
       nextOfKinConsent: Boolean(source.nextOfKinConsent),
+      guardianName: source.guardianName || "",
+      guardianRelationship: source.guardianRelationship || "",
+      guardianAuthority: source.guardianAuthority || "",
       hasInsurance: Boolean(source.hasInsurance || source.insuranceProvider || source.insuranceNumber || source.insuranceScheme || source.policyNumber),
       insuranceScheme: source.insuranceProvider || source.insuranceScheme || "",
       policyNumber: source.insuranceNumber || source.policyNumber || "",
@@ -1674,6 +1709,9 @@ function PatientsView() {
       policyExpiryDate: String(source.policyExpiryDate || source.insuranceValidTo || source.insuranceExpiry || "").slice(0, 10),
       annualBenefitLimit: source.annualBenefitLimit || source.insuranceBenefitLimit ? String(source.annualBenefitLimit || source.insuranceBenefitLimit) : "",
       portalPhone: source.portalPhone || source.phone || "",
+      portalAccessEnabled: source.portalAccessEnabled ?? true,
+      communicationPreferences: source.communicationPreferences || current.communicationPreferences,
+      duplicateOverrideReason: source.duplicateOverrideReason || "",
       vulnerabilityFlags: Array.isArray(source.vulnerabilityFlags) ? source.vulnerabilityFlags : [],
     }));
   };
@@ -1688,6 +1726,9 @@ function PatientsView() {
     setError("");
     try {
       const payload = {
+        registrationMode: form.registrationMode,
+        estimatedAge: form.estimatedAge ? Number(form.estimatedAge) : undefined,
+        arrivalSource: form.arrivalSource || undefined,
         firstName: form.firstName.trim(),
         middleName: form.middleName.trim() || undefined,
         lastName: form.lastName.trim(),
@@ -1697,6 +1738,8 @@ function PatientsView() {
         idType: form.idType || undefined,
         idNumber: form.idNumber.trim() || undefined,
         nationality: form.nationality.trim() || undefined,
+        countryOfBirth: form.countryOfBirth.trim() || undefined,
+        preferredLanguage: form.preferredLanguage.trim() || undefined,
         shaNumber: form.shaNumber.trim() || undefined,
         phone: form.phonePrimary.trim() || undefined,
         phonePrimary: form.phonePrimary.trim() || undefined,
@@ -1722,6 +1765,9 @@ function PatientsView() {
         nextOfKinAddress: form.nextOfKinAddress.trim() || undefined,
         nextOfKinIsPrimary: form.nextOfKinIsPrimary,
         nextOfKinConsent: form.nextOfKinConsent,
+        guardianName: form.guardianName.trim() || undefined,
+        guardianRelationship: form.guardianRelationship.trim() || undefined,
+        guardianAuthority: form.guardianAuthority.trim() || undefined,
         insuranceProvider: form.hasInsurance ? form.insuranceScheme.trim() || undefined : undefined,
         insuranceNumber: form.hasInsurance ? form.policyNumber.trim() || undefined : undefined,
         insuranceScheme: form.hasInsurance ? form.insuranceScheme.trim() || undefined : undefined,
@@ -1732,8 +1778,10 @@ function PatientsView() {
         policyStartDate: form.hasInsurance && form.policyStartDate ? new Date(form.policyStartDate).toISOString() : undefined,
         policyExpiryDate: form.hasInsurance && form.policyExpiryDate ? new Date(form.policyExpiryDate).toISOString() : undefined,
         annualBenefitLimit: form.hasInsurance && form.annualBenefitLimit ? Number(form.annualBenefitLimit) : undefined,
-        portalAccessEnabled: true,
+        portalAccessEnabled: form.portalAccessEnabled,
         portalPhone: form.portalPhone.trim() || form.phonePrimary.trim() || undefined,
+        communicationPreferences: form.communicationPreferences,
+        duplicateOverrideReason: form.duplicateOverrideReason.trim() || undefined,
         primaryFacilityId: facility?.id || undefined,
         orgId: facility?.id || undefined,
       } as any;
@@ -2875,6 +2923,9 @@ function PatientsView() {
                     </div>
                   ) : null}
                   <div className="patient-form-grid three">
+                    <label>Registration Mode<select className="form-input" value={form.registrationMode} onChange={(e) => setForm((f) => ({ ...f, registrationMode: e.target.value }))}><option value="STANDARD">Standard</option><option value="EMERGENCY">Emergency</option><option value="TEMPORARY">Temporary</option></select></label>
+                    <label>Arrival Source<input className="form-input" value={form.arrivalSource} onChange={(e) => setForm((f) => ({ ...f, arrivalSource: e.target.value }))} placeholder="Walk-in" /></label>
+                    <label>Estimated Age<input type="number" min="0" className="form-input" value={form.estimatedAge} onChange={(e) => setForm((f) => ({ ...f, estimatedAge: e.target.value }))} placeholder="Only when DOB is unknown" /></label>
                     <label>First Name *<input required className="form-input" value={form.firstName} onChange={(e) => setForm((f) => ({ ...f, firstName: e.target.value }))} placeholder="John" /></label>
                     <label>Middle Name<input className="form-input" value={form.middleName} onChange={(e) => setForm((f) => ({ ...f, middleName: e.target.value }))} placeholder="Omondi" /></label>
                     <label>Last Name *<input required className="form-input" value={form.lastName} onChange={(e) => setForm((f: any) => ({ ...f, lastName: e.target.value }))} placeholder="Doe" /></label>
@@ -2915,6 +2966,8 @@ function PatientsView() {
                     <label>Gender *<select required className="form-input" value={form.gender} onChange={(e) => setForm((f) => ({ ...f, gender: e.target.value as any }))}><option value="MALE">Male</option><option value="FEMALE">Female</option><option value="OTHER">Other</option></select></label>
                     <label>Marital Status<select className="form-input" value={form.maritalStatus} onChange={(e) => setForm((f) => ({ ...f, maritalStatus: e.target.value }))}><option value="">Select</option><option>Single</option><option>Married</option><option>Divorced</option><option>Widowed</option></select></label>
                     <label>Nationality<input className="form-input" value={form.nationality} onChange={(e) => setForm((f) => ({ ...f, nationality: e.target.value }))} placeholder="Kenyan" /></label>
+                    <label>Country of Birth<input className="form-input" value={form.countryOfBirth} onChange={(e) => setForm((f) => ({ ...f, countryOfBirth: e.target.value }))} placeholder="Kenya" /></label>
+                    <label>Preferred Language<input className="form-input" value={form.preferredLanguage} onChange={(e) => setForm((f) => ({ ...f, preferredLanguage: e.target.value }))} placeholder="English" /></label>
                     <label>ID Type<select className="form-input" value={form.idType} onChange={(e) => setForm((f) => ({ ...f, idType: e.target.value }))}><option value="">Select</option><option>National ID</option><option>Passport</option><option>Alien ID</option><option>Birth Certificate</option></select></label>
                     <label>ID Number *<input required className="form-input" value={form.idNumber} onChange={(e) => setForm((f) => ({ ...f, idNumber: e.target.value }))} placeholder="12345678" /></label>
                     <label>SHA Number<input className="form-input" value={form.shaNumber} onChange={(e) => setForm((f) => ({ ...f, shaNumber: e.target.value }))} placeholder="SHA member number" /></label>
@@ -2980,6 +3033,9 @@ function PatientsView() {
                     <label className="patient-form-span">NOK Address<input className="form-input" value={form.nextOfKinAddress} onChange={(e) => setForm((f) => ({ ...f, nextOfKinAddress: e.target.value }))} placeholder="Emergency contact address" /></label>
                     <label className="patient-form-check"><input type="checkbox" checked={form.nextOfKinIsPrimary} onChange={(e) => setForm((f) => ({ ...f, nextOfKinIsPrimary: e.target.checked }))} /> Primary emergency contact</label>
                     <label className="patient-form-check"><input type="checkbox" checked={form.nextOfKinConsent} onChange={(e) => setForm((f) => ({ ...f, nextOfKinConsent: e.target.checked }))} /> Consent to contact next of kin</label>
+                    <label>Guardian Name<input className="form-input" value={form.guardianName} onChange={(e) => setForm((f) => ({ ...f, guardianName: e.target.value }))} placeholder="For a minor or dependent" /></label>
+                    <label>Guardian Relationship<input className="form-input" value={form.guardianRelationship} onChange={(e) => setForm((f) => ({ ...f, guardianRelationship: e.target.value }))} placeholder="Parent, guardian, or legal representative" /></label>
+                    <label className="patient-form-span">Legal Authority / Consent<input className="form-input" value={form.guardianAuthority} onChange={(e) => setForm((f) => ({ ...f, guardianAuthority: e.target.value }))} placeholder="Authority or consent reference" /></label>
                     <label className="patient-form-check patient-form-span"><input type="checkbox" checked={form.hasInsurance} onChange={(e) => setForm((f) => ({ ...f, hasInsurance: e.target.checked }))} /> Has Insurance</label>
                   </div>
                 </div>
@@ -3008,7 +3064,11 @@ function PatientsView() {
                     <div className="form-info-banner patient-form-span">
                       Patient portal account is created automatically after registration.
                     </div>
+                    <label className="patient-form-check patient-form-span"><input type="checkbox" checked={form.portalAccessEnabled} onChange={(e) => setForm((f) => ({ ...f, portalAccessEnabled: e.target.checked }))} /> Enable patient portal access</label>
                     <label className="patient-form-span">Portal Phone<input type="tel" className="form-input" value={form.portalPhone} onChange={(e) => setForm((f) => ({ ...f, portalPhone: e.target.value }))} placeholder="Defaults to primary phone if left empty" /></label>
+                    <fieldset className="patient-form-span patient-check-grid"><legend>Communication Preferences</legend>{([
+                      ["sms", "SMS"], ["whatsapp", "WhatsApp"], ["email", "Email"], ["calls", "Calls"], ["appointmentReminders", "Appointment reminders"], ["resultsNotifications", "Results notifications"], ["billingNotifications", "Billing notifications"],
+                    ] as const).map(([key, label]) => <label key={key} className="patient-form-check"><input type="checkbox" checked={form.communicationPreferences[key]} onChange={(e) => setForm((f) => ({ ...f, communicationPreferences: { ...f.communicationPreferences, [key]: e.target.checked } }))} /> {label}</label>)}</fieldset>
                   </div>
                 </div>
               )}
@@ -8225,6 +8285,15 @@ export default function App() {
     null,
   );
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+
+  // Match the Web shell: a module workspace is always shown with the
+  // navigation rail collapsed, while returning to the launcher restores the
+  // full sidebar. Deriving this from the active module also covers modules
+  // opened from the dashboard cards and the topbar search.
+  useEffect(() => {
+    setSidebarCollapsed(activeWorkflowModuleId !== null);
+  }, [activeWorkflowModuleId]);
+
   const [primaryColor, setPrimaryColor] = useState(
     () => localStorage.getItem("hmis_primary") || "#13d802",
   );
@@ -8383,6 +8452,42 @@ export default function App() {
   useEffect(() => {
     localStorage.setItem("hmis_landing_theme", landingTheme);
   }, [landingTheme]);
+
+  useEffect(() => {
+    if (authScreen !== "app") return;
+    let cancelled = false;
+
+    const synchronizeProfile = async () => {
+      try {
+        const response = await api.get("/security/me");
+        const profile = response.data as {
+          name?: unknown;
+          fullName?: unknown;
+          email?: unknown;
+          role?: unknown;
+          roleLabel?: unknown;
+        };
+        const profileName = String(profile?.name || profile?.fullName || "").trim();
+        if (cancelled || !profileName || profileName.includes("@")) return;
+
+        setUser({
+          name: profileName,
+          email: String(profile?.email || user?.email || "").trim(),
+          role: String(profile?.roleLabel || profile?.role || user?.role || "User").trim(),
+          facilityId: user?.facilityId,
+          tenantId: user?.tenantId,
+          moduleIds: user?.moduleIds,
+        });
+      } catch {
+        // The local authenticated session remains the offline-safe fallback.
+      }
+    };
+
+    void synchronizeProfile();
+    return () => {
+      cancelled = true;
+    };
+  }, [authScreen, setUser, user?.email, user?.facilityId, user?.moduleIds, user?.name, user?.role, user?.tenantId]);
 
   useEffect(() => {
     if (authScreen !== "app") return;
@@ -9424,7 +9529,7 @@ export default function App() {
               </div>
               <div className="welcome-copy">
                 <span className="welcome-kicker">MEDILINK HMIS</span>
-                <h2>Welcome back, {user?.name || "Hospital Admin"}</h2>
+                <h2>Welcome back, {firstNameForGreeting(user?.name)}</h2>
                 <p>
                   {dashboardFacilityName ? (
                     <>
@@ -9451,51 +9556,6 @@ export default function App() {
                 </div>
               )}
             </section>
-
-            {/* Category Filter Tabs */}
-            <div
-              className="module-category-row"
-              style={{
-                display: "flex",
-                gap: 8,
-                padding: "4px 16px 12px",
-                flexWrap: "wrap",
-                alignItems: "center",
-              }}
-            >
-              {[
-                "All",
-                "Patient Journey",
-                "Clinical",
-                "Administration",
-                "Technology & Intelligence",
-                "Support Services",
-              ].map((category) => {
-                const isSelected = activeModuleCategory === category;
-                return (
-                  <button
-                    key={category}
-                    type="button"
-                    onClick={() => setActiveModuleCategory(category)}
-                    style={{
-                      border: isSelected
-                        ? "1px solid var(--hmis-primary, #10c400)"
-                        : "1px solid rgba(148, 163, 184, 0.4)",
-                      background: isSelected ? "var(--hmis-selected-bg, #d7fbe9)" : "#ffffff",
-                      color: isSelected ? "#065f46" : "#475569",
-                      padding: "5px 12px",
-                      borderRadius: 999,
-                      fontSize: "0.74rem",
-                      fontWeight: 800,
-                      cursor: "pointer",
-                      transition: "all 0.16s ease",
-                    }}
-                  >
-                    {category}
-                  </button>
-                );
-              })}
-            </div>
 
             <div className={`module-grid ${compactDashboard ? "module-grid-compact" : ""}`}>
               {visibleModules.map((mod) => {

@@ -87,6 +87,7 @@ export const MODULE_CATALOG: ModuleCatalogItem[] = [
   { id: 45, name: "Cost Accounting", path: "/cost-accounting", layer: "Administration", premium: true, icon: DollarSign },
   { id: 15, name: "Inventory", path: "/inventory", layer: "Administration", premium: true, icon: Hospital },
   { id: 16, name: "Human Resources", path: "/hr", layer: "Administration", premium: true, icon: Users },
+  // 38 is already reserved by ICU; keep Payroll's catalogue identity unique.
   { id: 66, name: "Payroll & Compensation", path: "/payroll", layer: "Administration", premium: true, icon: CreditCard },
   { id: 40, name: "Workforce Planning", path: "/workforce-planning", layer: "Administration", premium: true, icon: UsersRound },
   { id: 17, name: "Doctor Management", path: "/doctors", layer: "Administration", premium: true, icon: UserCheck },
@@ -141,4 +142,3 @@ export const MODULE_BY_ID = new Map<number, ModuleCatalogItem>(
 export const MODULE_BY_PATH = new Map<string, ModuleCatalogItem>(
   MODULE_CATALOG.map((item) => [item.path, item]),
 );
-

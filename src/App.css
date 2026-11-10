@@ -49287,6 +49287,282 @@ html[data-theme="dark"] .welcome p span { border-left-color: #475569; }
   .topbar-ai-label { display: inline !important; }
 }
 
+/*
+ * Desktop shell parity — keep this final so legacy Desktop rules cannot
+ * override the shared Web shell visual contract. The corresponding reference
+ * is Medilink-Frontend/src/app/globals.css and its layout components.
+ */
+.layout > .sidebar {
+  width: 220px !important;
+  padding: 10px 9px 12px !important;
+  background: linear-gradient(180deg, #080b10 0%, #06080a 34%, #061a13 66%, #10c400 100%) !important;
+  border-right: 1px solid rgba(255, 255, 255, 0.18) !important;
+  transition: width 0.22s ease, padding 0.22s ease !important;
+}
+
+.layout > .sidebar.sidebar-collapsed {
+  width: 76px !important;
+  padding-left: 8px !important;
+  padding-right: 8px !important;
+}
+
+.layout > .sidebar .sidebar-brand-top {
+  gap: 10px !important;
+  padding-bottom: 14px !important;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.12) !important;
+}
+
+.layout > .sidebar .sidebar-form-section {
+  gap: 10px !important;
+  padding: 6px 0 10px !important;
+}
+
+.layout > .sidebar .sidebar-form-list {
+  gap: 6px !important;
+}
+
+.layout > .sidebar .sidebar-form-btn,
+.layout > .sidebar .sidebar-workspace-btn {
+  min-height: 38px !important;
+  gap: 9px !important;
+  padding: 9px 10px !important;
+  border-radius: 8px !important;
+  font-size: 0.78rem !important;
+  line-height: 1.2 !important;
+}
+
+.layout > .sidebar .sidebar-workspace-tools {
+  gap: 8px !important;
+}
+
+.layout > .sidebar .sidebar-action-stack {
+  display: grid !important;
+  grid-template-columns: 1fr !important;
+  gap: 8px !important;
+  padding: 12px 0 0 !important;
+}
+
+.layout > .sidebar.sidebar-collapsed .sidebar-action-stack {
+  grid-template-columns: 1fr !important;
+}
+
+.layout > .sidebar .sidebar-upgrade-btn,
+.layout > .sidebar .sidebar-help-btn {
+  width: 100% !important;
+  min-height: 38px !important;
+  margin: 0 !important;
+}
+
+.layout > .sidebar .sidebar-hospital-profile {
+  min-height: 132px !important;
+  margin-top: 12px !important;
+  padding: 14px 10px !important;
+  border-radius: 8px !important;
+  gap: 10px !important;
+}
+
+.layout > .sidebar .sidebar-hospital-logo {
+  width: 86px !important;
+  height: 86px !important;
+  border-radius: 8px !important;
+}
+
+.layout > .sidebar.sidebar-collapsed .sidebar-hospital-profile {
+  min-height: 72px !important;
+  padding: 8px !important;
+}
+
+.layout > .sidebar.sidebar-collapsed .sidebar-hospital-logo {
+  width: 52px !important;
+  height: 52px !important;
+}
+
+.layout .topbar {
+  min-height: 68px !important;
+  padding: 12px 22px !important;
+  background:
+    radial-gradient(circle at 76% 0%, rgba(22, 163, 74, 0.26), transparent 28%),
+    linear-gradient(90deg, #1f2937 0%, #1e293b 44%, #0f172a 100%) !important;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.16) !important;
+  box-shadow: 0 10px 26px rgba(15, 23, 42, 0.16) !important;
+}
+
+.layout .topbar-left {
+  min-width: 0 !important;
+  flex: 1 !important;
+}
+
+.layout .topbar-right {
+  flex-shrink: 0 !important;
+  padding-left: 14px !important;
+  border-left: 1px solid rgba(255, 255, 255, 0.1) !important;
+}
+
+.layout .topbar-back-btn {
+  min-height: 38px !important;
+  border-color: rgba(255, 255, 255, 0.22) !important;
+  background: rgba(255, 255, 255, 0.12) !important;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08) !important;
+}
+
+.layout .topbar-back-btn:hover {
+  background: rgba(255, 255, 255, 0.2) !important;
+  box-shadow: 0 10px 18px rgba(15, 23, 42, 0.16) !important;
+}
+
+.layout .topbar form.search-wrap {
+  width: min(360px, 44vw) !important;
+  max-width: min(360px, 44vw) !important;
+}
+
+.layout .topbar .search-input {
+  height: 40px !important;
+  min-height: 40px !important;
+  padding-left: 40px !important;
+  padding-right: 18px !important;
+  color: #ffffff !important;
+  background: linear-gradient(180deg, rgba(15, 23, 42, 0.9), rgba(15, 23, 42, 0.72)) !important;
+  border-color: rgba(255, 255, 255, 0.22) !important;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08), 0 8px 18px rgba(2, 6, 23, 0.12) !important;
+}
+
+.layout .topbar .search-input::placeholder {
+  color: rgba(255, 255, 255, 0.78) !important;
+  opacity: 1 !important;
+}
+
+.layout .topbar .search-input:focus {
+  border-color: rgba(34, 197, 94, 0.72) !important;
+  box-shadow: 0 0 0 3px rgba(22, 163, 74, 0.14), inset 0 1px 0 rgba(255, 255, 255, 0.08) !important;
+}
+
+.layout .topbar-icon-btn {
+  width: 40px !important;
+  height: 40px !important;
+  border-color: rgba(255, 255, 255, 0.22) !important;
+  background: rgba(255, 255, 255, 0.12) !important;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08) !important;
+}
+
+.layout .topbar-icon-btn:hover {
+  background: rgba(255, 255, 255, 0.2) !important;
+  box-shadow: 0 10px 18px rgba(15, 23, 42, 0.16) !important;
+}
+
+.layout .topbar .topbar-logout-btn,
+.layout .topbar-danger-btn {
+  min-height: 40px !important;
+  padding: 9px 15px !important;
+  border-color: rgba(248, 113, 113, 0.45) !important;
+  background: linear-gradient(135deg, #dc2626 0%, #b91c1c 100%) !important;
+  color: #ffffff !important;
+  box-shadow: 0 10px 18px rgba(185, 28, 28, 0.2) !important;
+}
+
+.layout .topbar .topbar-logout-btn:hover,
+.layout .topbar-danger-btn:hover {
+  background: linear-gradient(135deg, #ef4444 0%, #b91c1c 100%) !important;
+}
+
+.layout .topbar .user-pill {
+  min-height: 42px !important;
+  padding: 6px 14px 6px 7px !important;
+  border-color: rgba(255, 255, 255, 0.18) !important;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.16), rgba(255, 255, 255, 0.08)) !important;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08) !important;
+}
+
+.layout .topbar .user-pill:hover {
+  border-color: rgba(255, 255, 255, 0.32) !important;
+  background: rgba(255, 255, 255, 0.18) !important;
+  transform: translateY(-1px) !important;
+}
+
+.layout .topbar .user-pill .avatar {
+  background: linear-gradient(135deg, #0f766e 0%, #0e7490 100%) !important;
+  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.16) !important;
+}
+
+/* Dashboard launcher parity with the Web /apps page. */
+.layout .welcome {
+  display: flex !important;
+  align-items: center !important;
+  gap: 12px !important;
+  min-height: 68px !important;
+  margin: 10px 16px 6px !important;
+  padding: 10px 13px !important;
+  flex-shrink: 0 !important;
+  border: 1px solid #d8e2ee !important;
+  border-left: 4px solid #0f766e !important;
+  border-radius: 9px !important;
+  background:
+    radial-gradient(circle at 94% 18%, rgba(20, 184, 166, 0.13), transparent 31%),
+    linear-gradient(110deg, #ffffff, #f8fafc) !important;
+  box-shadow: 0 8px 22px rgba(15, 23, 42, 0.055) !important;
+}
+
+.layout .welcome h2 {
+  margin: 0 !important;
+  color: #17233d !important;
+  font-family: inherit !important;
+  font-size: 0.94rem !important;
+  font-weight: 800 !important;
+  letter-spacing: -0.01em !important;
+}
+
+.layout .welcome p {
+  display: flex !important;
+  align-items: center !important;
+  gap: 7px !important;
+  margin: 4px 0 0 !important;
+  color: #64748b !important;
+  font-size: 0.72rem !important;
+  line-height: 1.25 !important;
+}
+
+.layout .welcome p strong {
+  color: #0f4c5c !important;
+  font-weight: 800 !important;
+}
+
+.layout .welcome p span {
+  padding-left: 7px !important;
+  border-left: 1px solid #cbd5e1 !important;
+  color: #64748b !important;
+}
+
+.layout .module-grid,
+.layout .module-grid.module-grid-compact {
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)) !important;
+  gap: 11px !important;
+  padding: 3px 16px 18px !important;
+}
+
+.layout .module-card,
+.layout .module-grid-compact .module-card {
+  gap: 7px !important;
+  min-height: 122px !important;
+  padding: 14px 8px 11px !important;
+}
+
+.layout .module-card:hover {
+  transform: translateY(-2px) scale(1.01) !important;
+}
+
+.layout .card-label {
+  font-size: 0.68rem !important;
+}
+
+.layout .module-icon-svg {
+  width: 32px !important;
+  height: 32px !important;
+}
+
+.layout .module-card::after {
+  width: 26px !important;
+  height: 34px !important;
+}
+
 .welcome-icon {
   display: inline-flex;
   width: 34px;
@@ -49320,3 +49596,143 @@ html[data-theme="dark"] .welcome p span { border-left-color: #475569; }
   opacity: 1;
   filter: drop-shadow(0 3px 3px rgba(0, 0, 0, 0.25));
 }
+
+/* Header panel parity: keep every header popover on the same compact visual
+   system used by Medilink-Frontend.  This deliberately lives last because
+   the desktop shell includes older panel rules for legacy module screens. */
+.topbar .topbar-panel {
+  top: calc(100% + 10px) !important;
+  right: 0 !important;
+  width: min(360px, 86vw) !important;
+  padding: 0 !important;
+  overflow: hidden !important;
+  border: 1px solid rgba(148, 163, 184, 0.35) !important;
+  border-radius: 8px !important;
+  background: #ffffff !important;
+  color: #0f172a !important;
+  box-shadow: 0 22px 60px rgba(15, 23, 42, 0.25) !important;
+  z-index: 80 !important;
+}
+
+.topbar .topbar-panel-header {
+  align-items: flex-start !important;
+  gap: 12px !important;
+  margin: 0 !important;
+  padding: 14px 16px !important;
+  border-bottom: 1px solid #e2e8f0 !important;
+  background: #f8fafc !important;
+}
+
+.topbar .topbar-panel-header strong { font-size: 0.9rem !important; }
+.topbar .topbar-panel-header span { margin-top: 2px !important; font-size: 0.74rem !important; }
+.topbar .topbar-panel-header button {
+  width: auto !important;
+  height: auto !important;
+  padding: 2px !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  color: #475569 !important;
+}
+
+.topbar .settings-panel { width: min(360px, calc(100vw - 24px)) !important; }
+.topbar .settings-panel-head {
+  gap: 12px !important;
+  padding: 13px 14px !important;
+  border-bottom: 1px solid #e2e8f0 !important;
+  background: #f8fafc !important;
+}
+.topbar .settings-panel-head strong { font-size: 0.9rem !important; }
+.topbar .settings-panel-head span { margin-top: 2px !important; font-size: 0.7rem !important; }
+.topbar .settings-panel-head button {
+  padding: 4px !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  color: #475569 !important;
+}
+.topbar .settings-menu-list { gap: 2px !important; padding: 7px !important; }
+.topbar .settings-menu-list > button {
+  gap: 10px !important;
+  padding: 9px 10px !important;
+  border: 0 !important;
+  border-radius: 6px !important;
+  background: transparent !important;
+}
+.topbar .settings-menu-list > button:hover { background: #f0fdfa !important; }
+.topbar .settings-menu-list strong { font-size: 0.77rem !important; }
+.topbar .settings-menu-list small { margin-top: 2px !important; font-size: 0.67rem !important; }
+.topbar .settings-panel-foot {
+  gap: 6px !important;
+  padding: 9px 14px !important;
+  border-top: 1px solid #e2e8f0 !important;
+  background: #f8fafc !important;
+  font-size: 0.65rem !important;
+}
+
+.topbar .notification-panel-header { align-items: center !important; }
+.topbar .notification-panel-actions { gap: 8px !important; }
+.topbar .notification-panel-actions button:first-child,
+.topbar .notification-panel-footer button {
+  border: 0 !important;
+  background: transparent !important;
+  color: #2563eb !important;
+  font-size: 0.68rem !important;
+  font-weight: 850 !important;
+}
+.topbar .notification-list { max-height: 320px !important; padding: 8px !important; }
+.topbar .notification-item {
+  gap: 12px !important;
+  padding: 10px !important;
+  border: 1px solid #e2e8f0 !important;
+  border-left: 3px solid #3b82f6 !important;
+  border-radius: 8px !important;
+  background: #ffffff !important;
+}
+.topbar .notification-item + .notification-item { margin-top: 8px !important; }
+.topbar .notification-item.is-warning { border-left-color: #f59e0b !important; }
+.topbar .notification-item.is-critical { border-left-color: #dc2626 !important; }
+.topbar .notification-item.is-read { opacity: .72 !important; }
+.topbar .notification-item strong { color: #0f172a !important; font-size: 0.82rem !important; }
+.topbar .notification-item span { margin-top: 3px !important; font-size: 0.74rem !important; }
+.topbar .notification-item small {
+  flex-shrink: 0 !important;
+  padding: 3px 7px !important;
+  border-radius: 999px !important;
+  background: #dcfce7 !important;
+  color: #166534 !important;
+  font-size: 0.62rem !important;
+  text-transform: uppercase !important;
+}
+.topbar .notification-item-category { margin: 0 0 4px !important; font-size: .62rem !important; }
+.topbar .notification-item-meta { gap: 7px !important; }
+.topbar .notification-panel-footer {
+  gap: 10px !important;
+  padding: 10px 12px !important;
+  border-top: 1px solid #e2e8f0 !important;
+  background: #f8fafc !important;
+}
+.topbar .topbar-panel-empty { padding: 18px 12px !important; font-size: 0.82rem !important; }
+
+.topbar .profile-panel {
+  width: min(390px, 90vw) !important;
+  border-radius: 10px !important;
+  border-color: rgba(15, 23, 42, 0.12) !important;
+  box-shadow: 0 22px 50px rgba(15, 23, 42, 0.24) !important;
+}
+.topbar .profile-hero { gap: 12px !important; padding: 14px 16px !important; }
+.topbar .profile-hero-main { gap: 11px !important; }
+.topbar .profile-panel-avatar { width: 48px !important; height: 48px !important; }
+.topbar .profile-hero-copy strong { font-size: 0.94rem !important; }
+.topbar .profile-hero-copy small { font-size: 0.74rem !important; }
+.topbar .profile-close-btn { width: 32px !important; height: 32px !important; border-radius: 7px !important; }
+.topbar .profile-panel-body { padding: 12px 14px 4px !important; }
+.topbar .profile-status-row { gap: 9px !important; margin: 0 !important; padding: 9px 10px !important; border-radius: 7px !important; }
+.topbar .profile-status-row strong { display: block !important; font-size: 0.76rem !important; }
+.topbar .profile-status-row small { display: block !important; margin-top: 1px !important; font-size: 0.66rem !important; text-align: left !important; }
+.topbar .profile-facility-name { font-size: 0.7rem !important; }
+.topbar .profile-details { padding: 8px 2px 10px !important; }
+.topbar .profile-details div { gap: 14px !important; padding: 9px 0 !important; border-bottom: 1px solid #e2e8f0 !important; }
+.topbar .profile-details dt { font-size: 0.72rem !important; font-weight: 700 !important; text-transform: none !important; }
+.topbar .profile-details dd { max-width: 62% !important; font-size: 0.76rem !important; }
+.topbar .profile-panel-footer { padding: 10px 14px !important; border-top: 1px solid #e2e8f0 !important; background: #f8fafc !important; }

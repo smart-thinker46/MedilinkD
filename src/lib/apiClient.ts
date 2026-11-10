@@ -30,6 +30,8 @@ export const DEVICE_ID_STORAGE_KEY = "hmis_device_id";
 export const LICENSE_FACILITY_STORAGE_KEY = "hmis_license_facility_code";
 export const HMIS_LIVE_REFRESH_EVENT = "hmis:live-data-changed";
 const HMIS_LIVE_REFRESH_STORAGE_KEY = "hmis_live_data_changed_at";
+const DEFAULT_REQUEST_TIMEOUT_MS = 30_000;
+const SAFE_REQUEST_RETRY_COUNT = 1;
 let csrfTokenCache: string | null = null;
 let accessTokenMemory: string | null = null;
 let refreshTokenMemory: string | null = null;
@@ -351,9 +353,6 @@ export async function refreshAccessToken(): Promise<boolean> {
 
   refreshInFlight = (async () => {
     const refreshToken = getRefreshToken();
-    if (!refreshToken) {
-      return false;
-    }
 
     const csrfToken = await getCsrfToken();
     const headers: Record<string, string> = { "Content-Type": "application/json" };
@@ -362,12 +361,24 @@ export async function refreshAccessToken(): Promise<boolean> {
     }
 
     try {
-      const response = await fetch(`${API_BASE_URL}/auth/refresh`, {
+      const requestRefresh = (includeDeviceId: boolean) => fetch(`${API_BASE_URL}/auth/refresh`, {
         method: "POST",
         headers,
         credentials: "include",
-        body: JSON.stringify({ refreshToken, deviceId: getDeviceId() }),
+        // The backend accepts either the rotated token or its secure refresh
+        // cookie. Keeping the token optional matches the web client and lets a
+        // restored desktop WebView session recover safely.
+        body: JSON.stringify({
+          ...(refreshToken ? { refreshToken } : {}),
+          ...(includeDeviceId ? { deviceId: getDeviceId() } : {}),
+        }),
       });
+      let response = await requestRefresh(true);
+      // A stale device binding must not prevent a valid refresh cookie/token
+      // from restoring a session. This is deliberately a single retry.
+      if (response.status === 401) {
+        response = await requestRefresh(false);
+      }
 
       const body = await parseJsonSafe(response);
       if (!response.ok) {
@@ -386,6 +397,39 @@ export async function refreshAccessToken(): Promise<boolean> {
   });
 
   return refreshInFlight;
+}
+
+function isAbortError(error: unknown) {
+  return error instanceof DOMException && error.name === "AbortError";
+}
+
+async function fetchWithTimeout(
+  input: string,
+  init: RequestInit,
+  timeoutMs = DEFAULT_REQUEST_TIMEOUT_MS,
+): Promise<Response> {
+  const controller = new AbortController();
+  const callerSignal = init.signal;
+  const abortFromCaller = () => controller.abort(callerSignal?.reason);
+  if (callerSignal?.aborted) abortFromCaller();
+  else callerSignal?.addEventListener("abort", abortFromCaller, { once: true });
+  let timedOut = false;
+  const timeout = window.setTimeout(() => {
+    timedOut = true;
+    controller.abort();
+  }, timeoutMs);
+
+  try {
+    return await fetch(input, { ...init, signal: controller.signal });
+  } catch (error) {
+    if (timedOut) {
+      throw new Error(`Request timed out after ${timeoutMs}ms`, { cause: error });
+    }
+    throw error;
+  } finally {
+    window.clearTimeout(timeout);
+    callerSignal?.removeEventListener("abort", abortFromCaller);
+  }
 }
 
 export async function logoutUser(): Promise<void> {
@@ -427,11 +471,32 @@ export async function apiFetch(
     headers.set("Authorization", `Bearer ${accessToken}`);
   }
 
-  const first = await fetch(`${API_BASE_URL}${path}`, {
-    ...init,
-    headers,
-    credentials: "include",
-  });
+  const request = (requestHeaders: Headers) =>
+    fetchWithTimeout(`${API_BASE_URL}${path}`, {
+      ...init,
+      headers: requestHeaders,
+      credentials: "include",
+    });
+
+  let first: Response;
+  try {
+    first = await request(headers);
+  } catch (error) {
+    // Retrying a mutation risks duplicate clinical/financial operations. Only
+    // retry one transient, non-user-cancelled read request.
+    if ((method !== "GET" && method !== "HEAD") || init.signal?.aborted || isAbortError(error)) throw error;
+    let lastError = error;
+    for (let attempt = 0; attempt < SAFE_REQUEST_RETRY_COUNT; attempt += 1) {
+      try {
+        first = await request(headers);
+        lastError = null;
+        break;
+      } catch (retryError) {
+        lastError = retryError;
+      }
+    }
+    if (lastError) throw lastError;
+  }
 
   if (needsCsrf && (await isBadCsrfResponse(first))) {
     clearCsrfToken();

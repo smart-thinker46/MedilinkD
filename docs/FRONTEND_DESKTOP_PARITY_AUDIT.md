@@ -7,6 +7,36 @@
 
 ---
 
+## Audit revalidation — November 9, 2026
+
+The repository locations and source trees were rechecked before foundation work:
+
+| Repository | Location | Write policy | Revalidation result |
+|---|---|---|---|
+| Web reference | `../Medilink-Frontend` | Read-only | 95 App Router pages identified; no changes made |
+| Desktop target | `.` | Writable | Tauri/Vite client with 44 dedicated view files plus shared shell and workflow components |
+| API authority | `../Medilink-Backend` | Read-only | 98 controllers identified; auth refresh and security contracts inspected directly |
+
+The existing route matrix remains the implementation inventory, not functional proof. A route marked `IMPLEMENTED` in the progress tracker requires a live, synthetic-tenant flow and visual comparison before it can be promoted to `TESTED` or `VERIFIED`. This distinction is now reflected in the QA report. The initial foundation gap addressed in this checkpoint is native-client session recovery: Desktop now mirrors the Web client's cookie-capable, single-flight refresh behavior and only retries safe read requests after a transient network failure.
+
+---
+
+## Form parity checkpoint — November 10, 2026
+
+The Web form inventory was compared with Desktop source before making changes. The shared form contracts are already synchronized: `formsDirectory.ts`, `moduleActionForms.ts`, `ModuleReferenceForms.tsx`, and the clinical form components use the same fields and validation behavior; the only differences in the clinical components are their project-relative API imports.
+
+| Form area | Reference | Desktop finding | Action / status |
+|---|---|---|---|
+| Generic action forms across modules | `formsDirectory.ts` + `moduleActionForms.ts` | Same catalogue and field definitions | Aligned |
+| Clinical: admission, notes, lab order, medication administration, nursing, prescriptions, vitals | `components/clinical/*` | Same component bodies, Desktop-relative API imports | Aligned |
+| Specialty clinical templates | `SpecialtyFormPanel.tsx` | Byte-for-byte match | Aligned |
+| Patient registration | `components/patients/PatientForm.tsx` | Desktop custom form lacked registration mode/source/estimated age, birth/language, guardian, portal, and communication fields | Updated November 10; live mutation verification pending |
+| Appointments, lab result, radiology report, inventory, pharmacy dispensing | Dedicated Web components and Desktop module views | Desktop implements these in module-specific views rather than matching component files | Requires per-screen visual and synthetic-backend verification; do not mark verified from source review alone |
+
+This audit does not treat source similarity as evidence that an endpoint accepts every field. All remaining forms must be exercised against a synthetic tenant and compared with their Web route before being marked `TESTED` or `VERIFIED`.
+
+---
+
 ## 1. Executive Summary & Architecture Baseline
 
 ### 1.1 Objective
@@ -172,4 +202,3 @@ During synchronization, the following native Desktop capabilities must remain in
 4. **Hardware Integrations:** Native thermal receipt printing for Pharmacy POS and Billing (`window.print` with Tauri fallback).
 5. **Local Session Caching & Offline State:** Device ID fingerprinting, offline patient caching, and network recovery reconciliation.
 6. **Live Inter-View Reactivity:** `HMIS_LIVE_REFRESH_EVENT` (`hmis:live-data-changed`) custom event and storage synchronization.
-

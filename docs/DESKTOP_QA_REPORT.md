@@ -10,9 +10,9 @@
 ## 1. Initial Quality Assessment Baseline
 
 ### 1.1 Static Compilation & Build Verification
-* **TypeScript:** Compiles cleanly using TypeScript ~5.8.3 (`npm run build`).
-* **Vite 7:** Bundles without asset resolution errors into `dist/`.
-* **Tauri v2:** Rust harness compiles under edition 2021 with cargo plugins (`updater`, `process`, `opener`).
+* **TypeScript:** Re-run on November 9, 2026 using the checked-in local compiler (`./node_modules/.bin/tsc --noEmit`) with no diagnostics.
+* **Vite 7:** Production bundling was started with the checked-in local Vite binary and reached `transforming...`; this execution environment terminated it before completion. It is **not** recorded as a successful production bundle.
+* **Tauri v2:** Not re-run in this audit session; the Rust harness remains a required verification item.
 * **Code Splitting & Lazy Loading:** Core views in `App.tsx` and `WorkflowModuleView.tsx` are currently large and should be progressively modularized to prevent bundle inflation and improve workstation launch performance.
 
 ### 1.2 Identified Quality & Consistency Gaps
@@ -32,15 +32,15 @@
 
 | Area | Test Objective | Pass Criteria | Baseline Result |
 | :--- | :--- | :--- | :--- |
-| **Authentication** | Login as Hospital Admin and Clinical Staff | Tokens issued, stored in sessionStorage, device ID registered | PASS |
-| **Session Expiry** | 401 response on expired access token | Refresh token rotated without re-prompting user | PASS |
-| **Tenant Isolation** | Multi-facility data separation | Patients from Facility A are invisible to Facility B | PASS |
-| **Patient Registration** | Create new patient record | Stored in PostgreSQL via backend; visible on both Web & Desktop | PASS |
-| **Queue Management** | Issue and call queue token | Token lifecycle transitions reflected in real time | PASS |
-| **Prescription Flow** | Doctor prescribes; Pharmacy dispenses | Medication inventory decrements in central ledger | PASS |
-| **Native Printing** | Pharmacy POS receipt print | Thermal / A4 receipt dialog opens without crashing Tauri | PASS |
-| **Auto-Updater** | In-app version check | Minisign signature verified against GitHub Releases | PASS |
-| **Anti-Tampering** | Suspicious flags check | Release build terminates if debugger attached | PASS |
+| **Authentication** | Login as Hospital Admin and Clinical Staff | Tokens issued, stored in sessionStorage, device ID registered | NOT RE-RUN — backend session required |
+| **Session Expiry** | 401 response on expired access token | Refresh token rotated without re-prompting user | IMPLEMENTED; runtime verification pending |
+| **Tenant Isolation** | Multi-facility data separation | Patients from Facility A are invisible to Facility B | NOT RE-RUN — two scoped test accounts required |
+| **Patient Registration** | Create new patient record | Stored in PostgreSQL via backend; visible on both Web & Desktop | NOT RE-RUN — synthetic tenant required |
+| **Queue Management** | Issue and call queue token | Token lifecycle transitions reflected in real time | NOT RE-RUN — synthetic tenant required |
+| **Prescription Flow** | Doctor prescribes; Pharmacy dispenses | Medication inventory decrements in central ledger | NOT RE-RUN — synthetic tenant required |
+| **Native Printing** | Pharmacy POS receipt print | Thermal / A4 receipt dialog opens without crashing Tauri | NOT RE-RUN — Tauri runtime required |
+| **Auto-Updater** | In-app version check | Minisign signature verified against GitHub Releases | NOT RE-RUN — release channel/network required |
+| **Anti-Tampering** | Suspicious flags check | Release build terminates if debugger attached | NOT RE-RUN — signed release build required |
 
 ---
 
@@ -54,4 +54,3 @@
 - [ ] Specialized ICU, NICU, Maternity, Dental, and Paediatrics views operational.
 - [ ] Zero changes made to `Medilink-Frontend`.
 - [ ] All native Tauri capabilities and security protections preserved.
-

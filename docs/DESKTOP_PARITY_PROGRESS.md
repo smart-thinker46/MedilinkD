@@ -9,6 +9,8 @@
 * `VERIFIED` — Visual and functional parity confirmed against Frontend.
 * `BLOCKED` — Waiting on external dependency or backend capability.
 
+**Verification checkpoint (November 9, 2026):** Existing `IMPLEMENTED` entries are source-inventory assertions, not retrospective runtime sign-off. No entry may be changed to `TESTED` or `VERIFIED` until it has been exercised against the backend using synthetic, tenant-scoped data and compared with the matching Web route. See `DESKTOP_QA_REPORT.md` for the evidence currently available.
+
 ---
 
 ## Screen-by-Screen Progress Matrix
@@ -110,4 +112,3 @@
 | 93| `/cost-accounting` | 45 | Unit Costing | IMPLEMENTED | Activity-based costing tracker |
 | 94| `/diagnostics/lab` | 8 | Lab Diagnostics Routing | IMPLEMENTED | Centralized lab router |
 | 95| `/diagnostics/radiology`| 9 | Radiology Routing | IMPLEMENTED | Centralized radiology router |
-

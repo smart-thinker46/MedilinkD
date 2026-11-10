@@ -13,7 +13,7 @@
 | :--- | :--- | :--- | :--- | :--- |
 | **Base URL** | `PORT=3000` | `NEXT_PUBLIC_API_URL` (default: `http://localhost:3000`) | `VITE_API_BASE_URL` (default: `http://localhost:3000`) | ALIGNED |
 | **Access Token** | `Authorization: Bearer <token>` | Injected via Axios request interceptor | Injected via `apiFetch()` helper | ALIGNED |
-| **Refresh Token** | `POST /auth/refresh` | In-flight refresh queue; retries pending requests on 401 | Single-request refresh in `refreshAccessToken()` | IMPROVE (Queue pending calls) |
+| **Refresh Token** | `POST /auth/refresh` | In-flight refresh queue; retries pending requests on 401 | Single-flight `refreshAccessToken()` sends a stored token when available, also supports the secure refresh cookie, and retries once without a stale optional device binding | IMPLEMENTED — runtime verification pending |
 | **CSRF Protection** | `X-CSRF-Token` header for non-GET | `GET /security/csrf-token` with automatic retry on 403 `EBADCSRFTOKEN` | Cached CSRF token; bearer bypass allowed | ALIGNED (Preserve bearer bypass) |
 | **Device Binding** | `X-Device-Id` / payload `deviceId` | Stored in `localStorage["hmis_device_id"]` | Generated in `getDeviceId()` and stored | ALIGNED |
 | **Multi-Tenancy** | RLS tenant isolation (`TenantGuard`) | Bound via user session claims (`tenantId`) | Bound via user session claims (`tenantId`) | ALIGNED |
@@ -102,7 +102,7 @@
 
 To match `Medilink-Frontend`:
 1. **Network Retries:** Only safe idempotent operations (`GET`, `HEAD`) retry automatically on network timeout.
-2. **Session Expiry (401):** Tokens refresh automatically via `refreshAccessToken()`; upon refresh failure, clear session and present `HospitalLoginScreen` or `StaffLoginScreen` cleanly with error context.
+2. **Session Expiry (401):** Tokens refresh automatically via the single-flight `refreshAccessToken()`; upon refresh failure, clear session and present `HospitalLoginScreen` or `StaffLoginScreen` cleanly with error context.
 3. **CSRF Expiry (403):** If `code === 'EBADCSRFTOKEN'`, clear stored CSRF token, re-fetch via `/security/csrf-token`, and replay the failed request.
 4. **Data Isolation:** Clear all memory token variables and active patient state upon logout to prevent cross-tenant data bleed.
-
+5. **Network safety:** `apiFetch()` applies a 30-second timeout and retries only one interrupted `GET`; it never automatically retries a mutation, preventing duplicate clinical or financial writes.

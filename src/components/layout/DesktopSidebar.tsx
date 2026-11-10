@@ -473,7 +473,7 @@ export function DesktopSidebar({
 
       {/* Module Workspace Navigation */}
       <nav className="sidebar-form-section" aria-label="Module workspace">
-        {!collapsed && isModuleOpen && (
+        {!collapsed && (
           <div className="sidebar-section-heading">
             <span>Workspace</span>
             <small>{activeModuleTitle}</small>

@@ -27,6 +27,19 @@ type HeaderNotification = QueueNotice & {
   severity: "critical" | "warning" | "info";
 };
 
+type ProfileSnapshot = {
+  name?: string | null;
+  fullName?: string | null;
+  email?: string | null;
+  role?: string | null;
+  roleLabel?: string | null;
+  status?: string | null;
+  facilityId?: string | null;
+  tenantId?: string | null;
+  facilityName?: string | null;
+  hospitalName?: string | null;
+};
+
 type DesktopTopbarProps = {
   activeNav: number;
   activeWorkflowModuleId: number | null;
@@ -121,6 +134,7 @@ export function DesktopTopbar({
   const [profileOpen, setProfileOpen] = useState(false);
   const [logoutConfirmOpen, setLogoutConfirmOpen] = useState(false);
   const [loggingOut, setLoggingOut] = useState(false);
+  const [profile, setProfile] = useState<ProfileSnapshot | null>(null);
 
   // Search state
   const [moduleSearch, setModuleSearch] = useState("");
@@ -229,6 +243,25 @@ export function DesktopTopbar({
     return () => window.clearInterval(timer);
   }, [loadNotifications]);
 
+  // Refresh the canonical profile projection whenever the signed-in panel is
+  // opened, as the Web header does. Props remain the safe immediate fallback
+  // while offline or while this request is in flight.
+  const loadProfile = useCallback(async () => {
+    try {
+      const response = await apiFetch("/security/me");
+      const payload = await response.json().catch(() => null);
+      if (response.ok && payload) {
+        setProfile(payload as ProfileSnapshot);
+      }
+    } catch {
+      // Header identity remains usable from the authenticated local session.
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadProfile();
+  }, [loadProfile]);
+
   const markNotificationRead = (id: string) => {
     setReadNotificationIds((current) => {
       const next = current.includes(id) ? current : [...current, id];
@@ -279,13 +312,18 @@ export function DesktopTopbar({
     }
   };
 
-  const displayName = cleanDisplayName(userName);
-  const displayFacilityName = pickHospitalName(facilityName) || "MediLink General Hospital";
+  const displayName = cleanDisplayName(profile?.name, profile?.fullName, userName);
+  const displayEmail = String(profile?.email || userEmail || "No email available");
+  const displayRole = String(profile?.roleLabel || profile?.role || userRole || "User");
+  const displayFacilityName =
+    pickHospitalName(profile?.facilityName, profile?.hospitalName, facilityName) ||
+    "MediLink General Hospital";
+  const displayFacilityId = String(profile?.facilityId || profile?.tenantId || facilityId || "facility");
   const userInitial = displayName.charAt(0).toUpperCase() || "U";
   const facilityIdLabel =
-    String(facilityId).length > 24
-      ? `${String(facilityId).slice(0, 12)}…${String(facilityId).slice(-8)}`
-      : String(facilityId);
+    displayFacilityId.length > 24
+      ? `${displayFacilityId.slice(0, 12)}…${displayFacilityId.slice(-8)}`
+      : displayFacilityId;
 
   return (
     <header className="topbar">
@@ -652,6 +690,7 @@ export function DesktopTopbar({
               setProfileOpen((open) => !open);
               setNotificationsOpen(false);
               setSettingsOpen(false);
+              void loadProfile();
             }}
             title="View profile"
           >
@@ -674,7 +713,7 @@ export function DesktopTopbar({
                   <div className="profile-hero-copy">
                     <span className="profile-kicker">Logged-in HMIS user</span>
                     <strong>{displayName}</strong>
-                    <small>{userEmail}</small>
+                    <small>{displayEmail}</small>
                   </div>
                 </div>
                 <button
@@ -703,15 +742,15 @@ export function DesktopTopbar({
                 <dl className="profile-details">
                   <div>
                     <dt>Access role</dt>
-                    <dd>{userRole}</dd>
+                    <dd>{displayRole}</dd>
                   </div>
                   <div>
                     <dt>Facility ID</dt>
-                    <dd title={String(facilityId)}>{facilityIdLabel}</dd>
+                    <dd title={displayFacilityId}>{facilityIdLabel}</dd>
                   </div>
                   <div>
                     <dt>Account status</dt>
-                    <dd className="profile-status-value">Active</dd>
+                    <dd className="profile-status-value">{profile?.status || "Active"}</dd>
                   </div>
                 </dl>
               </div>
