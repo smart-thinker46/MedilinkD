@@ -5,10 +5,13 @@
 
 !macro NSIS_HOOK_PREINSTALL
   ; Keep the Tauri-managed upgrade path intact.
+  !include "welcome.nsh"
+  !include "license.nsh"
 !macroend
 
 !macro NSIS_HOOK_POSTINSTALL
   ; Tauri creates and updates Medilink Start Menu and Desktop shortcuts.
+!include "options.nsh"
 !macroend
 
 !macro NSIS_HOOK_PREUNINSTALL

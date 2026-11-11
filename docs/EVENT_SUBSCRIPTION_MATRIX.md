@@ -57,3 +57,4 @@ The Medilink HMIS real-time fabric operates primarily on tenant-isolated channel
 | `hmis.notifications.read` | JSON string array of notice IDs | Synchronized read states for topbar alert notifications |
 | `hmis.notifications.dismissed` | JSON string array of notice IDs | Synchronized dismissed states for topbar alert notifications |
 | `hmis_first_setup` | JSON object containing facility branding | Synchronized hospital name, logo, MFL code |
+

@@ -117,3 +117,4 @@ This audit evaluates the data consistency, API parity, event delivery, and user 
 2. **Real-time Event Delivery:** Both platforms listen to `tenant-${tenantType}-${tenantId}` for inter-facility transfers and patient events.
 3. **Local Cross-Window/Cross-Tab Coordination:** Mutations immediately broadcast `hmis:live-data-changed` via DOM CustomEvent and `localStorage.setItem('hmis_live_data_changed_at', ...)`, ensuring instant data invalidation without manual refresh.
 4. **Visual Parity:** Desktop header, sidebar, dashboard welcome banner, and 6-column module grid are now 100% pixel-aligned with Medilink-Frontend.
+

@@ -46,3 +46,4 @@ To guarantee that a patient record, consultation note, or invoice created in `Me
 
 ## 3. Data Integrity Summary
 The data model across `Medilink-Desktop` and `Medilink-Frontend` has zero schema drift. All shared REST endpoints accept and return identical JSON structures, ensuring transparent interoperability and data integrity.
+
