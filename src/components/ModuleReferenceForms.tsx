@@ -307,80 +307,124 @@ export function ModuleReferenceForms({
       </div>
 
       {activeForm ? (
-        <div className="module-form-overlay">
+        <div className="module-form-overlay" role="dialog" aria-modal="true" onClick={() => setActiveForm(null)}>
           <div
-            className={`module-form-panel modal-panel module-form-panel-${moduleKey}`}
+            className={`module-form-panel has-rail modal-panel module-form-panel-${moduleKey}`}
             style={{
               "--module-form-accent": activeForm.accentColor || "#16a34a",
-              "--module-form-accent-dark": activeForm.accentColor || "#15803d",
+              "--module-form-accent-dark": `${activeForm.accentColor || "#16a34a"}cc`,
               "--module-form-accent-soft": `${activeForm.accentColor || "#16a34a"}22`,
             } as any}
+            onClick={(e) => e.stopPropagation()}
           >
-            <div className="module-form-header">
-              <div className="module-form-heading">
-                <div className="module-form-icon">
+            {/* Left Rail / Sidebar: Black to button color gradient */}
+            <aside
+              className="module-form-rail"
+              style={{
+                background: `linear-gradient(180deg, #070a0f 0%, #0d1522 35%, ${activeForm.accentColor || "#16a34a"}44 70%, ${activeForm.accentColor || "#16a34a"} 100%)`,
+              }}
+            >
+              <div className="module-form-rail-mark">
+                <div className="module-form-rail-icon">
                   <ModuleIcon name={pickIcon(activeForm.title)} />
                 </div>
                 <div>
-                  <div className="module-form-kicker">{moduleTitle}</div>
-                  <h2 className="module-form-title">{activeForm.title}</h2>
+                  <b>Medilink HMIS</b>
+                  <small>{moduleTitle}</small>
                 </div>
               </div>
-              <div className="module-form-header-actions">
-                <div className="module-form-meta">
-                  <span>{activeForm.fields.length} fields</span>
-                  <span>{requiredCount} required</span>
+
+              <div className="module-form-rail-rule" />
+
+              <div className="module-form-rail-steps">
+                <div className="module-form-rail-step active">
+                  <span className="module-form-rail-step-num">1</span>
+                  <div>
+                    <b>Form Data</b>
+                    <small>{activeForm.fields.length} inputs</small>
+                  </div>
+                </div>
+                {requiredCount > 0 ? (
+                  <div className="module-form-rail-step">
+                    <span className="module-form-rail-step-num">2</span>
+                    <div>
+                      <b>Required Checks</b>
+                      <small>{requiredCount} mandatory</small>
+                    </div>
+                  </div>
+                ) : null}
+              </div>
+
+              <div className="module-form-rail-banner">
+                <small>Active Action</small>
+                <div className="module-form-rail-bname">{activeForm.title}</div>
+                <div className="module-form-rail-bmeta">
+                  {Object.values(values).filter((v) => v !== "" && v !== undefined && v !== null && v !== false).length} of {activeForm.fields.length} fields filled
+                </div>
+                <span className="module-form-rail-chip ok">
+                  In Progress
+                </span>
+              </div>
+            </aside>
+
+            {/* Right Main Area */}
+            <div className="module-form-main">
+              <header className="module-form-head">
+                <div>
+                  <small className="module-form-kicker">{moduleTitle} · Form Terminal</small>
+                  <h2 className="module-form-title">{activeForm.title}</h2>
+                  {activeForm.description ? (
+                    <p className="module-form-desc">{activeForm.description}</p>
+                  ) : null}
                 </div>
                 <button
                   type="button"
                   onClick={() => setActiveForm(null)}
-                  className="modal-close-btn"
+                  className="module-form-x-btn"
                   aria-label="Close"
                 >
-                  x
+                  ✕
                 </button>
-              </div>
+              </header>
+
+              <form onSubmit={submitForm} className="module-form-content">
+                <div className="module-form-body-scroll">
+                  <div className="module-form-grid">
+                    {activeForm.fields.map((field) => {
+                      const wide = field.type === "textarea" || field.type === "file";
+                      return (
+                        <div key={field.name} className={`module-form-field ${wide ? "is-wide" : ""}`}>
+                          <label className="form-label">
+                            {field.label}
+                            {field.required ? <span className="module-form-required">*</span> : null}
+                          </label>
+                          {field.helper ? <div className="form-helper">{field.helper}</div> : null}
+                          {renderField(field)}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                <footer className="module-form-foot">
+                  <button
+                    type="button"
+                    onClick={() => setActiveForm(null)}
+                    className="module-form-btn-cancel"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    className="module-form-btn-submit"
+                    style={{ backgroundColor: activeForm.accentColor || "#16a34a" }}
+                    disabled={saving}
+                  >
+                    {saving ? "Saving..." : getSubmitLabel(activeForm.title)}
+                  </button>
+                </footer>
+              </form>
             </div>
-
-            {activeForm.description ? (
-              <div className="module-form-intro">
-                <p className="module-form-note">{activeForm.description}</p>
-              </div>
-            ) : null}
-
-            <form onSubmit={submitForm} className="module-form-body">
-              <div className="module-form-grid">
-                {activeForm.fields.map((field) => {
-                  const wide = field.type === "textarea" || field.type === "file";
-                  return (
-                    <div key={field.name} className={`module-form-field ${wide ? "is-wide" : ""}`}>
-                      <label className="form-label">
-                        {field.label}
-                        {field.required ? <span className="module-form-required">*</span> : null}
-                      </label>
-                      {field.helper ? <div className="form-helper">{field.helper}</div> : null}
-                      {renderField(field)}
-                    </div>
-                  );
-                })}
-              </div>
-              <div className="module-form-footer">
-                <button
-                  type="button"
-                  onClick={() => setActiveForm(null)}
-                  className="form-btn form-btn-cancel"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  className="form-btn form-btn-primary module-form-submit"
-                  disabled={saving}
-                >
-                  {saving ? "Saving..." : getSubmitLabel(activeForm.title)}
-                </button>
-              </div>
-            </form>
           </div>
         </div>
       ) : null}

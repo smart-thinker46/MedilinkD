@@ -2,8 +2,8 @@
 **Reference Implementation:** `Medilink-Frontend` (Next.js 16 App Router, React 19, Tailwind CSS v4, Zustand)  
 **Target Application:** `Medilink-Desktop` (Tauri v2, React 19, Vite 7, Zustand 5, Rust)  
 **Authority Backend:** `Medilink-Backend` (NestJS 11, PostgreSQL, Prisma ORM 448 models)  
-**Audit Date:** November 8, 2026  
-**Status:** Baseline Comparative Audit Completed  
+**Audit Date:** November 13, 2026 — Revalidated & Stubs Created  
+**Status:** Stub scaffold complete — implementation agents may now begin  
 
 ---
 
@@ -37,6 +37,16 @@ This audit does not treat source similarity as evidence that an endpoint accepts
 
 ---
 
+## Stub scaffold checkpoint — November 13, 2026
+
+35 missing view stub files were created under `src/views/` to unblock implementation agents. Each stub exports a named React component with the standard `module-view-root` / `pv-header` / `pv-body` DOM structure and the `apiFetch` import already in scope.
+
+**Pre-existing views (45 files):** AmbulanceView, AnalyticsView, BillingView, BiomedicalView, BlockchainView, BloodBankView (⚠️ thin), CanteenView, CdssView, DentalView, DoctorsView, EhrView, EmergencyView, FacilitiesView, FinanceView (⚠️ thin), HelpdeskView, HrView, IcuView, InfectionControlView, InsuranceView, IntegrationsView (⚠️ thin), InventoryView, IpdView, LaboratoryView, MaternityView, MortuaryView, NicuView, NursingView, NutritionView, OpdDashboardView, OtView, PaediatricsView, PatientFeedbackView, PatientPortalView, PharmacyPosView, PharmacyView, PhysiotherapyView, ProcurementView (⚠️ thin), QualityAssuranceView, QueueManagementView, RadiologyView, ReferralsView, ReportsView, TelemedicineView, UserManagementView, WardView
+
+**New stubs created (35 files):** AccountingView, AiAnalyticsView, AiCentralView, AiChatView, AppointmentsView, AppsView, ClinicalResearchView, CommunicationView, CommunityHealthView, ConsentView, CostAccountingView, DocumentsView, ExecutiveView, FacilitiesWorkOrdersView, FinanceJournalsView, FullSystemSetupView, GovernanceView, HomeCareView, IctView, InventoryPurchaseOrdersView, MedicalDirectorView, MessagingView, MigrationView, NursingAdminView, OperationsView, OrchestrationView, PatientRegistrationView, PayrollView, PortalAppointmentsView, PortalView, RevenueView, SettingsView, SetupView, SignupView, WorkforcePlanningView
+
+---
+
 ## 1. Executive Summary & Architecture Baseline
 
 ### 1.1 Objective
@@ -44,8 +54,11 @@ Establish complete functional, visual, architectural, and data parity between `M
 
 ### 1.2 Core Architectural Divergence
 * **`Medilink-Frontend`:** Structured around modern Next.js 16 App Router (`src/app/*`) with 95 distinct route pages, a modular shell architecture (`AppShell`, `DashboardLayout`, `Sidebar`, `Topbar`, `OrderInbox`, `RecordDrawer`, `TableInteractionLayer`), Lucide React icons, Tailwind CSS v4 styling, and granular Axios API interceptors.
-* **`Medilink-Desktop`:** Currently organized as a high-density single-file monolithic structure (`src/App.tsx` with 16,457 lines, and `WorkflowModuleView.tsx` with 31,380 lines) running on Tauri v2 + Vite 7. While it features working implementations of core workflows (Patient registration, Appointments, basic Billing, Pharmacy, Migration Center), over 50 specialized HMIS modules currently fall back to a generic multi-stage workflow runner instead of the dedicated, rich clinical dashboards present in the web reference.
+* **`Medilink-Desktop`:** Currently organized as a high-density single-file monolithic structure (`src/App.tsx` with ~10,000+ lines, and `WorkflowModuleView.tsx`) running on Tauri v2 + Vite 7. While it features working implementations of core workflows (Patient registration, Appointments, basic Billing, Pharmacy, Migration Center), over 50 specialized HMIS modules currently fall back to a generic multi-stage workflow runner instead of the dedicated, rich clinical dashboards present in the web reference.
 * **Component Architecture:** Frontend uses reusable component libraries (`src/components/clinical/`, `src/components/diagnostics/`, `src/components/layout/`), whereas Desktop duplicates large blocks of JSX, form fields, and modal states inside `App.tsx`.
+
+### 1.3 App.tsx Routing Findings
+App.tsx uses a numeric `activeNav` index (0–42, 99) and a `moduleId` integer to dispatch views — **not** path-based routing. New dedicated views must be wired via additional `activeNav` cases or by extending the module dispatch in the existing `renderModuleView()` switch. The module IDs in `moduleCatalog.ts` are already synchronized between Frontend and Desktop; **no new module IDs are needed** — the missing views only need their `activeNav`/`moduleId` cases added to App.tsx.
 
 ---
 
@@ -68,113 +81,134 @@ Establish complete functional, visual, architectural, and data parity between `M
 ## 3. Screen-by-Screen Parity Audit (95 Frontend Routes vs Desktop)
 
 ### Legend
-* **MATCH (M):** Exists in Desktop with visual and functional parity.
-* **PARTIAL (P):** Exists in Desktop but has outdated layout, missing actions, or uses generic `WorkflowModuleView` fallback.
-* **MISSING (X):** Route/screen does not exist or has no dedicated view in Desktop.
+* **✅ EXISTS** — Dedicated view file found in `Desktop/src/views/` with substantive implementation.
+* **⚠️ PARTIAL** — File exists but is thin/stub/minimal or falls back to `WorkflowModuleView`.
+* **❌ MISSING** → **🔧 STUB** — No dedicated Desktop view existed; stub file now created by this audit run.
 
-| # | Route in Frontend | Module ID | Screen Name & Purpose | Desktop Status | Existing Desktop Implementation | Required Action |
+| # | Route in Frontend | Module ID | Screen Name & Purpose | Desktop Status | View File | Required Action |
 |---|---|---|---|---|---|---|
-| 1 | `/` | — | Root landing redirect | M | `SplashScreen` -> `AuthLanding` | Preserve desktop boot flow & splash |
-| 2 | `/landing` | — | Marketing / Auth landing | M | `AuthLanding` in `App.tsx` | Align typography & theme switcher |
-| 3 | `/login` | — | Hospital Admin login | M | `HospitalLoginScreen` | Align form validation & token rotation |
-| 4 | `/login/staff` | — | Clinical staff login | M | `StaffLoginScreen` | Align facility code selection & MFA |
-| 5 | `/signup` | — | Self-registration portal | P | Handled via setup wizard | Reconcile registration workflow |
-| 6 | `/setup` | — | Initial facility onboarding | M | `FirstTimeSetupScreen` | Match multi-step wizard fields |
-| 7 | `/full-system-setup`| — | Complete enterprise setup | P | Partial in admin settings | Port full system configuration steps |
-| 8 | `/patients` | 1 | Patient Registration & Registry | P | Dedicated `PatientsView` in `App.tsx` | Synchronize PatientDrawer, insurance verify, MPI merge |
-| 9 | `/appointments` | 4 | Appointment Scheduling | P | Dedicated `AppointmentsView` in `App.tsx` | Add slot booking calendar & telemedicine link |
-| 10| `/queue` | 28 | Central Queue Management | P | Dedicated `QueueManagementView` | Synchronize counter sessions & priority override |
-| 11| `/opd` | 36 | Outpatient Consultation & Triage | P | Merged in `OPDOTView` / `WorkflowModuleView` | Build dedicated OPD Consultation dashboard with ICD-10 |
-| 12| `/ipd` | 2 | Inpatient (IPD) Management | P | `WorkflowModuleView` fallback (ID 2) | Implement dedicated Inpatient bed board & care plan |
-| 13| `/ipd/[id]` | 2 | Inpatient Admission Detail | X | None (generic table row click) | Build admission detail slide-over / drawer |
-| 14| `/emergency` | 25 | Emergency & Trauma Unit | P | Dedicated `EmergencyView` in `App.tsx` | Synchronize triage acuity scoring (Manchester/ESI) |
-| 15| `/ambulance` | 26 | Ambulance Fleet & Dispatch | P | Dedicated `AmbulanceView` in `App.tsx` | Add GPS log dispatch & fuel billing integration |
-| 16| `/wards` | 5 | Wards & Bed Allocation | P | Dedicated `WardView` in `App.tsx` | Synchronize bed graphical grid & ward transfers |
-| 17| `/maternity` | 37 | Maternity & Obstetrics | P | `WorkflowModuleView` fallback (ID 37) | Implement dedicated ANC, Labor & Delivery dashboard |
-| 18| `/maternity/[pregnancyId]` | 37 | Pregnancy Episode Detail | X | None | Build pregnancy clinical timeline & APGAR logger |
-| 19| `/icu` | 38 | Intensive Care Unit (ICU) | P | `WorkflowModuleView` fallback (ID 38) | Build dedicated ICU monitoring & APACHE score dashboard |
-| 20| `/nicu` | 51 | Neonatal ICU (NICU) | P | `WorkflowModuleView` fallback (ID 51) | Build dedicated NICU incubator & phototherapy dashboard |
-| 21| `/ot` | 11 | Operation Theatre Management | P | Merged in `OPDOTView` / `OTView` | Build dedicated OT surgical schedule & WHO checklist |
-| 22| `/mortuary` | 27 | Mortuary & Deceased Tracking | P | Dedicated `MortuaryView` in `App.tsx` | Add freezer allocation & autopsy release flow |
-| 23| `/referrals` | 55 | Inter-facility Referrals | P | `WorkflowModuleView` fallback (ID 55) | Build dedicated incoming/outgoing referral dashboard |
-| 24| `/ehr` | 6 | EMR & Medical Records | P | Dedicated `EHRView` in `App.tsx` | Synchronize clinical note templates & allergy alerts |
-| 25| `/ehr/[patientId]` | 6 | Patient Longitudinal Record | X | None (inline search modal) | Build full longitudinal patient timeline view |
-| 26| `/cdss` | 48 | Clinical Decision Support | P | `WorkflowModuleView` fallback (ID 48) | Build dedicated rule monitor & alert action center |
-| 27| `/nursing` | 7 | Nursing Care & Vitals | P | Dedicated `NursingView` in `App.tsx` | Synchronize MedAdmin 5-Rights & nursing care plans |
-| 28| `/nursing-admin` | 42 | Nursing Administration / Matron| P | `WorkflowModuleView` fallback (ID 42) | Build staffing ratios & shift incident monitor |
-| 29| `/lab` | 8 | Laboratory Diagnostics | P | Dedicated `LaboratoryView` in `App.tsx` | Synchronize specimen accessioning & critical values |
-| 30| `/radiology` | 9 | Radiology & PACS Imaging | P | Dedicated `DiagnosticsView` in `App.tsx` | Add study timeline & critical radiology alerts |
-| 31| `/pharmacy` | 10 | Pharmacy Operations | P | Dedicated `PharmacyView` in `App.tsx` | Synchronize prescription review & dispensing |
-| 32| `/pharmacy/[sub]` | 10 | Pharmacy Sub-Inventories | X | None | Support satellite & floor pharmacy routing |
-| 33| `/pharmacy/dispense/[id]`| 10 | Dispense Execution Screen | X | None (inline modal) | Build full prescription dispense verification screen |
-| 34| `/pharmacy/pos` | 35 | Pharmacy Retail POS | P | Basic sale modal in `WorkflowModuleView` | Build retail checkout with barcode, cart & receipt print |
-| 35| `/blood-bank` | 12 | Blood Bank & Transfusion | P | Dedicated `BloodBankView` in `App.tsx` | Synchronize donor registry & cross-match workflow |
-| 36| `/clinical-research` | 32 | Clinical Trials & Research | P | `WorkflowModuleView` fallback (ID 32) | Build protocol registry & adverse event reporting |
-| 37| `/quality-assurance` | 33 | Quality Assurance & Audits | P | Dedicated `QualityAssuranceView` | Add root cause analysis & accreditation checklist |
-| 38| `/physiotherapy` | 49 | Physiotherapy & Rehab | P | `WorkflowModuleView` fallback (ID 49) | Build rehab assessment & range-of-motion charts |
-| 39| `/nutrition` | 50 | Nutrition & Dietetics | P | `WorkflowModuleView` fallback (ID 50) | Build clinical nutrition plans & enteral feeding logs |
-| 40| `/dental` | 52 | Dental Clinic & Odontogram | P | `WorkflowModuleView` fallback (ID 52) | Build interactive tooth chart (odontogram) & treatment plan |
-| 41| `/infection-control` | 53 | Infection Control & CSSD | P | `WorkflowModuleView` fallback (ID 53) | Build autoclave sterilization & surveillance tracker |
-| 42| `/paediatrics` | 59 | Paediatric Medicine | P | `WorkflowModuleView` fallback (ID 59) | Build WHO growth percentile charts & immunization |
-| 43| `/billing` | 13 | Patient Billing & Invoicing | P | Dedicated `BillingView` in `App.tsx` | Add invoice lifecycle, discounts, and payment modal |
-| 44| `/insurance` | 14 | Insurance Pre-auth & Claims | P | Dedicated `InsuranceView` in `App.tsx` | Synchronize claim submissions & pre-auth approvals |
-| 45| `/revenue` | 44 | Revenue Cycle Management (RCM) | P | `WorkflowModuleView` fallback (ID 44) | Build claims scrubbing, denial tracking & AR aging |
-| 46| `/accounting` | 39 | General Ledger & Accounting | P | `WorkflowModuleView` fallback (ID 39) | Build Chart of Accounts, Journal entries & Trial Balance |
-| 47| `/finance` | 39 | Financial Overview Dashboard | P | Basic summary in `BillingView` | Build executive financial summary dashboard |
-| 48| `/finance/journals` | 39 | Journal Voucher System | X | None | Build double-entry debit/credit ledger posting |
-| 49| `/cost-accounting` | 45 | Cost Centers & Unit Costing | P | `WorkflowModuleView` fallback (ID 45) | Build departmental cost allocation & profitability |
-| 50| `/inventory` | 15 | Central Inventory & Stores | P | Dedicated `InventoryView` in `App.tsx` | Synchronize stock movements, batch tracking & expiry |
-| 51| `/inventory/purchase-orders` | 15 | Purchase Order Tracking | P | Merged in `ProcurementView` | Build dedicated PO lifecycle & approval dashboard |
-| 52| `/procurement` | 15 | Procurement & Suppliers | P | Dedicated `ProcurementView` in `App.tsx` | Synchronize supplier evaluation & quotation bids |
-| 53| `/hr` | 16 | Human Resources Operations | P | Dedicated `HRView` in `App.tsx` | Synchronize employee lifecycle, leaves & attendance |
-| 54| `/hr/payroll` | 66 | Staff Payroll Calculation | P | Basic summary in `HRView` | Build Kenya statutory deduction (PAYE/SHA/NSSF) run |
-| 55| `/payroll` | 66 | Payroll Management | P | Merged in `HRView` | Synchronize payslip generation & bank payment batch |
-| 56| `/workforce-planning` | 40 | Workforce Shift Roster | P | `WorkflowModuleView` fallback (ID 40) | Build nurse shift scheduling & staffing ratio forecasts |
-| 57| `/doctors` | 17 | Doctor Directory & Credentialing| P | Dedicated `DoctorView` in `App.tsx` | Synchronize CME credits, license renewal & OPD schedule |
-| 58| `/facilities` | 18 | Multi-facility Asset Mgmt | P | Dedicated `FacilityView` in `App.tsx` | Synchronize equipment maintenance & compliance checks |
-| 59| `/facilities/work-orders` | 18 | Maintenance Work Orders | X | None | Build work order assignment & SLA tracking |
-| 60| `/facility` | 18 | Current Facility Settings | M | `SettingsView` facility tab | Preserve and synchronize facility metadata |
-| 61| `/biomedical` | 61 | Biomedical Equipment Care | P | `WorkflowModuleView` fallback (ID 61) | Build equipment calibration logs & breakdown tickets |
-| 62| `/governance` | 62 | Clinical Governance & DR | P | `WorkflowModuleView` fallback (ID 62) | Build DR runbook drill simulator & policy registry |
-| 63| `/operations` | 63 | Operations & Vendor Support | P | `WorkflowModuleView` fallback (ID 63) | Build vendor ticket manager with SLA countdowns |
-| 64| `/orchestration` | 47 | System Automation & HL7 | P | `WorkflowModuleView` fallback (ID 47) | Build hospital event bus & integration monitors |
-| 65| `/telemedicine` | 21 | Telemedicine & Virtual Care | P | Dedicated `TelemedicineView` in `App.tsx` | Add Jitsi/Daily video room integration & chat log |
-| 66| `/blockchain` | 22 | Blockchain Audit Trail | P | Dedicated `BlockchainView` in `App.tsx` | Synchronize immutable block verification & export |
-| 67| `/ai-analytics` | 23 | AI Operational Analytics | P | Merged in `AISuiteView` | Build readmission risk, bed demand & clinical alerts |
-| 68| `/ai-central` | 23 | Central AI Capability Center | P | Basic chatbot in `AISuiteView` | Build AI model registry & clinical documentation assistant |
-| 69| `/ai-chat` | 23 | Interactive Clinical Assistant | P | Floating help widget | Build dedicated conversational clinical assistant page |
-| 70| `/executive` | 46 | Executive & C-Suite Dashboard | P | Basic analytics in `AnalyticsView` | Build hospital KPI metrics (ALOS, BOR, Rev/Bed, EBITDA)|
-| 71| `/reports` | 19 | Reporting & MOH Indicators | P | Dedicated `AnalyticsView` in `App.tsx` | Build MOH 705/711 statutory report generators |
-| 72| `/users` | 20 | User Management & RBAC | P | Dedicated `UserManagementView` | Synchronize role catalog, permissions & MFA reset |
-| 73| `/settings` | 12 | System & Branding Settings | M | Dedicated `SettingsView` in `App.tsx` | Align display density & live refresh configuration |
-| 74| `/portal` | 24 | Staff/Patient Shared Portal | P | Dedicated `PatientPortalView` | Align portal access token & patient lookup |
-| 75| `/portal/appointments`| 24 | Portal Appointment Booking | X | None | Synchronize self-service patient slot request |
-| 76| `/patient-portal` | 24 | Patient Self-Service Portal | P | Merged with ID 24 | Synchronize lab results view & prescription history |
-| 77| `/patient-portal/appointments`| 24| Self-Service Appointments | X | None | Synchronize patient appointment booking flow |
-| 78| `/documents` | 57 | Document Management & OCR | P | `WorkflowModuleView` fallback (ID 57) | Build categorized document repository & tag search |
-| 79| `/consent` | 54 | Digital Consent Management | P | `WorkflowModuleView` fallback (ID 54) | Build surgical consent templates & digital signatures |
-| 80| `/communication` | 58 | Hospital Broadcasts & Alerts | P | Merged in announcements | Build patient communication campaigns (SMS/WhatsApp) |
-| 81| `/messaging` | 58 | Messaging Notification Gateway | P | `WorkflowModuleView` fallback (ID 58) | Build delivery status tracker & SMS gateway balances |
-| 82| `/community-health` | 56 | Community Health Workers (CHW) | P | `WorkflowModuleView` fallback (ID 56) | Build household register & disease surveillance |
-| 83| `/home-care` | 60 | Home Care & Remote Monitoring | P | `WorkflowModuleView` fallback (ID 60) | Build patient visit checklist & vital logs |
-| 84| `/canteen` | 30 | Canteen & Dietary Management | P | Dedicated `CanteenView` in `App.tsx` | Synchronize patient meal orders & kitchen prep board |
-| 85| `/feedback` | 31 | Patient Feedback & Net Promoter| P | Dedicated `PatientFeedbackView` | Synchronize sentiment analysis & complaint resolution |
-| 86| `/helpdesk` | 29 | Internal IT & Facility Helpdesk | P | Dedicated `HelpdeskView` in `App.tsx` | Synchronize ticket priorities, assignment & resolution |
-| 87| `/integrations` | 34 | External Systems Integration | P | Dedicated `ExternalIntegrationsView` | Synchronize M-Pesa, Pusher, FHIR & Cloudinary configs |
-| 88| `/migration` | 64 | Legacy Data Migration Center | M | Dedicated `MigrationCenterView.tsx` | Preserve existing CSV mapper, dry-run & batch import |
-| 89| `/medical-director` | 43 | Medical Director Dashboard | P | `WorkflowModuleView` fallback (ID 43) | Build mortality audits, doctor credentialing & CDSS |
-| 90| `/analytics` | 19 | General BI Analytics | P | Merged in `AnalyticsView` | Synchronize department utilization charts |
-| 91| `/apps` | — | Module Launcher Grid | M | Default Dashboard (Nav 0) in `App.tsx` | Align card hover states, badges & category tabs |
-| 92| `/[module]` | — | Dynamic Module Resolver | M | Handled via `activeNav = 99` | Ensure all 66 module IDs resolve properly |
-| 93| `/cost-accounting` | 45 | Cost Category Tracking | P | `WorkflowModuleView` fallback (ID 45) | Synchronize overhead allocations & unit costing |
-| 94| `/diagnostics/lab` | 8 | Lab Diagnostics Routing | M | Handled via `LaboratoryView` | Keep synchronized with central lab |
-| 95| `/diagnostics/radiology`| 9 | Radiology Routing | M | Handled via `DiagnosticsView` | Keep synchronized with central radiology |
+| 1 | `/` | — | Root landing redirect | ✅ EXISTS | `App.tsx` SplashScreen | Preserve desktop boot flow & splash |
+| 2 | `/landing` | — | Marketing / Auth landing | ✅ EXISTS | `App.tsx` AuthLanding | Align typography & theme switcher |
+| 3 | `/login` | — | Hospital Admin login | ✅ EXISTS | `App.tsx` HospitalLoginScreen | Align form validation & token rotation |
+| 4 | `/login/staff` | — | Clinical staff login | ✅ EXISTS | `App.tsx` StaffLoginScreen | Align facility code selection & MFA |
+| 5 | `/signup` | — | Self-registration portal | 🔧 STUB | `SignupView.tsx` | Implement facility self-registration |
+| 6 | `/setup` | — | Initial facility onboarding | ✅ EXISTS | `App.tsx` FirstTimeSetupScreen | Match multi-step wizard fields |
+| 7 | `/full-system-setup` | — | Complete enterprise setup | 🔧 STUB | `FullSystemSetupView.tsx` | Port full system configuration steps |
+| 8 | `/patients` | 1 | Patient Registration & Registry | ⚠️ PARTIAL | `App.tsx` PatientsView + `PatientRegistrationView.tsx` (stub) | Migrate to dedicated file; add MPI merge & insurance verify |
+| 9 | `/appointments` | 4 | Appointment Scheduling | 🔧 STUB | `AppointmentsView.tsx` | Add slot booking calendar & telemedicine link |
+| 10 | `/queue` | 28 | Central Queue Management | ✅ EXISTS | `QueueManagementView.tsx` | Synchronize counter sessions & priority override |
+| 11 | `/opd` | 36 | Outpatient Consultation & Triage | ✅ EXISTS | `OpdDashboardView.tsx` | Build dedicated OPD Consultation dashboard with ICD-10 |
+| 12 | `/ipd` | 2 | Inpatient (IPD) Management | ✅ EXISTS | `IpdView.tsx` | Implement dedicated Inpatient bed board & care plan |
+| 13 | `/ipd/[id]` | 2 | Inpatient Admission Detail | ⚠️ PARTIAL | `IpdView.tsx` | Build admission detail slide-over / drawer |
+| 14 | `/emergency` | 25 | Emergency & Trauma Unit | ✅ EXISTS | `EmergencyView.tsx` | Synchronize triage acuity scoring (Manchester/ESI) |
+| 15 | `/ambulance` | 26 | Ambulance Fleet & Dispatch | ✅ EXISTS | `AmbulanceView.tsx` | Add GPS log dispatch & fuel billing integration |
+| 16 | `/wards` | 5 | Wards & Bed Allocation | ✅ EXISTS | `WardView.tsx` | Synchronize bed graphical grid & ward transfers |
+| 17 | `/maternity` | 37 | Maternity & Obstetrics | ✅ EXISTS | `MaternityView.tsx` | Implement dedicated ANC, Labor & Delivery dashboard |
+| 18 | `/maternity/[pregnancyId]` | 37 | Pregnancy Episode Detail | ⚠️ PARTIAL | `MaternityView.tsx` | Build pregnancy clinical timeline & APGAR logger |
+| 19 | `/icu` | 38 | Intensive Care Unit (ICU) | ✅ EXISTS | `IcuView.tsx` | Build dedicated ICU monitoring & APACHE score dashboard |
+| 20 | `/nicu` | 51 | Neonatal ICU (NICU) | ✅ EXISTS | `NicuView.tsx` | Build dedicated NICU incubator & phototherapy dashboard |
+| 21 | `/ot` | 11 | Operation Theatre Management | ✅ EXISTS | `OtView.tsx` | Build dedicated OT surgical schedule & WHO checklist |
+| 22 | `/mortuary` | 27 | Mortuary & Deceased Tracking | ✅ EXISTS | `MortuaryView.tsx` | Add freezer allocation & autopsy release flow |
+| 23 | `/referrals` | 55 | Inter-facility Referrals | ✅ EXISTS | `ReferralsView.tsx` | Build dedicated incoming/outgoing referral dashboard |
+| 24 | `/ehr` | 6 | EMR & Medical Records | ✅ EXISTS | `EhrView.tsx` | Synchronize clinical note templates & allergy alerts |
+| 25 | `/ehr/[patientId]` | 6 | Patient Longitudinal Record | ⚠️ PARTIAL | `EhrView.tsx` | Build full longitudinal patient timeline view |
+| 26 | `/cdss` | 48 | Clinical Decision Support | ✅ EXISTS | `CdssView.tsx` | Build dedicated rule monitor & alert action center |
+| 27 | `/nursing` | 7 | Nursing Care & Vitals | ✅ EXISTS | `NursingView.tsx` | Synchronize MedAdmin 5-Rights & nursing care plans |
+| 28 | `/nursing-admin` | 42 | Nursing Administration / Matron | 🔧 STUB | `NursingAdminView.tsx` | Build staffing ratios & shift incident monitor |
+| 29 | `/lab` | 8 | Laboratory Diagnostics | ✅ EXISTS | `LaboratoryView.tsx` | Synchronize specimen accessioning & critical values |
+| 30 | `/radiology` | 9 | Radiology & PACS Imaging | ✅ EXISTS | `RadiologyView.tsx` | Add study timeline & critical radiology alerts |
+| 31 | `/pharmacy` | 10 | Pharmacy Operations | ✅ EXISTS | `PharmacyView.tsx` | Synchronize prescription review & dispensing |
+| 32 | `/pharmacy/[sub]` | 10 | Pharmacy Sub-Inventories | ⚠️ PARTIAL | `PharmacyView.tsx` | Support satellite & floor pharmacy routing |
+| 33 | `/pharmacy/dispense/[id]` | 10 | Dispense Execution Screen | ⚠️ PARTIAL | `PharmacyView.tsx` | Build full prescription dispense verification screen |
+| 34 | `/pharmacy/pos` | 35 | Pharmacy Retail POS | ✅ EXISTS | `PharmacyPosView.tsx` | Build retail checkout with barcode, cart & receipt print |
+| 35 | `/blood-bank` | 12 | Blood Bank & Transfusion | ⚠️ PARTIAL | `BloodBankView.tsx` (154 lines) | Synchronize donor registry & cross-match workflow |
+| 36 | `/clinical-research` | 32 | Clinical Trials & Research | 🔧 STUB | `ClinicalResearchView.tsx` | Build protocol registry & adverse event reporting |
+| 37 | `/quality-assurance` | 33 | Quality Assurance & Audits | ✅ EXISTS | `QualityAssuranceView.tsx` | Add root cause analysis & accreditation checklist |
+| 38 | `/physiotherapy` | 49 | Physiotherapy & Rehab | ✅ EXISTS | `PhysiotherapyView.tsx` | Build rehab assessment & range-of-motion charts |
+| 39 | `/nutrition` | 50 | Nutrition & Dietetics | ✅ EXISTS | `NutritionView.tsx` | Build clinical nutrition plans & enteral feeding logs |
+| 40 | `/dental` | 52 | Dental Clinic & Odontogram | ✅ EXISTS | `DentalView.tsx` | Build interactive tooth chart (odontogram) & treatment plan |
+| 41 | `/infection-control` | 53 | Infection Control & CSSD | ✅ EXISTS | `InfectionControlView.tsx` | Build autoclave sterilization & surveillance tracker |
+| 42 | `/paediatrics` | 59 | Paediatric Medicine | ✅ EXISTS | `PaediatricsView.tsx` | Build WHO growth percentile charts & immunization |
+| 43 | `/billing` | 13 | Patient Billing & Invoicing | ✅ EXISTS | `BillingView.tsx` | Add invoice lifecycle, discounts, and payment modal |
+| 44 | `/insurance` | 14 | Insurance Pre-auth & Claims | ✅ EXISTS | `InsuranceView.tsx` | Synchronize claim submissions & pre-auth approvals |
+| 45 | `/revenue` | 44 | Revenue Cycle Management (RCM) | 🔧 STUB | `RevenueView.tsx` | Build claims scrubbing, denial tracking & AR aging |
+| 46 | `/accounting` | 39 | General Ledger & Accounting | 🔧 STUB | `AccountingView.tsx` | Build Chart of Accounts, Journal entries & Trial Balance |
+| 47 | `/finance` | 39 | Financial Overview Dashboard | ⚠️ PARTIAL | `FinanceView.tsx` (207 lines) | Build executive financial summary dashboard |
+| 48 | `/finance/journals` | 39 | Journal Voucher System | 🔧 STUB | `FinanceJournalsView.tsx` | Build double-entry debit/credit ledger posting |
+| 49 | `/cost-accounting` | 45 | Cost Centers & Unit Costing | 🔧 STUB | `CostAccountingView.tsx` | Build departmental cost allocation & profitability |
+| 50 | `/inventory` | 15 | Central Inventory & Stores | ✅ EXISTS | `InventoryView.tsx` | Synchronize stock movements, batch tracking & expiry |
+| 51 | `/inventory/purchase-orders` | 15 | Purchase Order Tracking | 🔧 STUB | `InventoryPurchaseOrdersView.tsx` | Build dedicated PO lifecycle & approval dashboard |
+| 52 | `/procurement` | 15 | Procurement & Suppliers | ⚠️ PARTIAL | `ProcurementView.tsx` (45 lines) | Synchronize supplier evaluation & quotation bids |
+| 53 | `/hr` | 16 | Human Resources Operations | ✅ EXISTS | `HrView.tsx` | Synchronize employee lifecycle, leaves & attendance |
+| 54 | `/hr/payroll` | 66 | Staff Payroll Calculation | 🔧 STUB | `PayrollView.tsx` | Build Kenya statutory deduction (PAYE/SHA/NSSF) run |
+| 55 | `/payroll` | 66 | Payroll Management | 🔧 STUB | `PayrollView.tsx` | Synchronize payslip generation & bank payment batch |
+| 56 | `/workforce-planning` | 40 | Workforce Shift Roster | 🔧 STUB | `WorkforcePlanningView.tsx` | Build nurse shift scheduling & staffing ratio forecasts |
+| 57 | `/doctors` | 17 | Doctor Directory & Credentialing | ✅ EXISTS | `DoctorsView.tsx` | Synchronize CME credits, license renewal & OPD schedule |
+| 58 | `/facilities` | 18 | Multi-facility Asset Mgmt | ✅ EXISTS | `FacilitiesView.tsx` | Synchronize equipment maintenance & compliance checks |
+| 59 | `/facilities/work-orders` | 18 | Maintenance Work Orders | 🔧 STUB | `FacilitiesWorkOrdersView.tsx` | Build work order assignment & SLA tracking |
+| 60 | `/facility` | 18 | Current Facility Settings | ✅ EXISTS | `SettingsView.tsx` (stub — was inline) | Preserve and synchronize facility metadata |
+| 61 | `/biomedical` | 61 | Biomedical Equipment Care | ✅ EXISTS | `BiomedicalView.tsx` | Build equipment calibration logs & breakdown tickets |
+| 62 | `/governance` | 62 | Clinical Governance & DR | 🔧 STUB | `GovernanceView.tsx` | Build DR runbook drill simulator & policy registry |
+| 63 | `/operations` | 63 | Operations & Vendor Support | 🔧 STUB | `OperationsView.tsx` | Build vendor ticket manager with SLA countdowns |
+| 64 | `/orchestration` | 47 | System Automation & HL7 | 🔧 STUB | `OrchestrationView.tsx` | Build hospital event bus & integration monitors |
+| 65 | `/telemedicine` | 21 | Telemedicine & Virtual Care | ✅ EXISTS | `TelemedicineView.tsx` | Add Jitsi/Daily video room integration & chat log |
+| 66 | `/blockchain` | 22 | Blockchain Audit Trail | ✅ EXISTS | `BlockchainView.tsx` | Synchronize immutable block verification & export |
+| 67 | `/ai-analytics` | 23 | AI Operational Analytics | 🔧 STUB | `AiAnalyticsView.tsx` | Build readmission risk, bed demand & clinical alerts |
+| 68 | `/ai-central` | 23 | Central AI Capability Center | 🔧 STUB | `AiCentralView.tsx` | Build AI model registry & clinical documentation assistant |
+| 69 | `/ai-chat` | 23 | Interactive Clinical Assistant | 🔧 STUB | `AiChatView.tsx` | Build dedicated conversational clinical assistant page |
+| 70 | `/executive` | 46 | Executive & C-Suite Dashboard | 🔧 STUB | `ExecutiveView.tsx` | Build hospital KPI metrics (ALOS, BOR, Rev/Bed, EBITDA) |
+| 71 | `/reports` | 19 | Reporting & MOH Indicators | ✅ EXISTS | `ReportsView.tsx` | Build MOH 705/711 statutory report generators |
+| 72 | `/users` | 20 | User Management & RBAC | ✅ EXISTS | `UserManagementView.tsx` | Synchronize role catalog, permissions & MFA reset |
+| 73 | `/settings` | — | System & Branding Settings | 🔧 STUB | `SettingsView.tsx` | Align display density & live refresh configuration |
+| 74 | `/portal` | 24 | Staff/Patient Shared Portal | 🔧 STUB | `PortalView.tsx` | Align portal access token & patient lookup |
+| 75 | `/portal/appointments` | 24 | Portal Appointment Booking | 🔧 STUB | `PortalAppointmentsView.tsx` | Synchronize self-service patient slot request |
+| 76 | `/patient-portal` | 24 | Patient Self-Service Portal | ✅ EXISTS | `PatientPortalView.tsx` | Synchronize lab results view & prescription history |
+| 77 | `/patient-portal/appointments` | 24 | Self-Service Appointments | ⚠️ PARTIAL | `PatientPortalView.tsx` | Synchronize patient appointment booking flow |
+| 78 | `/documents` | 57 | Document Management & OCR | 🔧 STUB | `DocumentsView.tsx` | Build categorized document repository & tag search |
+| 79 | `/consent` | 54 | Digital Consent Management | 🔧 STUB | `ConsentView.tsx` | Build surgical consent templates & digital signatures |
+| 80 | `/communication` | 58 | Hospital Broadcasts & Alerts | 🔧 STUB | `CommunicationView.tsx` | Build patient communication campaigns (SMS/WhatsApp) |
+| 81 | `/messaging` | 58 | Messaging Notification Gateway | 🔧 STUB | `MessagingView.tsx` | Build delivery status tracker & SMS gateway balances |
+| 82 | `/community-health` | 56 | Community Health Workers (CHW) | 🔧 STUB | `CommunityHealthView.tsx` | Build household register & disease surveillance |
+| 83 | `/home-care` | 60 | Home Care & Remote Monitoring | 🔧 STUB | `HomeCareView.tsx` | Build patient visit checklist & vital logs |
+| 84 | `/canteen` | 30 | Canteen & Dietary Management | ✅ EXISTS | `CanteenView.tsx` | Synchronize patient meal orders & kitchen prep board |
+| 85 | `/feedback` | 31 | Patient Feedback & Net Promoter | ✅ EXISTS | `PatientFeedbackView.tsx` | Synchronize sentiment analysis & complaint resolution |
+| 86 | `/helpdesk` | 29 | Internal IT & Facility Helpdesk | ✅ EXISTS | `HelpdeskView.tsx` | Synchronize ticket priorities, assignment & resolution |
+| 87 | `/integrations` | 34 | External Systems Integration | ⚠️ PARTIAL | `IntegrationsView.tsx` (209 lines) | Synchronize M-Pesa, Pusher, FHIR & Cloudinary configs |
+| 88 | `/migration` | 64 | Legacy Data Migration Center | ✅ EXISTS | `MigrationView.tsx` (stub) + `MigrationCenterView.tsx` | Preserve existing CSV mapper, dry-run & batch import |
+| 89 | `/medical-director` | 43 | Medical Director Dashboard | 🔧 STUB | `MedicalDirectorView.tsx` | Build mortality audits, doctor credentialing & CDSS |
+| 90 | `/analytics` | 19 | General BI Analytics | ✅ EXISTS | `AnalyticsView.tsx` | Synchronize department utilization charts |
+| 91 | `/apps` | — | Module Launcher Grid | 🔧 STUB | `AppsView.tsx` | Align card hover states, badges & category tabs |
+| 92 | `/[module]` | — | Dynamic Module Resolver | ✅ EXISTS | `App.tsx` activeNav=99 | Ensure all 66 module IDs resolve properly |
+| 93 | `/cost-accounting` | 45 | Cost Category Tracking | 🔧 STUB | `CostAccountingView.tsx` | Synchronize overhead allocations & unit costing |
+| 94 | `/diagnostics/lab` | 8 | Lab Diagnostics Routing | ✅ EXISTS | `LaboratoryView.tsx` | Keep synchronized with central lab |
+| 95 | `/diagnostics/radiology` | 9 | Radiology Routing | ✅ EXISTS | `RadiologyView.tsx` | Keep synchronized with central radiology |
+| 96 | `/ict` | 41 | ICT & Security Operations | 🔧 STUB | `IctView.tsx` | Build security dashboard & vulnerability tracking |
+| 97 | `/setup` | — | First-time Setup | ✅ EXISTS | `App.tsx` FirstTimeSetupScreen | Align wizard steps |
+| 98 | `/signup` | — | Facility Registration | 🔧 STUB | `SignupView.tsx` | Implement registration endpoint integration |
 
 ---
 
-## 4. API Client & Networking Discrepancies
+## 4. App.tsx Routing Blocker Analysis
 
-### 4.1 Comparison Summary
+> [!IMPORTANT]
+> App.tsx uses a **numeric `activeNav` index** (not path-based routing) to dispatch views. The 35 new stub files exist in `src/views/` but are **not yet imported or wired** into App.tsx. Implementation agents must:
+> 1. Import each new View file at the top of `App.tsx`
+> 2. Add the corresponding `case` branch in the view-dispatch switch/conditional
+> 3. Map the correct `moduleId` from `moduleCatalog.ts` to the new `activeNav` index
+
+**Module IDs already in sync** — both catalogs are identical. No new IDs needed. The routing gap is purely a wiring issue in `App.tsx`.
+
+**Partial views needing upgrade (not just wiring):**
+- `ProcurementView.tsx` (45 lines) — nearly empty, needs full implementation
+- `BloodBankView.tsx` (154 lines) — thin, needs donor registry & cross-match
+- `IntegrationsView.tsx` (209 lines) — partial, needs M-Pesa/FHIR configs
+- `FinanceView.tsx` (207 lines) — partial, needs full financial KPI dashboard
+
+---
+
+## 5. API Client & Networking Discrepancies
+
+### 5.1 Comparison Summary
 * **Base URL Alignment:** Both default to `http://localhost:3000` (`VITE_API_BASE_URL` in Desktop, `NEXT_PUBLIC_API_URL` in Frontend).
 * **Missing Endpoints in Desktop:**
   * In Frontend, specialized modules directly invoke 729 distinct endpoint paths against `Medilink-Backend`.
@@ -193,7 +227,7 @@ Establish complete functional, visual, architectural, and data parity between `M
 
 ---
 
-## 5. Desktop-Specific Native Capabilities to Preserve
+## 6. Desktop-Specific Native Capabilities to Preserve
 
 During synchronization, the following native Desktop capabilities must remain intact:
 1. **Tauri v2 Core Runtime:** Window controls, native min/max/close handlers, and process management.
@@ -202,3 +236,72 @@ During synchronization, the following native Desktop capabilities must remain in
 4. **Hardware Integrations:** Native thermal receipt printing for Pharmacy POS and Billing (`window.print` with Tauri fallback).
 5. **Local Session Caching & Offline State:** Device ID fingerprinting, offline patient caching, and network recovery reconciliation.
 6. **Live Inter-View Reactivity:** `HMIS_LIVE_REFRESH_EVENT` (`hmis:live-data-changed`) custom event and storage synchronization.
+
+---
+
+## Module wiring parity checkpoint — November 14, 2026
+
+This checkpoint closes the largest structural gap between the Web reference and the Desktop shell: the audit previously confirmed that many dedicated view files existed but were never reachable from the desktop navigation. Wiring is now complete end-to-end.
+
+### 1. Authoritative module registry
+
+| Item | Before | After |
+|---|---|---|
+| Module-to-screen routing | Legacy `MODULE_ID_TO_NAV` table misaligned with `MODULE_CATALOG` (e.g. module 36 → ICU, module 37 → blank, module 42 collided with Migration) | `src/lib/moduleViewRegistry.tsx` maps every `MODULE_CATALOG` id to its screen; 65/65 catalogue ids covered |
+| Dynamic module case | `case 99` resolved only `WORKFLOW_MODULE_BY_ID` (IDs 5–20 and 37–47), so newer modules fell back to “no access” | `case 99` resolves `MODULE_BY_ID` first, checks RBAC, then renders the registry screen |
+| Fixed sidebar entries | Numbered nav cases 0–42 retained for Dashboard, Patients, Settings, Super Admin, Migration | Retained unchanged; all catalogue modules now open through nav 99 |
+
+### 2. Backend-aligned RBAC
+
+* `normalizeModuleIds` and the super-admin CSV parser now validate against `MODULE_CATALOG` instead of the narrower legacy workflow catalogue. This fixes valid backend module ids 23, 26, 27, 29, 30, 32, 33 and 35 being silently dropped from `/security/access/me` responses.
+* `getAdminAllowedModules` now returns all catalogue ids instead of the legacy `ROLE_ALLOWED_MODULES` subset.
+* Role gating on the client remains advisory; the backend `TenantGuard` / module permissions stay authoritative. No permission checks were removed.
+
+### 3. Web → Desktop navigation bridge
+
+`src/lib/navigation.tsx` now keeps a small subscribable route store that mirrors the parts of `next/navigation`, `next/link`, `useSearchParams` and `usePathname` used by the ported pages.
+
+`App.tsx` listens for `hmis:navigate-path` and resolves paths in this order:
+
+1. Dedicated sub-route registry (`/finance/journals`, `/facilities/work-orders`, `/inventory/purchase-orders`, `/portal/appointments`, `/patient-portal/appointments`, `/payroll`, `/apps`, `/ai-central`, `/ai-chat`, `/communication`).
+2. Exact catalogue path (`MODULE_BY_PATH`).
+3. Longest matching catalogue prefix (for example `/pharmacy/pos/123` → module 35).
+
+`/settings` opens nav 12. Unknown paths are ignored rather than navigating to a blank screen.
+
+### 4. Settings merge
+
+Nav 12 now exposes two tabs: **Appearance & behaviour** (the existing desktop theme/typography/layout controls) and **Account & security** (the ported Web settings page with profile, password, notifications, display and active sessions). The Web page remains separate from the desktop-only controls, so neither set of capabilities was lost.
+
+### 5. Tailwind v4 utility layer
+
+Several newer Web pages (`nursing-admin`, `full-system-setup`, `portal`, etc.) are written with Tailwind utilities. Desktop previously had no Tailwind runtime, so those classes were inert.
+
+* Added `postcss.config.mjs` with `@tailwindcss/postcss`.
+* Added `src/tailwind.css` importing `tailwindcss/theme.css` and `tailwindcss/utilities.css` (no preflight) plus the `@theme` design tokens used by the Web client.
+* Imported from `src/main.tsx` after `App.css`, preserving the existing desktop shell styles.
+* Added `tailwindcss` and `@tailwindcss/postcss` to `package.json` for reproducible installs.
+
+### 6. CSS parity sync
+
+`/tmp/opencode/append_missing_css.py` compared the Web `globals.css` with Desktop `App.css` and appended only rules that were missing from Desktop, excluding `html`, `body`, `:root`, `*` and `@theme` so the desktop shell base is not reset.
+
+| Metric | Value |
+|---|---|
+| Missing plain rules appended | 2,409 |
+| Missing rules appended inside `@media`/`@supports` blocks | 194 |
+| Missing keyframes appended | 9 |
+| Desktop `App.css` after sync | ~67,000 lines, balanced braces |
+
+Differing rules (currently 282) are intentionally **not** overwritten in this pass; they are shell-adjacent variants where Desktop has deliberately customised the presentation. They remain on the visual-verification list.
+
+### 7. Remaining parity work
+
+| Area | Remaining work |
+|---|---|
+| Runtime verification | Every module still needs a synthetic-tenant walkthrough against the matching Web route; source parity is not runtime sign-off |
+| Ported screen polish | Some Web pages use Tailwind arbitrary values that depend on tokens not yet defined in Desktop; visual review required |
+| CSS differing rules | 282 rules share a selector with a different Desktop declaration — review individually |
+| Patients module | Desktop keeps its locally-owned `PatientsView` (patient state is shared with the shell); a dedicated port of the Web `/patients` page is still pending |
+| Migration | Desktop uses the existing `MigrationCenterView` for module 64; the Web `/migration` page was reviewed but not replaced because the desktop component is already backend-wired |
+| Auth-adjacent pages | `SetupView` and `SignupView` are ported but the native first-run/auth flow still uses the existing inline screens |

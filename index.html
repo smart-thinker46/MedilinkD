@@ -5,9 +5,103 @@
     <link rel="icon" type="image/png" href="/MedilinkAppIcon.png" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Medilink HMIS</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=Newsreader:opsz,wght@6..72,500;6..72,600&display=swap" rel="stylesheet">
+    <style>
+      /* ── Instant splash shown before React mounts ── */
+      #preload-splash {
+        position: fixed;
+        inset: 0;
+        z-index: 99999;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        background: linear-gradient(135deg, #060f1e 0%, #0a2342 50%, #0d3060 100%);
+        color: #fff;
+        font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        transition: opacity 0.5s ease, visibility 0.5s ease;
+      }
+      #preload-splash.hidden {
+        opacity: 0;
+        visibility: hidden;
+        pointer-events: none;
+      }
+      #preload-splash .ps-logo {
+        width: 100px;
+        height: 100px;
+        background: url('/MedilinkAppIcon.png') no-repeat center / contain;
+        animation: ps-pulse 2s ease-in-out infinite alternate;
+        margin-bottom: 20px;
+        filter: drop-shadow(0 0 24px rgba(0, 140, 255, 0.6));
+      }
+      #preload-splash .ps-title {
+        font-size: 1.8rem;
+        font-weight: 300;
+        letter-spacing: 0.05em;
+        margin: 0 0 6px;
+      }
+      #preload-splash .ps-tagline {
+        font-size: 0.9rem;
+        opacity: 0.7;
+        margin: 0 0 36px;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+      #preload-splash .ps-spinner {
+        width: 44px;
+        height: 44px;
+        border: 3px solid rgba(255, 255, 255, 0.15);
+        border-top-color: #3b9eff;
+        border-radius: 50%;
+        animation: ps-spin 0.9s linear infinite;
+        margin-bottom: 20px;
+      }
+      #preload-splash .ps-status {
+        font-size: 0.8rem;
+        opacity: 0.55;
+        letter-spacing: 0.06em;
+      }
+      /* Animated aurora glow behind content */
+      #preload-splash::before {
+        content: '';
+        position: absolute;
+        width: 600px;
+        height: 600px;
+        background: radial-gradient(ellipse at center, rgba(0, 102, 204, 0.25) 0%, transparent 70%);
+        border-radius: 50%;
+        animation: ps-aurora 4s ease-in-out infinite alternate;
+        pointer-events: none;
+      }
+      @keyframes ps-pulse {
+        from { transform: scale(0.95); }
+        to   { transform: scale(1.05); }
+      }
+      @keyframes ps-spin {
+        to { transform: rotate(360deg); }
+      }
+      @keyframes ps-aurora {
+        from { transform: scale(0.9) translateY(-20px); opacity: 0.6; }
+        to   { transform: scale(1.1) translateY(20px);  opacity: 1; }
+      }
+
+      /* Prevent flash of white before splash is painted */
+      html, body { margin: 0; padding: 0; background: #060f1e; }
+      #root { min-height: 100vh; }
+    </style>
   </head>
 
   <body>
+    <!-- Instant HTML splash — visible before any JS loads -->
+    <div id="preload-splash" role="status" aria-label="Loading Medilink HMIS">
+      <div class="ps-logo"></div>
+      <h1 class="ps-title">Medilink HMIS</h1>
+      <p class="ps-tagline">Intelligent Healthcare &bull; Connected Operations</p>
+      <div class="ps-spinner"></div>
+      <p class="ps-status">Starting up&hellip;</p>
+    </div>
+
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>

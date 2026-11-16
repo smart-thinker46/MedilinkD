@@ -265,116 +265,212 @@ export default function EmergencyView() {
       />
 
       {registerModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
-          <form onSubmit={handleRegister} className="emergency-modal bg-card p-6 rounded-2xl border border-border shadow-xl w-full max-w-xl max-h-[90vh] overflow-y-auto">
-            <h2 className="text-xl font-bold mb-2 text-red-600 flex items-center gap-2">
-               <ModuleIcon name="warning" /> ER Registration
-            </h2>
-            <p className="text-sm text-muted-foreground mb-4">
-              Rapidly admit a patient to the Emergency Board.
-            </p>
-
-            <div className="space-y-4">
-              <div>
-                <label className="form-label">Identity pathway</label>
-                <select className="w-full px-4 py-3 bg-background border border-border rounded-xl text-sm mt-1" value={formData.identityType} onChange={(e) => setFormData({...formData, identityType: e.target.value})}>
-                  <option value="REGISTERED">Registered patient / MRN</option>
-                  <option value="TEMPORARY">Temporary or unknown patient</option>
-                </select>
-              </div>
-              {formData.identityType === "REGISTERED" ? (
+        <div className="module-form-overlay" onClick={() => setRegisterModal(false)}>
+          <div
+            className="module-form-panel emergency-modal has-rail"
+            onClick={(e) => e.stopPropagation()}
+            style={{'--module-form-accent': '#dc2626', '--module-form-accent-dark': '#991b1b', '--module-form-accent-soft': 'rgba(220, 38, 38, 0.14)'} as any}
+          >
+            <div className="module-form-rail">
+              <div className="module-form-rail-mark">
+                <div className="module-form-rail-icon" style={{ background: "rgba(220, 38, 38, 0.35)" }}>
+                  <ModuleIcon name="warning" />
+                </div>
                 <div>
-                  <label className="form-label">Patient MRN / ID</label>
-                  <input required type="text" className="w-full px-4 py-3 bg-background border border-border rounded-xl text-sm mt-1" value={formData.patientId} onChange={(e) => setFormData({...formData, patientId: e.target.value})} placeholder="Scan or enter patient MRN..." />
+                  <b>Emergency</b>
+                  <small>Rapid ER Triage</small>
                 </div>
-              ) : (
-                <div className="grid grid-cols-2 gap-3">
-                  <label className="form-label">Temporary ID<input type="text" className="w-full px-4 py-3 bg-background border border-border rounded-xl text-sm mt-1" value={formData.temporaryId} onChange={(e) => setFormData({...formData, temporaryId: e.target.value})} placeholder="Auto-generated if blank" /></label>
-                  <label className="form-label">Unknown category<select className="w-full px-4 py-3 bg-background border border-border rounded-xl text-sm mt-1" value={formData.unknownCategory} onChange={(e) => setFormData({...formData, unknownCategory: e.target.value})}><option value="">Select category</option><option>Unknown male</option><option>Unknown female</option><option>Unknown child</option><option>Unconscious patient</option><option>Police brought</option><option>Ambulance brought</option></select></label>
+              </div>
+              <div className="module-form-rail-rule" />
+              <div className="module-form-rail-steps">
+                <div className="module-form-rail-step active">
+                  <span className="module-form-rail-step-num">1</span>
+                  <div><b>Identity & Triage</b><small>Patient & priority</small></div>
                 </div>
-              )}
-              
-              <div>
-                <label className="form-label">Initial Triage Level</label>
-                <select
-                  required
-                  className="w-full px-4 py-3 bg-background border border-border rounded-xl text-sm mt-1"
-                  value={formData.priority}
-                  onChange={(e) => setFormData({...formData, priority: e.target.value})}
-                >
-                  <option value="RED">Red (Resuscitation / Immediate)</option>
-                  <option value="YELLOW">Yellow (Urgent)</option>
-                  <option value="GREEN">Green (Non-Urgent / Standard)</option>
-                  <option value="BLACK">Black (Deceased / Expectant)</option>
-                </select>
+                <div className="module-form-rail-step">
+                  <span className="module-form-rail-step-num">2</span>
+                  <div><b>Clinical Vitals</b><small>Vitals & disposition</small></div>
+                </div>
               </div>
-              <div className="grid grid-cols-2 gap-3">
-                <label className="form-label">Triage system<select className="w-full px-4 py-3 bg-background border border-border rounded-xl text-sm mt-1" value={formData.triageSystem} onChange={(e) => setFormData({...formData, triageSystem: e.target.value})}><option>MTS</option><option>SATS</option><option>ESI</option><option>START</option></select></label>
-                <label className="form-label">AVPU<select className="w-full px-4 py-3 bg-background border border-border rounded-xl text-sm mt-1" value={formData.avpu} onChange={(e) => setFormData({...formData, avpu: e.target.value})}><option>Alert</option><option>Voice</option><option>Pain</option><option>Unresponsive</option></select></label>
-              </div>
-
-              <div>
-                <label className="form-label">Mode of Arrival</label>
-                <select
-                  required
-                  className="w-full px-4 py-3 bg-background border border-border rounded-xl text-sm mt-1"
-                  value={formData.modeOfArrival}
-                  onChange={(e) => setFormData({...formData, modeOfArrival: e.target.value})}
-                >
-                  <option value="AMBULANCE">Ambulance</option>
-                  <option value="WALK_IN">Walk-in</option>
-                  <option value="REFERRAL">Referral / Transfer</option>
-                  <option value="POLICE">Police</option>
-                </select>
-              </div>
-
-              <div>
-                <label className="form-label">Chief Complaint</label>
-                <textarea required className="w-full px-4 py-3 bg-background border border-border rounded-xl text-sm mt-1" 
-                  value={formData.chiefComplaint} onChange={(e) => setFormData({...formData, chiefComplaint: e.target.value})} 
-                  placeholder="Brief description of the emergency..." />
-              </div>
-              <div>
-                <label className="form-label">Mechanism of injury / presenting condition</label>
-                <input type="text" className="w-full px-4 py-3 bg-background border border-border rounded-xl text-sm mt-1" value={formData.mechanismOfInjury} onChange={(e) => setFormData({...formData, mechanismOfInjury: e.target.value})} placeholder="Trauma mechanism or presenting condition" />
-              </div>
-              <div className="grid grid-cols-3 gap-3">
-                {([["temperatureC", "Temp °C"], ["pulseBpm", "Pulse"], ["respiratoryRate", "Resp. rate"], ["bloodPressure", "BP"], ["spo2", "SpO₂ %"], ["painScore", "Pain 0–10"]] as const).map(([key, label]) => <label key={key} className="form-label">{label}<input type={key === "bloodPressure" ? "text" : "number"} className="w-full px-3 py-2 bg-background border border-border rounded-lg text-sm mt-1" value={formData[key]} onChange={(e) => setFormData({...formData, [key]: e.target.value})} /></label>)}
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                <label className="form-label">GCS total<input type="number" min="3" max="15" className="w-full px-3 py-2 bg-background border border-border rounded-lg text-sm mt-1" value={formData.gcsTotal} onChange={(e) => setFormData({...formData, gcsTotal: e.target.value})} /></label>
-                <label className="form-label">Disposition<select className="w-full px-3 py-2 bg-background border border-border rounded-lg text-sm mt-1" value={formData.disposition} onChange={(e) => setFormData({...formData, disposition: e.target.value})}><option value="">Pending assessment</option><option>Admitted</option><option>ICU</option><option>Theatre</option><option>Discharged</option><option>Transferred</option><option>Deceased</option></select></label>
-              </div>
-
-              <div className="flex justify-end gap-3 pt-4 border-t">
-                <button
-                  type="button"
-                  onClick={() => setRegisterModal(false)}
-                  className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg font-medium"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  disabled={registering}
-                  className="px-4 py-2 bg-red-800 hover:bg-red-900 text-white rounded-lg font-medium disabled:opacity-50"
-                >
-                  {registering ? "Admitting..." : "Admit to ER"}
-                </button>
+              <div className="module-form-rail-banner">
+                <small>ER ADMISSION</small>
+                <div className="module-form-rail-bname">Rapid ER Intake</div>
+                <div className="module-form-rail-bmeta">Triage: {formData.priority}</div>
+                <span className={`module-form-rail-chip ${formData.priority === "RED" ? "bad" : formData.priority === "YELLOW" ? "warn" : "ok"}`}>{formData.priority} PRIORITY</span>
               </div>
             </div>
-          </form>
+            <div className="module-form-main">
+              <div className="module-form-head">
+                <div>
+                  <div className="module-form-kicker">Emergency Department</div>
+                  <h3 className="module-form-title">Admit Patient to Emergency Board</h3>
+                  <p className="module-form-desc">Capture triage level, arrival mode, and clinical baseline for the ER queue.</p>
+                </div>
+                <button type="button" className="module-form-x-btn" onClick={() => setRegisterModal(false)} aria-label="Close">×</button>
+              </div>
+              <form onSubmit={handleRegister} className="module-form-content">
+                <div className="module-form-body-scroll">
+                  <div className="module-form-grid">
+                    <div className="module-form-field">
+                      <label className="form-label">Identity pathway</label>
+                      <select className="module-form-input" value={formData.identityType} onChange={(e) => setFormData({...formData, identityType: e.target.value})}>
+                        <option value="REGISTERED">Registered patient / MRN</option>
+                        <option value="TEMPORARY">Temporary or unknown patient</option>
+                      </select>
+                    </div>
+                    {formData.identityType === "REGISTERED" ? (
+                      <div className="module-form-field">
+                        <label className="form-label">Patient MRN / ID <span className="module-form-required">*</span></label>
+                        <input required type="text" className="module-form-input" value={formData.patientId} onChange={(e) => setFormData({...formData, patientId: e.target.value})} placeholder="Scan or enter patient MRN..." />
+                      </div>
+                    ) : (
+                      <>
+                        <div className="module-form-field">
+                          <label className="form-label">Temporary ID</label>
+                          <input type="text" className="module-form-input" value={formData.temporaryId} onChange={(e) => setFormData({...formData, temporaryId: e.target.value})} placeholder="Auto-generated if blank" />
+                        </div>
+                        <div className="module-form-field">
+                          <label className="form-label">Unknown category</label>
+                          <select className="module-form-input" value={formData.unknownCategory} onChange={(e) => setFormData({...formData, unknownCategory: e.target.value})}>
+                            <option value="">Select category</option>
+                            <option>Unknown male</option><option>Unknown female</option><option>Unknown child</option>
+                            <option>Unconscious patient</option><option>Police brought</option><option>Ambulance brought</option>
+                          </select>
+                        </div>
+                      </>
+                    )}
+                    <div className="module-form-field">
+                      <label className="form-label">Initial Triage Level <span className="module-form-required">*</span></label>
+                      <select required className="module-form-input" value={formData.priority} onChange={(e) => setFormData({...formData, priority: e.target.value})}>
+                        <option value="RED">Red (Resuscitation / Immediate)</option>
+                        <option value="YELLOW">Yellow (Urgent)</option>
+                        <option value="GREEN">Green (Non-Urgent / Standard)</option>
+                        <option value="BLACK">Black (Deceased / Expectant)</option>
+                      </select>
+                    </div>
+                    <div className="module-form-field">
+                      <label className="form-label">Triage system</label>
+                      <select className="module-form-input" value={formData.triageSystem} onChange={(e) => setFormData({...formData, triageSystem: e.target.value})}>
+                        <option>MTS</option><option>SATS</option><option>ESI</option><option>START</option>
+                      </select>
+                    </div>
+                    <div className="module-form-field">
+                      <label className="form-label">AVPU</label>
+                      <select className="module-form-input" value={formData.avpu} onChange={(e) => setFormData({...formData, avpu: e.target.value})}>
+                        <option>Alert</option><option>Voice</option><option>Pain</option><option>Unresponsive</option>
+                      </select>
+                    </div>
+                    <div className="module-form-field">
+                      <label className="form-label">Mode of Arrival <span className="module-form-required">*</span></label>
+                      <select required className="module-form-input" value={formData.modeOfArrival} onChange={(e) => setFormData({...formData, modeOfArrival: e.target.value})}>
+                        <option value="AMBULANCE">Ambulance</option><option value="WALK_IN">Walk-in</option>
+                        <option value="REFERRAL">Referral / Transfer</option><option value="POLICE">Police</option>
+                      </select>
+                    </div>
+                    <div className="module-form-field is-wide">
+                      <label className="form-label">Chief Complaint <span className="module-form-required">*</span></label>
+                      <textarea required className="module-form-input" value={formData.chiefComplaint} onChange={(e) => setFormData({...formData, chiefComplaint: e.target.value})} placeholder="Brief description of the emergency..." />
+                    </div>
+                    <div className="module-form-field is-wide">
+                      <label className="form-label">Mechanism of injury / presenting condition</label>
+                      <input type="text" className="module-form-input" value={formData.mechanismOfInjury} onChange={(e) => setFormData({...formData, mechanismOfInjury: e.target.value})} placeholder="Trauma mechanism or presenting condition" />
+                    </div>
+                    {([["temperatureC", "Temp °C"], ["pulseBpm", "Pulse (bpm)"], ["respiratoryRate", "Resp. rate"], ["bloodPressure", "BP (mmHg)"], ["spo2", "SpO₂ %"], ["painScore", "Pain (0-10)"]] as const).map(([key, label]) => (
+                      <div key={key} className="module-form-field">
+                        <label className="form-label">{label}</label>
+                        <input type={key === "bloodPressure" ? "text" : "number"} className="module-form-input" value={formData[key]} onChange={(e) => setFormData({...formData, [key]: e.target.value})} />
+                      </div>
+                    ))}
+                    <div className="module-form-field">
+                      <label className="form-label">GCS total (3-15)</label>
+                      <input type="number" min="3" max="15" className="module-form-input" value={formData.gcsTotal} onChange={(e) => setFormData({...formData, gcsTotal: e.target.value})} />
+                    </div>
+                    <div className="module-form-field">
+                      <label className="form-label">Disposition</label>
+                      <select className="module-form-input" value={formData.disposition} onChange={(e) => setFormData({...formData, disposition: e.target.value})}>
+                        <option value="">Pending assessment</option>
+                        <option>Admitted</option><option>ICU</option><option>Theatre</option>
+                        <option>Discharged</option><option>Transferred</option><option>Deceased</option>
+                      </select>
+                    </div>
+                  </div>
+                </div>
+                <div className="module-form-foot">
+                  <button type="button" onClick={() => setRegisterModal(false)} className="module-form-btn-cancel">Cancel</button>
+                  <button type="submit" disabled={registering} className="module-form-btn-submit">{registering ? "Admitting..." : "Admit to ER"}</button>
+                </div>
+              </form>
+            </div>
+          </div>
         </div>
       )}
       {queueModal ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
-          <form onSubmit={queueEmergencyPatient} className="emergency-modal bg-card p-6 rounded-2xl border border-border shadow-xl w-full max-w-lg">
-            <h2 className="text-xl font-bold mb-2 text-red-700 flex items-center gap-2"><ModuleIcon name="queue" /> Queue emergency patient</h2>
-            <p className="text-sm text-muted-foreground mb-4">Route an active emergency case to the next operational service without recreating the patient.</p>
-            <label className="form-label">Emergency case<select required className="w-full px-4 py-3 bg-background border border-border rounded-xl text-sm mt-1" value={queueCaseId} onChange={(event) => setQueueCaseId(event.target.value)}><option value="">Select active case</option>{cases.filter((row) => !["DISCHARGED", "DECEASED", "CANCELLED"].includes(String(row.status))).map((row) => <option key={row.id} value={row.id}>{row.patientName || "Unknown patient"} · {row.temporaryId || row.id}</option>)}</select></label>
-            <label className="form-label mt-4">Destination<select required className="w-full px-4 py-3 bg-background border border-border rounded-xl text-sm mt-1" value={queueDestination} onChange={(event) => setQueueDestination(event.target.value)}><option value="INPATIENT">Inpatient</option><option value="ICU">ICU</option><option value="THEATRE">Operating Theatre</option><option value="LABORATORY">Laboratory</option><option value="RADIOLOGY">Radiology</option><option value="PHARMACY">Pharmacy</option><option value="REFERRAL">Referral</option></select></label>
-            <div className="flex justify-end gap-3 pt-5 mt-5 border-t"><button type="button" onClick={() => setQueueModal(false)} className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg font-medium">Cancel</button><button type="submit" className="px-4 py-2 bg-red-700 hover:bg-red-800 text-white rounded-lg font-medium">Queue Patient</button></div>
-          </form>
+        <div className="module-form-overlay" onClick={() => setQueueModal(false)}>
+          <div
+            className="module-form-panel emergency-modal has-rail"
+            onClick={(e) => e.stopPropagation()}
+            style={{'--module-form-accent': '#dc2626', '--module-form-accent-dark': '#991b1b', '--module-form-accent-soft': 'rgba(220, 38, 38, 0.14)'} as any}
+          >
+            <div className="module-form-rail">
+              <div className="module-form-rail-mark">
+                <div className="module-form-rail-icon" style={{ background: "rgba(220, 38, 38, 0.35)" }}>
+                  <ModuleIcon name="queue" />
+                </div>
+                <div><b>Queue Patient</b><small>ER Routing</small></div>
+              </div>
+              <div className="module-form-rail-rule" />
+              <div className="module-form-rail-steps">
+                <div className="module-form-rail-step active">
+                  <span className="module-form-rail-step-num">1</span>
+                  <div><b>Select Service</b><small>Case & destination</small></div>
+                </div>
+              </div>
+              <div className="module-form-rail-banner">
+                <small>NEXT SERVICE</small>
+                <div className="module-form-rail-bname">{queueDestination}</div>
+                <div className="module-form-rail-bmeta">Routing active case</div>
+                <span className="module-form-rail-chip ok">READY</span>
+              </div>
+            </div>
+            <div className="module-form-main">
+              <div className="module-form-head">
+                <div>
+                  <div className="module-form-kicker">Emergency Department</div>
+                  <h3 className="module-form-title">Queue Emergency Patient</h3>
+                  <p className="module-form-desc">Route an active emergency case to the next operational service.</p>
+                </div>
+                <button type="button" className="module-form-x-btn" onClick={() => setQueueModal(false)}>×</button>
+              </div>
+              <form onSubmit={queueEmergencyPatient} className="module-form-content">
+                <div className="module-form-body-scroll">
+                  <div className="module-form-grid">
+                    <div className="module-form-field is-wide">
+                      <label className="form-label">Emergency case <span className="module-form-required">*</span></label>
+                      <select required className="module-form-input" value={queueCaseId} onChange={(event) => setQueueCaseId(event.target.value)}>
+                        <option value="">Select active case</option>
+                        {cases.filter((row) => !["DISCHARGED", "DECEASED", "CANCELLED"].includes(String(row.status))).map((row) => (
+                          <option key={row.id} value={row.id}>{row.patientName || "Unknown patient"} · {row.temporaryId || row.id}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div className="module-form-field is-wide">
+                      <label className="form-label">Destination module <span className="module-form-required">*</span></label>
+                      <select required className="module-form-input" value={queueDestination} onChange={(event) => setQueueDestination(event.target.value)}>
+                        <option value="INPATIENT">Inpatient</option><option value="ICU">ICU</option>
+                        <option value="THEATRE">Operating Theatre</option><option value="LABORATORY">Laboratory</option>
+                        <option value="RADIOLOGY">Radiology</option><option value="PHARMACY">Pharmacy</option>
+                        <option value="REFERRAL">Referral</option>
+                      </select>
+                    </div>
+                  </div>
+                </div>
+                <div className="module-form-foot">
+                  <button type="button" onClick={() => setQueueModal(false)} className="module-form-btn-cancel">Cancel</button>
+                  <button type="submit" className="module-form-btn-submit">Queue Patient</button>
+                </div>
+              </form>
+            </div>
+          </div>
         </div>
       ) : null}
     </>

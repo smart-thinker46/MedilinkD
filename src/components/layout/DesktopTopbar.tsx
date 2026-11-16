@@ -13,6 +13,15 @@ import { getModuleIcon } from "../../lib/moduleIconMap";
 import { apiFetch } from "../../lib/apiClient";
 import { useAppStore } from "../../store/appStore";
 import { useSyncState } from "../../lib/syncEngine";
+import {
+  cleanDisplayName,
+  DEFAULT_USER_NAMES,
+  formatPrettyName,
+  isAdminLikeRole,
+  isFacilityLevelLabel,
+  pickHospitalName,
+  resolveRealUserName,
+} from "../../lib/utils";
 
 type QueueNotice = {
   id: string;
@@ -47,6 +56,7 @@ type DesktopTopbarProps = {
   onGoBack: () => void;
   onOpenSettings: (section?: string) => void;
   onOpenHelpAi: () => void;
+  onNavigateAiCentral: () => void;
   onOpenFacilitySettings: () => void;
   onOpenHelpdesk: () => void;
   onNavigateQueue: () => void;
@@ -60,56 +70,6 @@ type DesktopTopbarProps = {
   allowedModuleIds?: Set<number>;
   onOpenModule: (id: number) => void;
 };
-
-const DEFAULT_USER_NAMES = new Set(["dr. almalick", "hospital admin", "user"]);
-
-function formatPrettyName(name: string): string {
-  const lower = name.toLowerCase().replace(/[@._\d-]+/g, " ").trim();
-  if (lower.includes("almalick") || lower.includes("alimalick") || lower.includes("kweyu")) {
-    return "Almalick Kweyu";
-  }
-  return name
-    .replace(/[._-]+/g, " ")
-    .replace(/\d+$/, "")
-    .split(/\s+/)
-    .filter(Boolean)
-    .map((w) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
-    .join(" ");
-}
-
-const cleanDisplayName = (...values: Array<unknown>) => {
-  for (const value of values) {
-    const text = String(value || "").trim();
-    if (!text || DEFAULT_USER_NAMES.has(text.toLowerCase())) continue;
-    return formatPrettyName(text);
-  }
-  const fallback = String(values.find((value) => String(value || "").trim()) || "").trim();
-  return fallback ? formatPrettyName(fallback) : "Almalick Kweyu";
-};
-
-const isFacilityLevelLabel = (value?: unknown) =>
-  /^level\s+\d\b/i.test(String(value || "").trim());
-
-const pickHospitalName = (...values: Array<unknown>) => {
-  for (const value of values) {
-    const text = String(value || "").trim();
-    if (text && !isFacilityLevelLabel(text)) return text;
-  }
-  return values.map((value) => String(value || "").trim()).find(Boolean) || "";
-};
-
-const isAdminLikeRole = (...values: Array<unknown>) =>
-  values.some((value) => {
-    const role = String(value || "").trim().toLowerCase().replace(/[\s-]+/g, "_");
-    return [
-      "super_admin",
-      "hospital_admin",
-      "admin",
-      "administrator",
-      "facility_admin",
-      "tenant_admin",
-    ].includes(role);
-  });
 
 const normalizeStatus = (value: unknown) =>
   String(value || "").trim().toUpperCase().replace(/\s+/g, "_");
@@ -129,7 +89,7 @@ export function DesktopTopbar({
   activeWorkflowModuleId,
   onGoBack,
   onOpenSettings,
-  onOpenHelpAi,
+  onNavigateAiCentral,
   onOpenFacilitySettings,
   onOpenHelpdesk,
   onNavigateQueue,
@@ -139,7 +99,7 @@ export function DesktopTopbar({
   userEmail = "admin@medilink.com",
   facilityId = "facility",
   facilityName = "Hospital Facility",
-  facilityLogo = null,
+  facilityLogo: _facilityLogo = null,
   allowedModuleIds = new Set<number>(),
   onOpenModule,
 }: DesktopTopbarProps) {
@@ -162,7 +122,7 @@ export function DesktopTopbar({
   const [dismissedNotificationIds, setDismissedNotificationIds] = useState<string[]>([]);
 
   const showBack = activeNav !== 0 || activeWorkflowModuleId !== null;
-  const isAdmin = isAdminLikeRole(userRole);
+  const isAdmin = isAdminLikeRole(userRole, profile?.role, profile?.roleLabel);
 
   // Filter modules based on query and RBAC
   const moduleSearchResults = useMemo(() => {
@@ -328,7 +288,7 @@ export function DesktopTopbar({
     }
   };
 
-  const displayName = cleanDisplayName(profile?.name, profile?.fullName, userName);
+  const displayName = resolveRealUserName(profile?.name, profile?.fullName, userName);
   const displayEmail = String(profile?.email || userEmail || "No email available");
   const displayRole = String(profile?.roleLabel || profile?.role || userRole || "User");
   const displayFacilityName =
@@ -441,7 +401,7 @@ export function DesktopTopbar({
         <button
           type="button"
           className="topbar-icon-btn topbar-ai-btn"
-          onClick={onOpenHelpAi}
+          onClick={onNavigateAiCentral}
           title="Open Medilink AI"
           aria-label="Open Medilink AI"
         >

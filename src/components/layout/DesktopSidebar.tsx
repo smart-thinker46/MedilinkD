@@ -33,6 +33,12 @@ import {
 import { MODULE_CATALOG } from "../../lib/moduleCatalog";
 import { apiFetch } from "../../lib/apiClient";
 import { useAppStore } from "../../store/appStore";
+import {
+  pickHospitalName,
+  readSetupBranding,
+  resolveAssetUrl,
+  type SetupBranding,
+} from "../../lib/utils";
 
 type DesktopSidebarProps = {
   collapsed: boolean;
@@ -43,8 +49,10 @@ type DesktopSidebarProps = {
   onNavigateNav: (navIndex: number) => void;
   onNavigateUpgrade: () => void;
   onOpenHelpAi: () => void;
+  onNavigateAiChat: () => void;
   facilityName?: string;
   facilityLogo?: string | null;
+  appMode?: "light" | "dark";
 };
 
 const patientWorkspaceTools = [
@@ -264,56 +272,13 @@ const moduleQueueConfig: Record<string, { departmentId: string; label: string }>
     return acc;
   }, {});
 
-const navToModuleKeyMap: Record<number, string> = {
-  0: "",
-  1: "patients",
-  2: "opd",
-  3: "appointments",
-  4: "ehr",
-  5: "nursing",
-  6: "wards",
-  7: "lab",
-  8: "radiology",
-  9: "billing",
-  10: "pharmacy",
-  11: "inventory",
-  12: "settings",
-  13: "facilities",
-  14: "insurance",
-  15: "procurement",
-  16: "hr",
-  17: "doctors",
-  18: "facilities",
-  19: "analytics",
-  20: "users",
-  21: "telemedicine",
-  22: "blockchain",
-  24: "portal",
-  25: "emergency",
-  26: "ambulance",
-  27: "mortuary",
-  28: "queue",
-  29: "helpdesk",
-  30: "canteen",
-  31: "feedback",
-  33: "quality-assurance",
-  34: "integrations",
-  35: "reports",
-  36: "icu",
-  37: "maternity",
-  38: "nicu",
-  39: "dental",
-  41: "cdss",
-  42: "migration",
-  43: "ot",
-  44: "physiotherapy",
-  45: "nutrition",
-  46: "paediatrics",
-  47: "infection-control",
-  48: "blood-bank",
-  49: "biomedical",
-  50: "pharmacy",
-};
+const navToModuleKeyMap: Record<number, string> = MODULE_CATALOG.reduce(
+  (acc, mod) => {
+    acc[mod.id] = mod.path.replace(/^\//, "").replace(/\//g, "-");
+    return acc;
+  },
+  { 0: "", 40: "subscription", 41: "super-admin", 64: "migration", 99: "" } as Record<number, string>
+);
 
 const formatModuleName = (moduleKey: string) =>
   moduleKey
@@ -343,17 +308,67 @@ export function DesktopSidebar({
   onNavigateNav,
   onNavigateUpgrade,
   onOpenHelpAi,
+  onNavigateAiChat,
   facilityName = "Hospital Facility",
   facilityLogo = null,
+  appMode,
 }: DesktopSidebarProps) {
-  const { facility } = useAppStore();
+  const { facility, facilityLogo: storeFacilityLogo } = useAppStore();
+  const [setupBranding, setSetupBranding] = useState<SetupBranding>(() => readSetupBranding());
   const [waitingCount, setWaitingCount] = useState(0);
   const [orderCount, setOrderCount] = useState(0);
   const [patientModuleState, setPatientModuleState] = useState<any>(() => readPatientModuleState());
 
+  useEffect(() => {
+    setSetupBranding(readSetupBranding());
+
+    const handleStorage = (event: StorageEvent) => {
+      if (
+        event.key === "hmis_first_setup" ||
+        event.key === "hmis_logo" ||
+        event.key === "hmis_hospital_admin_account"
+      ) {
+        setSetupBranding(readSetupBranding());
+      }
+    };
+
+    window.addEventListener("storage", handleStorage);
+    return () => window.removeEventListener("storage", handleStorage);
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    const fetchBranding = async () => {
+      try {
+        const response = await apiFetch("/facilities/current/runtime-settings");
+        if (!response.ok) return;
+        const data = await response.json();
+        if (cancelled || !data) return;
+        const runtimeName = data?.facility?.shortName || data?.facility?.name;
+        const runtimeLogo = data?.branding?.logoUrl;
+        if (runtimeName || runtimeLogo) {
+          setSetupBranding((prev) => ({
+            ...prev,
+            name: pickHospitalName(runtimeName, prev.name),
+            logoUrl: runtimeLogo || prev.logoUrl,
+          }));
+        }
+      } catch {
+        // Safe offline fallback
+      }
+    };
+    void fetchBranding();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   const moduleKey = useMemo(() => {
-    if (activeWorkflowModuleId) {
-      const mod = MODULE_CATALOG.find((m) => m.id === activeWorkflowModuleId);
+    const id =
+      activeWorkflowModuleId ||
+      (activeNav > 0 && activeNav !== 99 && activeNav !== 40 && activeNav !== 41 ? activeNav : null);
+    if (id) {
+      const mod = MODULE_CATALOG.find((m) => m.id === id);
       if (mod) return mod.path.replace(/^\//, "").replace(/\//g, "-");
     }
     return navToModuleKeyMap[activeNav] || "";
@@ -446,11 +461,26 @@ export function DesktopSidebar({
     };
   }, [orderDestination]);
 
-  const hospitalName = facilityName || facility?.name || "MediLink General Hospital";
-  const hospitalLogo = facilityLogo || "/MedilinkHMIS.png";
+  const hospitalName =
+    pickHospitalName(
+      facilityName,
+      facility?.name,
+      setupBranding.name,
+    ) || "MediLink General Hospital";
+
+  const hospitalLogo =
+    resolveAssetUrl(
+      facilityLogo ||
+      setupBranding.logoUrl ||
+      storeFacilityLogo ||
+      (typeof window !== "undefined" ? localStorage.getItem("hmis_logo") : null)
+    ) || "/MedilinkHMIS.png";
 
   return (
-    <aside className={`sidebar custom-scrollbar ${collapsed ? "sidebar-collapsed" : ""}`}>
+    <aside
+      className={`sidebar custom-scrollbar ${collapsed ? "sidebar-collapsed" : ""} ${appMode ? `sidebar-${appMode}` : ""}`}
+      data-theme={appMode}
+    >
       {/* Brand Header */}
       <div className="sidebar-brand-top">
         <img
@@ -1634,21 +1664,35 @@ export function DesktopSidebar({
         <button
           type="button"
           className="sidebar-help-btn"
-          onClick={() => collapseAfterAction(onOpenHelpAi)}
+          onClick={() => collapseAfterAction(onNavigateAiChat)}
           title="Open Medilink AI assistant"
         >
           <Bot size={16} />
           {!collapsed && <span>AI Assistant</span>}
         </button>
+        {!collapsed && (
+          <button
+            type="button"
+            className="sidebar-help-btn"
+            onClick={() => collapseAfterAction(onOpenHelpAi)}
+            title="Open Medilink Help AI"
+          >
+            <Bot size={16} />
+            <span>Help AI</span>
+          </button>
+        )}
       </div>
 
       {/* Active Facility Profile Card */}
       {!isModuleOpen ? (
-        <div className="sidebar-hospital-profile">
+        <div className="sidebar-hospital-profile" title={hospitalName}>
           <img
             src={hospitalLogo}
             className="sidebar-hospital-logo"
             alt="Hospital logo"
+            onError={(e) => {
+              (e.currentTarget as HTMLImageElement).src = "/MedilinkHMIS.png";
+            }}
           />
           {!collapsed && (
             <div className="sidebar-hospital-copy">

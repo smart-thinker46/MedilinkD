@@ -259,138 +259,10 @@ export default function CanteenView() {
         })}
       </section>
 
-      <section className="canteen-grid">
-        <form className={`canteen-panel canteen-form ${activeForm === "diet" ? "canteen-modal-form" : "is-hidden"}`} onSubmit={postDietOrder}>
-          <div className="canteen-panel-title">
-            <ClipboardList size={18} />
-            <div>
-              <h2>Clinical Diet Order</h2>
-              <p>Post or update the current diet directly to the kitchen board.</p>
-            </div>
-            <button type="button" className="canteen-modal-close" onClick={() => setActiveForm(null)} aria-label="Close diet order form">×</button>
-          </div>
-          <label>
-            Admission ID
-            <input value={dietForm.inpatientId} onChange={(event) => setDietForm({ ...dietForm, inpatientId: event.target.value })} placeholder="Inpatient/admission ID" />
-          </label>
-          <label>
-            Patient ID
-            <input value={dietForm.patientId} onChange={(event) => setDietForm({ ...dietForm, patientId: event.target.value })} placeholder="Patient ID" />
-          </label>
-          <label>
-            Diet Type
-            <select value={dietForm.dietType} onChange={(event) => setDietForm({ ...dietForm, dietType: event.target.value })}>
-              {(configuration?.dietTypes || DIET_TYPES).map((diet: string) => <option key={diet} value={diet}>{pretty(diet)}</option>)}
-            </select>
-          </label>
-          <label>
-            Source
-            <select value={dietForm.source} onChange={(event) => setDietForm({ ...dietForm, source: event.target.value })}>
-              <option value="EMR">EMR</option>
-              <option value="DOCTOR">Doctor</option>
-              <option value="NUTRITION">Nutrition</option>
-            </select>
-          </label>
-          <label className="span-2">
-            Clinical Note
-            <textarea value={dietForm.note} onChange={(event) => setDietForm({ ...dietForm, note: event.target.value })} placeholder="Diet change reason or instruction" />
-          </label>
-          <button className="canteen-primary" disabled={saving === "diet"}>
-            <Send size={16} /> {saving === "diet" ? "Posting..." : "Post Diet Order"}
-          </button>
-        </form>
-
-        <form className={`canteen-panel canteen-form ${activeForm === "consumption" ? "canteen-modal-form" : "is-hidden"}`} onSubmit={recordConsumption}>
-          <div className="canteen-panel-title">
-            <CookingPot size={18} />
-            <div>
-              <h2>Meal Consumption</h2>
-              <p>Ward nurse intake documentation feeds the dietitian review queue.</p>
-            </div>
-            <button type="button" className="canteen-modal-close" onClick={() => setActiveForm(null)} aria-label="Close consumption form">×</button>
-          </div>
-          <label>
-            Admission ID
-            <input value={mealForm.inpatientId} onChange={(event) => setMealForm({ ...mealForm, inpatientId: event.target.value })} placeholder="Inpatient/admission ID" />
-          </label>
-          <label>
-            Patient ID
-            <input value={mealForm.patientId} onChange={(event) => setMealForm({ ...mealForm, patientId: event.target.value })} placeholder="Patient ID" />
-          </label>
-          <label>
-            Meal
-            <select value={mealForm.mealType} onChange={(event) => setMealForm({ ...mealForm, mealType: event.target.value })}>
-              {(configuration?.mealTypes || MEAL_TYPES).map((meal: string) => <option key={meal} value={meal}>{pretty(meal)}</option>)}
-            </select>
-          </label>
-          <label>
-            Consumed
-            <select value={mealForm.consumption} onChange={(event) => setMealForm({ ...mealForm, consumption: event.target.value })}>
-              {(configuration?.consumptionLevels || CONSUMPTION_LEVELS).map((level: string) => <option key={level} value={level}>{pretty(level)}</option>)}
-            </select>
-          </label>
-          <label className="span-2">
-            Notes
-            <textarea value={mealForm.notes} onChange={(event) => setMealForm({ ...mealForm, notes: event.target.value })} placeholder="Ward note" />
-          </label>
-          <button className="canteen-primary" disabled={saving === "meal"}>
-            <Send size={16} /> {saving === "meal" ? "Saving..." : "Record Consumption"}
-          </button>
-        </form>
-      </section>
-
       <section className="canteen-panel">
         <div className="canteen-panel-title"><CookingPot size={18} /><div><h2>Production & Delivery Control</h2><p>Track production plans, tray dispatch, delivery exceptions, and replacements.</p></div></div>
         <div className="canteen-table-wrap"><table className="canteen-table"><thead><tr><th>Record</th><th>Patient / Ward</th><th>Meal</th><th>Status</th><th>Updated</th></tr></thead><tbody>{[...productionPlans, ...deliveries].length ? [...productionPlans, ...deliveries].slice(0, 100).map((row: any) => <tr key={`${row.module}-${row.id}`}><td>{row.trayId || row.planId || row.id}</td><td>{row.patientName || row.ward || row.patientId || "Production plan"}</td><td>{pretty(row.mealType || row.mealPeriod || "—")}</td><td><span className={String(row.status).includes("FAILED") || String(row.status).includes("MISSED") ? "intake-low" : "intake-ok"}>{pretty(row.status || "DRAFT")}</span></td><td>{formatDateTime(row.updatedAt || row.recordedAt || row.createdAt)}</td></tr>) : <tr><td colSpan={5}>No production or delivery records yet.</td></tr>}</tbody></table></div>
       </section>
-
-      <form className={`canteen-panel canteen-form canteen-operational-form ${activeForm === "operational" ? "canteen-modal-form" : "is-hidden"}`} onSubmit={createOperational}>
-        <div className="canteen-panel-title">
-          <ClipboardList size={18} />
-          <div>
-            <h2>Operational Control Record</h2>
-            <p>Record menus, production, delivery, waste, food-safety, and hygiene events without changing the clinical diet order.</p>
-          </div>
-          <button type="button" className="canteen-modal-close" onClick={() => setActiveForm(null)} aria-label="Close operational form">×</button>
-        </div>
-        <label>
-          Record type
-          <select value={operationalKind} onChange={(event) => setOperationalKind(event.target.value)}>
-            {['MENU', 'RECIPE', 'SCHEDULE', 'PRODUCTION', 'DELIVERY', 'WASTE', 'FOOD_SAFETY', 'HYGIENE', 'FORECAST'].map((kind) => <option key={kind} value={kind}>{pretty(kind)}</option>)}
-          </select>
-        </label>
-        <label>
-          Record name / ID
-          <input value={operationalForm.name} onChange={(event) => setOperationalForm({ ...operationalForm, name: event.target.value })} placeholder="e.g. LUNCH-2026-10-24-001" />
-        </label>
-        <label>
-          Meal period
-          <select value={operationalForm.mealType} onChange={(event) => setOperationalForm({ ...operationalForm, mealType: event.target.value })}>
-            {(configuration?.mealTypes || MEAL_TYPES).map((meal: string) => <option key={meal} value={meal}>{pretty(meal)}</option>)}
-          </select>
-        </label>
-        <label>
-          Status
-          <select value={operationalForm.status} onChange={(event) => setOperationalForm({ ...operationalForm, status: event.target.value })}>
-            <option value="DRAFT">Draft</option><option value="IN_PROGRESS">In progress</option><option value="READY_FOR_DISPATCH">Ready for dispatch</option><option value="DELIVERED">Delivered</option><option value="OPEN">Open</option><option value="PASSED">Passed</option><option value="FAILED">Failed</option>
-          </select>
-        </label>
-        <label>
-          Ward / location
-          <input value={operationalForm.ward} onChange={(event) => setOperationalForm({ ...operationalForm, ward: event.target.value })} placeholder="Kitchen, ward, or storage location" />
-        </label>
-        <label>
-          Diet or restriction
-          <select value={operationalForm.dietType} onChange={(event) => setOperationalForm({ ...operationalForm, dietType: event.target.value })}>
-            {(configuration?.dietTypes || DIET_TYPES).map((diet: string) => <option key={diet} value={diet}>{pretty(diet)}</option>)}
-          </select>
-        </label>
-        <label className="span-2">
-          Notes / safety findings
-          <textarea value={operationalForm.notes} onChange={(event) => setOperationalForm({ ...operationalForm, notes: event.target.value })} placeholder="Add quantities, temperature, allergens, corrective action, or delivery notes" />
-        </label>
-        <button className="canteen-primary" disabled={saving === "operational"}><Send size={16} /> {saving === "operational" ? "Saving..." : "Save Operational Record"}</button>
-      </form>
 
       <section className="canteen-panel">
         <div className="canteen-toolbar">
@@ -460,6 +332,90 @@ export default function CanteenView() {
           </table>
         </div>
       </section>
+
+      {activeForm === "diet" ? (
+        <div className="module-form-overlay" onClick={() => setActiveForm(null)}>
+          <form className="module-form-panel modal-panel canteen-modal" onSubmit={postDietOrder} onClick={(event) => event.stopPropagation()}>
+            <div className="module-form-header" style={{ background: "linear-gradient(180deg, #000 0%, #111 32%, #222 68%, #333 100%)" }}>
+              <div className="module-form-heading">
+                <div className="module-form-icon"><ClipboardList size={20} /></div>
+                <div><div className="module-form-kicker">Canteen</div><h2 className="module-form-title">Clinical Diet Order</h2></div>
+              </div>
+              <button type="button" className="modal-close-btn" onClick={() => setActiveForm(null)} aria-label="Close diet order form">×</button>
+            </div>
+            <div className="module-form-body">
+              <div className="module-form-grid">
+                <label className="module-form-field"><span>Admission ID</span><input className="module-form-input" value={dietForm.inpatientId} onChange={(event) => setDietForm({ ...dietForm, inpatientId: event.target.value })} placeholder="Inpatient/admission ID" /></label>
+                <label className="module-form-field"><span>Patient ID</span><input className="module-form-input" value={dietForm.patientId} onChange={(event) => setDietForm({ ...dietForm, patientId: event.target.value })} placeholder="Patient ID" /></label>
+                <label className="module-form-field"><span>Diet Type</span><select className="module-form-input" value={dietForm.dietType} onChange={(event) => setDietForm({ ...dietForm, dietType: event.target.value })}>{(configuration?.dietTypes || DIET_TYPES).map((diet: string) => <option key={diet} value={diet}>{pretty(diet)}</option>)}</select></label>
+                <label className="module-form-field"><span>Source</span><select className="module-form-input" value={dietForm.source} onChange={(event) => setDietForm({ ...dietForm, source: event.target.value })}><option value="EMR">EMR</option><option value="DOCTOR">Doctor</option><option value="NUTRITION">Nutrition</option></select></label>
+                <label className="module-form-field is-wide"><span>Clinical Note</span><textarea className="module-form-input" value={dietForm.note} onChange={(event) => setDietForm({ ...dietForm, note: event.target.value })} placeholder="Diet change reason or instruction" /></label>
+              </div>
+              <div className="module-form-footer">
+                <button type="button" className="form-btn form-btn-cancel" onClick={() => setActiveForm(null)}>Cancel</button>
+                <button type="submit" className="form-btn form-btn-primary module-form-submit" disabled={saving === "diet"}><Send size={16} /> {saving === "diet" ? "Posting..." : "Post Diet Order"}</button>
+              </div>
+            </div>
+          </form>
+        </div>
+      ) : null}
+
+      {activeForm === "consumption" ? (
+        <div className="module-form-overlay" onClick={() => setActiveForm(null)}>
+          <form className="module-form-panel modal-panel canteen-modal" onSubmit={recordConsumption} onClick={(event) => event.stopPropagation()}>
+            <div className="module-form-header" style={{ background: "linear-gradient(180deg, #000 0%, #111 32%, #222 68%, #333 100%)" }}>
+              <div className="module-form-heading">
+                <div className="module-form-icon"><CookingPot size={20} /></div>
+                <div><div className="module-form-kicker">Canteen</div><h2 className="module-form-title">Meal Consumption</h2></div>
+              </div>
+              <button type="button" className="modal-close-btn" onClick={() => setActiveForm(null)} aria-label="Close consumption form">×</button>
+            </div>
+            <div className="module-form-body">
+              <div className="module-form-grid">
+                <label className="module-form-field"><span>Admission ID</span><input className="module-form-input" value={mealForm.inpatientId} onChange={(event) => setMealForm({ ...mealForm, inpatientId: event.target.value })} placeholder="Inpatient/admission ID" /></label>
+                <label className="module-form-field"><span>Patient ID</span><input className="module-form-input" value={mealForm.patientId} onChange={(event) => setMealForm({ ...mealForm, patientId: event.target.value })} placeholder="Patient ID" /></label>
+                <label className="module-form-field"><span>Meal</span><select className="module-form-input" value={mealForm.mealType} onChange={(event) => setMealForm({ ...mealForm, mealType: event.target.value })}>{(configuration?.mealTypes || MEAL_TYPES).map((meal: string) => <option key={meal} value={meal}>{pretty(meal)}</option>)}</select></label>
+                <label className="module-form-field"><span>Consumed</span><select className="module-form-input" value={mealForm.consumption} onChange={(event) => setMealForm({ ...mealForm, consumption: event.target.value })}>{(configuration?.consumptionLevels || CONSUMPTION_LEVELS).map((level: string) => <option key={level} value={level}>{pretty(level)}</option>)}</select></label>
+                <label className="module-form-field is-wide"><span>Notes</span><textarea className="module-form-input" value={mealForm.notes} onChange={(event) => setMealForm({ ...mealForm, notes: event.target.value })} placeholder="Ward note" /></label>
+              </div>
+              <div className="module-form-footer">
+                <button type="button" className="form-btn form-btn-cancel" onClick={() => setActiveForm(null)}>Cancel</button>
+                <button type="submit" className="form-btn form-btn-primary module-form-submit" disabled={saving === "meal"}><Send size={16} /> {saving === "meal" ? "Saving..." : "Record Consumption"}</button>
+              </div>
+            </div>
+          </form>
+        </div>
+      ) : null}
+
+      {activeForm === "operational" ? (
+        <div className="module-form-overlay" onClick={() => setActiveForm(null)}>
+          <form className="module-form-panel modal-panel canteen-modal" onSubmit={createOperational} onClick={(event) => event.stopPropagation()}>
+            <div className="module-form-header" style={{ background: "linear-gradient(180deg, #000 0%, #111 32%, #222 68%, #333 100%)" }}>
+              <div className="module-form-heading">
+                <div className="module-form-icon"><ClipboardList size={20} /></div>
+                <div><div className="module-form-kicker">Canteen</div><h2 className="module-form-title">Operational Control Record</h2></div>
+              </div>
+              <button type="button" className="modal-close-btn" onClick={() => setActiveForm(null)} aria-label="Close operational form">×</button>
+            </div>
+            <div className="module-form-body">
+              <div className="module-form-grid">
+                <label className="module-form-field"><span>Record type</span><select className="module-form-input" value={operationalKind} onChange={(event) => setOperationalKind(event.target.value)}>{['MENU', 'RECIPE', 'SCHEDULE', 'PRODUCTION', 'DELIVERY', 'WASTE', 'FOOD_SAFETY', 'HYGIENE', 'FORECAST'].map((kind) => <option key={kind} value={kind}>{pretty(kind)}</option>)}</select></label>
+                <label className="module-form-field"><span>Record name / ID</span><input className="module-form-input" value={operationalForm.name} onChange={(event) => setOperationalForm({ ...operationalForm, name: event.target.value })} placeholder="e.g. LUNCH-2026-10-24-001" /></label>
+                <label className="module-form-field"><span>Meal period</span><select className="module-form-input" value={operationalForm.mealType} onChange={(event) => setOperationalForm({ ...operationalForm, mealType: event.target.value })}>{(configuration?.mealTypes || MEAL_TYPES).map((meal: string) => <option key={meal} value={meal}>{pretty(meal)}</option>)}</select></label>
+                <label className="module-form-field"><span>Status</span><select className="module-form-input" value={operationalForm.status} onChange={(event) => setOperationalForm({ ...operationalForm, status: event.target.value })}><option value="DRAFT">Draft</option><option value="IN_PROGRESS">In progress</option><option value="READY_FOR_DISPATCH">Ready for dispatch</option><option value="DELIVERED">Delivered</option><option value="OPEN">Open</option><option value="PASSED">Passed</option><option value="FAILED">Failed</option></select></label>
+                <label className="module-form-field"><span>Ward / location</span><input className="module-form-input" value={operationalForm.ward} onChange={(event) => setOperationalForm({ ...operationalForm, ward: event.target.value })} placeholder="Kitchen, ward, or storage location" /></label>
+                <label className="module-form-field"><span>Diet or restriction</span><select className="module-form-input" value={operationalForm.dietType} onChange={(event) => setOperationalForm({ ...operationalForm, dietType: event.target.value })}>{(configuration?.dietTypes || DIET_TYPES).map((diet: string) => <option key={diet} value={diet}>{pretty(diet)}</option>)}</select></label>
+                <label className="module-form-field is-wide"><span>Notes / safety findings</span><textarea className="module-form-input" value={operationalForm.notes} onChange={(event) => setOperationalForm({ ...operationalForm, notes: event.target.value })} placeholder="Add quantities, temperature, allergens, corrective action, or delivery notes" /></label>
+              </div>
+              <div className="module-form-footer">
+                <button type="button" className="form-btn form-btn-cancel" onClick={() => setActiveForm(null)}>Cancel</button>
+                <button type="submit" className="form-btn form-btn-primary module-form-submit" disabled={saving === "operational"}><Send size={16} /> {saving === "operational" ? "Saving..." : "Save Operational Record"}</button>
+              </div>
+            </div>
+          </form>
+        </div>
+      ) : null}
+
     </main>
   );
 }

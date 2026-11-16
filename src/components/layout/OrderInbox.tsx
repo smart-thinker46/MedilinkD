@@ -15,12 +15,12 @@ export function OrderInbox({ destinationModule, onClose }: OrderInboxProps) {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const response = await apiFetch<any>(
+      const response = await apiFetch(
         `/orchestration/orders?destinationModule=${encodeURIComponent(
           destinationModule,
         )}&status=ORDERED,SUBMITTED,ROUTED,RECEIVED,ACKNOWLEDGED,READY,SCHEDULED,IN_PROGRESS`,
       );
-      const data = response?.data ?? response;
+      const data = await response.json().catch(() => null);
       setOrders(Array.isArray(data?.items) ? data.items : Array.isArray(data) ? data : []);
     } catch {
       setOrders([]);

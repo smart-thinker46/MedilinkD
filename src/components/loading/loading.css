@@ -1,0 +1,311 @@
+/* ==========================================================================
+   MEDILINK HMIS — PREMIUM HEALTHCARE LOADING & SKELETON ANIMATIONS
+   Ultra-smooth GPU-accelerated micro-interactions & feedback
+   ========================================================================== */
+
+/* ── 1. Global Loading Overlay ── */
+.loading-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(9, 20, 34, 0.72);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  z-index: 99999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  animation: pfOverlayFadeIn 0.25s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+@keyframes pfOverlayFadeIn {
+  from {
+    opacity: 0;
+    backdrop-filter: blur(0px);
+  }
+  to {
+    opacity: 1;
+    backdrop-filter: blur(8px);
+  }
+}
+
+.loading-card {
+  background: rgba(15, 23, 42, 0.88);
+  border: 1px solid rgba(45, 212, 191, 0.25);
+  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5), 0 0 24px rgba(15, 118, 110, 0.25);
+  border-radius: 20px;
+  padding: 32px 40px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 18px;
+  max-width: 420px;
+  width: 90%;
+  text-align: center;
+  transform: translateY(0);
+  animation: pfCardPop 0.3s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+}
+
+@keyframes pfCardPop {
+  from {
+    opacity: 0;
+    transform: scale(0.92) translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+/* ── 2. Multi-Ring Healthcare Pulse Spinner ── */
+.spinner-container {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.spinner-circle {
+  position: relative;
+  border-radius: 50%;
+  animation: pfSpinnerRotate 0.9s cubic-bezier(0.5, 0.1, 0.4, 0.9) infinite;
+  box-sizing: border-box;
+}
+
+.spinner-circle.size-xs {
+  width: 18px;
+  height: 18px;
+  border: 2px solid rgba(15, 118, 110, 0.2);
+  border-top-color: #0d9488;
+}
+
+.spinner-circle.size-sm {
+  width: 24px;
+  height: 24px;
+  border: 2.5px solid rgba(15, 118, 110, 0.2);
+  border-top-color: #0d9488;
+}
+
+.spinner-circle.size-md {
+  width: 36px;
+  height: 36px;
+  border: 3px solid rgba(45, 212, 191, 0.2);
+  border-top-color: #2dd4bf;
+}
+
+.spinner-circle.size-lg {
+  width: 52px;
+  height: 52px;
+  border: 4px solid rgba(45, 212, 191, 0.18);
+  border-top-color: #2dd4bf;
+  border-right-color: #38bdf8;
+}
+
+.spinner-circle.size-xl {
+  width: 64px;
+  height: 64px;
+  border: 4.5px solid rgba(45, 212, 191, 0.15);
+  border-top-color: #2dd4bf;
+  border-right-color: #0284c7;
+}
+
+/* White variant for dark buttons or banners */
+.spinner-circle.variant-white {
+  border-color: rgba(255, 255, 255, 0.25);
+  border-top-color: #ffffff;
+}
+
+/* Pulse Glow Rings */
+.spinner-pulse-ring {
+  position: absolute;
+  inset: -6px;
+  border-radius: 50%;
+  border: 2px solid rgba(45, 212, 191, 0.35);
+  animation: pfPulseRing 2s cubic-bezier(0.24, 0, 0.38, 1) infinite;
+}
+
+@keyframes pfPulseRing {
+  0% {
+    transform: scale(0.85);
+    opacity: 0.8;
+  }
+  50% {
+    transform: scale(1.15);
+    opacity: 0.2;
+  }
+  100% {
+    transform: scale(0.85);
+    opacity: 0.8;
+  }
+}
+
+@keyframes pfSpinnerRotate {
+  0% {
+    transform: rotate(0deg);
+  }
+  100% {
+    transform: rotate(360deg);
+  }
+}
+
+/* ── 3. Overlay Typography & Status Message ── */
+.loading-title {
+  color: #f8fafc;
+  font-size: 1.05rem;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  margin: 0;
+}
+
+.loading-subtitle {
+  color: #94a3b8;
+  font-size: 0.82rem;
+  margin: 0;
+  line-height: 1.4;
+}
+
+.loading-bar-track {
+  width: 100%;
+  height: 4px;
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 999px;
+  overflow: hidden;
+  margin-top: 4px;
+  position: relative;
+}
+
+.loading-bar-fill {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 40%;
+  background: linear-gradient(90deg, #0d9488, #2dd4bf, #38bdf8);
+  border-radius: 999px;
+  animation: pfLoadingBarSweep 1.6s ease-in-out infinite;
+}
+
+@keyframes pfLoadingBarSweep {
+  0% {
+    left: -40%;
+    width: 30%;
+  }
+  50% {
+    left: 40%;
+    width: 50%;
+  }
+  100% {
+    left: 100%;
+    width: 30%;
+  }
+}
+
+/* ── 4. Inline Table & Card Loading Indicators ── */
+.pf-inline-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 32px 20px;
+  color: #64748b;
+  font-size: 0.85rem;
+  font-weight: 600;
+  animation: pfFadeIn 0.3s ease;
+}
+
+.app-mode-dark .pf-inline-loading,
+[data-theme="dark"] .pf-inline-loading {
+  color: #94a3b8;
+}
+
+.pf-inline-spinner {
+  width: 20px;
+  height: 20px;
+  border: 2.5px solid rgba(15, 118, 110, 0.2);
+  border-top-color: #0f766e;
+  border-radius: 50%;
+  animation: pfSpinnerRotate 0.8s linear infinite;
+  flex-shrink: 0;
+}
+
+.app-mode-dark .pf-inline-spinner,
+[data-theme="dark"] .pf-inline-spinner {
+  border-color: rgba(45, 212, 191, 0.2);
+  border-top-color: #2dd4bf;
+}
+
+/* ── 5. Skeleton Shimmer Effects ── */
+.pf-skeleton {
+  background: linear-gradient(
+    90deg,
+    rgba(226, 232, 240, 0.6) 25%,
+    rgba(241, 245, 249, 0.9) 37%,
+    rgba(226, 232, 240, 0.6) 63%
+  );
+  background-size: 400% 100%;
+  animation: pfSkeletonShimmer 1.5s ease infinite;
+  border-radius: 6px;
+}
+
+.app-mode-dark .pf-skeleton,
+[data-theme="dark"] .pf-skeleton {
+  background: linear-gradient(
+    90deg,
+    rgba(30, 41, 59, 0.6) 25%,
+    rgba(51, 65, 85, 0.85) 37%,
+    rgba(30, 41, 59, 0.6) 63%
+  );
+  background-size: 400% 100%;
+}
+
+@keyframes pfSkeletonShimmer {
+  0% {
+    background-position: 100% 50%;
+  }
+  100% {
+    background-position: 0 50%;
+  }
+}
+
+.pf-skeleton-text {
+  height: 14px;
+  width: 80%;
+  margin: 4px 0;
+  border-radius: 4px;
+}
+
+.pf-skeleton-circle {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.pf-skeleton-row {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 12px 16px;
+  border-bottom: 1px solid #f1f5f9;
+}
+
+.app-mode-dark .pf-skeleton-row,
+[data-theme="dark"] .pf-skeleton-row {
+  border-bottom-color: #1e293b;
+}
+
+/* Smooth view transition helper */
+.pf-view-enter {
+  animation: pfViewEnter 0.22s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+@keyframes pfViewEnter {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}

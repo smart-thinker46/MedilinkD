@@ -168,27 +168,30 @@ export default function FacilitiesDashboard() {
       />
 
       {addModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
-          <form onSubmit={handleAddAsset} className="bg-card p-6 rounded-2xl border border-border shadow-xl w-full max-w-lg">
-            <h2 className="text-xl font-bold mb-2 text-sky-700 flex items-center gap-2">
-               <ModuleIcon name="domain" /> Register New Asset
-            </h2>
-            <p className="text-sm text-muted-foreground mb-4">
-              Add a new piece of equipment or facility asset to the registry.
-            </p>
-
-            <div className="space-y-4">
-              <div>
-                <label className="form-label">Asset Name</label>
-                <input required type="text" className="w-full px-4 py-3 bg-background border border-border rounded-xl text-sm mt-1" 
-                  value={assetForm.name} onChange={(e) => setAssetForm({...assetForm, name: e.target.value})} 
-                  placeholder="e.g. MRI Scanner, Hospital Bed" />
-              </div>
-
-              <div className="grid grid-cols-2 gap-4">
+        <div className="module-form-overlay" onClick={() => setAddModal(false)}>
+          <form onSubmit={handleAddAsset} className="module-form-panel modal-panel facilities-modal" onClick={(event) => event.stopPropagation()}>
+            <div className="module-form-header">
+              <div className="module-form-heading">
+                <div className="module-form-icon"><ModuleIcon name="domain" /></div>
                 <div>
+                  <div className="module-form-kicker">Facilities & Assets</div>
+                  <h2 className="module-form-title">Register New Asset</h2>
+                </div>
+              </div>
+              <button type="button" className="module-form-close" onClick={() => setAddModal(false)} aria-label="Close form">×</button>
+            </div>
+            <div className="module-form-body">
+              <p className="module-form-note">Add a new piece of equipment or facility asset to the registry.</p>
+              <div className="module-form-grid">
+                <div className="module-form-field is-wide">
+                  <label className="form-label">Asset Name</label>
+                  <input required type="text" className="module-form-input"
+                    value={assetForm.name} onChange={(e) => setAssetForm({...assetForm, name: e.target.value})}
+                    placeholder="e.g. MRI Scanner, Hospital Bed" />
+                </div>
+                <div className="module-form-field">
                   <label className="form-label">Category</label>
-                  <select required className="w-full px-4 py-3 bg-background border border-border rounded-xl text-sm mt-1"
+                  <select required className="module-form-input"
                     value={assetForm.category} onChange={(e) => setAssetForm({...assetForm, category: e.target.value})}>
                     <option value="GENERAL">General</option>
                     <option value="MEDICAL_EQUIPMENT">Medical Equipment</option>
@@ -197,82 +200,73 @@ export default function FacilitiesDashboard() {
                     <option value="FURNITURE">Furniture</option>
                   </select>
                 </div>
-                <div>
+                <div className="module-form-field">
                   <label className="form-label">Initial Status</label>
-                  <select required className="w-full px-4 py-3 bg-background border border-border rounded-xl text-sm mt-1"
+                  <select required className="module-form-input"
                     value={assetForm.status} onChange={(e) => setAssetForm({...assetForm, status: e.target.value})}>
                     <option value="ACTIVE">Active</option>
                     <option value="UNDER_MAINTENANCE">Under Maintenance</option>
                     <option value="DAMAGED">Damaged</option>
                   </select>
                 </div>
+                <div className="module-form-field">
+                  <label className="form-label">Serial Number</label>
+                  <input type="text" className="module-form-input"
+                    value={assetForm.serialNumber} onChange={(e) => setAssetForm({...assetForm, serialNumber: e.target.value})} />
+                </div>
+                <div className="module-form-field">
+                  <label className="form-label">Assigned Department</label>
+                  <input type="text" className="module-form-input"
+                    value={assetForm.assignedDepartment} onChange={(e) => setAssetForm({...assetForm, assignedDepartment: e.target.value})}
+                    placeholder="e.g. Radiology, ICU" />
+                </div>
               </div>
-
-              <div className="grid grid-cols-2 gap-4">
-                 <div>
-                    <label className="form-label">Serial Number</label>
-                    <input type="text" className="w-full px-4 py-3 bg-background border border-border rounded-xl text-sm mt-1" 
-                      value={assetForm.serialNumber} onChange={(e) => setAssetForm({...assetForm, serialNumber: e.target.value})} />
-                 </div>
-                 <div>
-                    <label className="form-label">Assigned Department</label>
-                    <input type="text" className="w-full px-4 py-3 bg-background border border-border rounded-xl text-sm mt-1" 
-                      value={assetForm.assignedDepartment} onChange={(e) => setAssetForm({...assetForm, assignedDepartment: e.target.value})} 
-                      placeholder="e.g. Radiology, ICU" />
-                 </div>
-              </div>
-
-              <div className="flex justify-end gap-3 pt-4 border-t mt-4">
-                <button
-                  type="button"
-                  onClick={() => setAddModal(false)}
-                  className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg font-medium"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  disabled={adding}
-                  className="px-4 py-2 bg-sky-600 hover:bg-sky-700 text-white rounded-lg font-medium disabled:opacity-50"
-                >
-                  {adding ? "Saving..." : "Register Asset"}
-                </button>
-              </div>
+            </div>
+            <div className="module-form-footer">
+              <button type="button" className="form-btn form-btn-cancel" onClick={() => setAddModal(false)}>Cancel</button>
+              <button type="submit" disabled={adding} className="form-btn form-btn-primary module-form-submit">{adding ? "Saving..." : "Register Asset"}</button>
             </div>
           </form>
         </div>
       )}
 
       {issueModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
-          <form onSubmit={handleReportIssue} className="bg-card p-6 rounded-2xl border border-border shadow-xl w-full max-w-sm">
-            <h2 className="text-xl font-bold mb-2 text-amber-600">Report Issue</h2>
-            <p className="text-sm text-muted-foreground mb-4">
-              Create a maintenance work order for <span className="font-bold text-slate-800">{issueModal.name}</span>.
-            </p>
-            
-            <div className="space-y-4">
-               <div>
+        <div className="module-form-overlay" onClick={() => setIssueModal(null)}>
+          <form onSubmit={handleReportIssue} className="module-form-panel modal-panel facilities-modal" onClick={(event) => event.stopPropagation()}>
+            <div className="module-form-header">
+              <div className="module-form-heading">
+                <div className="module-form-icon"><ModuleIcon name="build" /></div>
+                <div>
+                  <div className="module-form-kicker">Facilities & Assets</div>
+                  <h2 className="module-form-title">Report Issue</h2>
+                </div>
+              </div>
+              <button type="button" className="module-form-close" onClick={() => setIssueModal(null)} aria-label="Close form">×</button>
+            </div>
+            <div className="module-form-body">
+              <p className="module-form-note">Create a maintenance work order for <strong>{issueModal.name}</strong>.</p>
+              <div className="module-form-grid">
+                <div className="module-form-field is-wide">
                   <label className="form-label">Priority</label>
-                  <select required className="w-full px-4 py-3 bg-background border border-border rounded-xl text-sm mt-1"
+                  <select required className="module-form-input"
                     value={issueForm.priority} onChange={(e) => setIssueForm({...issueForm, priority: e.target.value})}>
                     <option value="LOW">Low (Routine)</option>
                     <option value="MEDIUM">Medium</option>
                     <option value="HIGH">High (Urgent)</option>
                     <option value="CRITICAL">Critical (Safety/Ops Impact)</option>
                   </select>
-               </div>
-               <div>
+                </div>
+                <div className="module-form-field is-wide">
                   <label className="form-label">Issue Description</label>
-                  <textarea required className="w-full px-4 py-3 bg-background border border-border rounded-xl text-sm mt-1" 
-                    value={issueForm.description} onChange={(e) => setIssueForm({...issueForm, description: e.target.value})} 
+                  <textarea required className="module-form-input"
+                    value={issueForm.description} onChange={(e) => setIssueForm({...issueForm, description: e.target.value})}
                     placeholder="Describe the problem..." rows={3} />
-               </div>
+                </div>
+              </div>
             </div>
-
-            <div className="flex justify-end gap-3 pt-4 mt-4 border-t">
-              <button type="button" onClick={() => setIssueModal(null)} className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg font-medium">Cancel</button>
-              <button type="submit" disabled={reporting} className="px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white rounded-lg font-medium disabled:opacity-50">{reporting ? "Submitting..." : "Submit Report"}</button>
+            <div className="module-form-footer">
+              <button type="button" className="form-btn form-btn-cancel" onClick={() => setIssueModal(null)}>Cancel</button>
+              <button type="submit" disabled={reporting} className="form-btn form-btn-primary module-form-submit">{reporting ? "Submitting..." : "Submit Report"}</button>
             </div>
           </form>
         </div>

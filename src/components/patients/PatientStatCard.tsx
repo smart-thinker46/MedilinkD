@@ -1,5 +1,5 @@
 export function StatCard({
-  icon: Icon,
+  icon: _Icon,
   label,
   value,
   color,

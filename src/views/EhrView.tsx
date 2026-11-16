@@ -622,10 +622,10 @@ function EhrPatientDetail({ patientId, onBack }: { patientId: string; onBack: ()
           {activeTab === "notes" ? (
             <section className="emr-card">
               <div className="emr-card-head"><div><h2>Template-Based Clinical Notes</h2><span className="emr-card-subtitle">{currentVisitId ? "Encounter linked" : "New encounter will be created"}</span></div><span className="emr-lock-state">{visitVersions.some((version) => version.eventName === "emr.record.finalized") ? "FINAL · LOCKED" : "DRAFT"}</span></div>
-              <div className="emr-form-grid">
-                <label><span>Template</span><select value={templateId} onChange={(event) => applyTemplate(event.target.value)}>{NOTE_TEMPLATES.map((template) => <option key={template.id} value={template.id}>{template.name}</option>)}</select></label>
-                <label><span>Diagnosis / problem</span><input value={note.diagnosisLabel} onChange={(event) => setNote({ ...note, diagnosisLabel: event.target.value })} placeholder="e.g. Type 2 diabetes mellitus" /></label>
-                <label><span>ICD-10 code</span><input value={note.icd10 || acceptedAiCode} onChange={(event) => setNote({ ...note, icd10: event.target.value })} placeholder="e.g. E11.9" /></label>
+              <div className="emr-form-grid module-form-grid">
+                <label className="module-form-field"><span>Template</span><select className="module-form-input" value={templateId} onChange={(event) => applyTemplate(event.target.value)}>{NOTE_TEMPLATES.map((template) => <option key={template.id} value={template.id}>{template.name}</option>)}</select></label>
+                <label className="module-form-field"><span>Diagnosis / problem</span><input className="module-form-input" value={note.diagnosisLabel} onChange={(event) => setNote({ ...note, diagnosisLabel: event.target.value })} placeholder="e.g. Type 2 diabetes mellitus" /></label>
+                <label className="module-form-field"><span>ICD-10 code</span><input className="module-form-input" value={note.icd10 || acceptedAiCode} onChange={(event) => setNote({ ...note, icd10: event.target.value })} placeholder="e.g. E11.9" /></label>
                 <label className="emr-check"><input type="checkbox" checked={note.addToProblemList} onChange={(event) => setNote({ ...note, addToProblemList: event.target.checked })} /> Add to problem list</label>
                 {[
                   ["chiefComplaint", "Chief complaint"],
@@ -634,16 +634,16 @@ function EhrPatientDetail({ patientId, onBack }: { patientId: string; onBack: ()
                   ["assessment", "Assessment"],
                   ["plan", "Plan"],
                 ].map(([key, label]) => (
-                  <label key={key} className="wide"><span>{label}</span><textarea value={(note as any)[key]} onChange={(event) => setNote({ ...note, [key]: event.target.value })} /></label>
+                  <label key={key} className="wide module-form-field"><span>{label}</span><textarea className="module-form-input" value={(note as any)[key]} onChange={(event) => setNote({ ...note, [key]: event.target.value })} /></label>
                 ))}
-                <label><span>Temperature C</span><input value={note.temperature} onChange={(event) => setNote({ ...note, temperature: event.target.value })} /></label>
-                <label><span>Blood pressure</span><input value={note.bloodPressure} onChange={(event) => setNote({ ...note, bloodPressure: event.target.value })} placeholder="145/90" /></label>
-                <label><span>Pulse</span><input value={note.pulseRate} onChange={(event) => setNote({ ...note, pulseRate: event.target.value })} /></label>
-                <label><span>Resp rate</span><input value={note.respiratoryRate} onChange={(event) => setNote({ ...note, respiratoryRate: event.target.value })} /></label>
-                <label><span>SpO2 %</span><input value={note.oxygenSaturation} onChange={(event) => setNote({ ...note, oxygenSaturation: event.target.value })} /></label>
-                <label><span>Weight kg</span><input value={note.weight} onChange={(event) => setNote({ ...note, weight: event.target.value })} /></label>
-                <label><span>Height cm</span><input value={note.height} onChange={(event) => setNote({ ...note, height: event.target.value })} /></label>
-                <label><span>Pain score</span><input value={note.painScore} onChange={(event) => setNote({ ...note, painScore: event.target.value })} placeholder="0-10" /></label>
+                <label className="module-form-field"><span>Temperature C</span><input className="module-form-input" value={note.temperature} onChange={(event) => setNote({ ...note, temperature: event.target.value })} /></label>
+                <label className="module-form-field"><span>Blood pressure</span><input className="module-form-input" value={note.bloodPressure} onChange={(event) => setNote({ ...note, bloodPressure: event.target.value })} placeholder="145/90" /></label>
+                <label className="module-form-field"><span>Pulse</span><input className="module-form-input" value={note.pulseRate} onChange={(event) => setNote({ ...note, pulseRate: event.target.value })} /></label>
+                <label className="module-form-field"><span>Resp rate</span><input className="module-form-input" value={note.respiratoryRate} onChange={(event) => setNote({ ...note, respiratoryRate: event.target.value })} /></label>
+                <label className="module-form-field"><span>SpO2 %</span><input className="module-form-input" value={note.oxygenSaturation} onChange={(event) => setNote({ ...note, oxygenSaturation: event.target.value })} /></label>
+                <label className="module-form-field"><span>Weight kg</span><input className="module-form-input" value={note.weight} onChange={(event) => setNote({ ...note, weight: event.target.value })} /></label>
+                <label className="module-form-field"><span>Height cm</span><input className="module-form-input" value={note.height} onChange={(event) => setNote({ ...note, height: event.target.value })} /></label>
+                <label className="module-form-field"><span>Pain score</span><input className="module-form-input" value={note.painScore} onChange={(event) => setNote({ ...note, painScore: event.target.value })} placeholder="0-10" /></label>
               </div>
               {aiSuggestions.length > 0 ? (
                 <div className="emr-ai-strip">
@@ -655,7 +655,7 @@ function EhrPatientDetail({ patientId, onBack }: { patientId: string; onBack: ()
                   ))}
                 </div>
               ) : null}
-              <div className="emr-form-footer">{visitVersions.some((version) => version.eventName === "emr.record.finalized") && !amendingNote ? <button type="button" className="emr-finalize-btn" onClick={beginAmendment}>Create Formal Amendment</button> : null}<button type="button" className="emr-primary-btn" onClick={saveClinicalNote} disabled={savingNote || (!amendingNote && visitVersions.some((version) => version.eventName === "emr.record.finalized"))}><Save size={16} /> {savingNote ? "Saving..." : amendingNote ? "Save Amendment" : "Save Note"}</button><button type="button" className="emr-finalize-btn" onClick={finalizeEncounter} disabled={finalizingVisit || !currentVisitId || amendingNote || visitVersions.some((version) => version.eventName === "emr.record.finalized")}>{finalizingVisit ? "Finalizing..." : "Finalize & Lock Encounter"}</button></div>
+              <div className="emr-form-footer module-form-footer">{visitVersions.some((version) => version.eventName === "emr.record.finalized") && !amendingNote ? <button type="button" className="emr-finalize-btn" onClick={beginAmendment}>Create Formal Amendment</button> : null}<button type="button" className="emr-primary-btn" onClick={saveClinicalNote} disabled={savingNote || (!amendingNote && visitVersions.some((version) => version.eventName === "emr.record.finalized"))}><Save size={16} /> {savingNote ? "Saving..." : amendingNote ? "Save Amendment" : "Save Note"}</button><button type="button" className="emr-finalize-btn" onClick={finalizeEncounter} disabled={finalizingVisit || !currentVisitId || amendingNote || visitVersions.some((version) => version.eventName === "emr.record.finalized")}>{finalizingVisit ? "Finalizing..." : "Finalize & Lock Encounter"}</button></div>
               {visitVersions.length > 0 ? <div className="emr-version-history"><strong>Record history</strong>{visitVersions.slice(0, 5).map((version) => <span key={version.id}>{version.eventName === "emr.record.finalized" ? "Finalized" : `Version ${version.version || "-"}`} · {formatDate(version.createdAt)} · {version.actorRole || "Clinician"}</span>)}</div> : null}
             </section>
           ) : null}
@@ -676,9 +676,9 @@ function EhrPatientDetail({ patientId, onBack }: { patientId: string; onBack: ()
                   <LabRequestForm visitId={currentVisitId} patientId={patientId} onSuccess={fetchPatientData} />
                   <div className="emr-rad-form">
                     <h3><Radio size={17} /> Radiology Request</h3>
-                    <input value={radiology.procedureName} onChange={(event) => setRadiology({ ...radiology, procedureName: event.target.value })} placeholder="Procedure name, e.g. Chest X-ray" />
-                    <select value={radiology.urgency} onChange={(event) => setRadiology({ ...radiology, urgency: event.target.value })}><option>ROUTINE</option><option>URGENT</option><option>STAT</option></select>
-                    <textarea value={radiology.notes} onChange={(event) => setRadiology({ ...radiology, notes: event.target.value })} placeholder="Clinical indication" />
+                    <input className="module-form-input" value={radiology.procedureName} onChange={(event) => setRadiology({ ...radiology, procedureName: event.target.value })} placeholder="Procedure name, e.g. Chest X-ray" />
+                    <select className="module-form-input" value={radiology.urgency} onChange={(event) => setRadiology({ ...radiology, urgency: event.target.value })}><option>ROUTINE</option><option>URGENT</option><option>STAT</option></select>
+                    <textarea className="module-form-input" value={radiology.notes} onChange={(event) => setRadiology({ ...radiology, notes: event.target.value })} placeholder="Clinical indication" />
                     <button type="button" className="emr-primary-btn" disabled={savingRadiology || !radiology.procedureName.trim()} onClick={createRadiologyRequest}>{savingRadiology ? "Routing..." : "Order Radiology"}</button>
                   </div>
                   <AdmissionForm visitId={currentVisitId} patientId={patientId} onSuccess={fetchPatientData} />
@@ -714,7 +714,7 @@ function EhrPatientDetail({ patientId, onBack }: { patientId: string; onBack: ()
                 </div>
                 <div>
                   <h3>Draft Discharge Summary</h3>
-                  <textarea readOnly value={dischargeDraft} />
+                  <textarea className="module-form-input" readOnly value={dischargeDraft} />
                   <p>AI draft only. Doctor must review, edit, and sign before saving.</p>
                 </div>
               </div>

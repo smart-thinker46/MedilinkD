@@ -24,12 +24,37 @@ const DESCRIPTION_RULES: Array<[RegExp, string]> = [
   [/consent|approval|authori[sz]/i, "Record the required approval or consent."],
 ];
 
-function descriptionFor(label: string) {
+function descriptionFor(label: string): string | null {
   const normalized = label.replace(/\*/g, "").replace(/\s+/g, " ").trim();
-  return (
-    DESCRIPTION_RULES.find(([pattern]) => pattern.test(normalized))?.[1] ??
-    "Provide the information required for this field."
-  );
+  // Only return a description when a specific rule matches.
+  // Never fall back to the generic "Provide the information required…" text.
+  return DESCRIPTION_RULES.find(([pattern]) => pattern.test(normalized))?.[1] ?? null;
+}
+
+/** Returns true if the label wraps a filter / search / utility control that
+ *  should not receive a field description. */
+function isFilterOrSearchControl(
+  label: HTMLLabelElement,
+  control: HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement,
+): boolean {
+  // Explicit text-based exclusions on the label text
+  if (/search|filter|sort|select all|remember|agree|confirm|active/i.test(label.textContent || ""))
+    return true;
+  // Input placeholder looks like a search / filter hint
+  if (
+    control instanceof HTMLInputElement &&
+    /search|filter|find|look/i.test(control.placeholder || "")
+  )
+    return true;
+  // The control or any ancestor carries a filter/search CSS class
+  const filterClasses =
+    /pv-search|search-bar|filter-bar|filter-row|filter-group|toolbar|worklist-filter/i;
+  let el: Element | null = control;
+  while (el && el !== document.body) {
+    if (filterClasses.test(el.className || "")) return true;
+    el = el.parentElement;
+  }
+  return false;
 }
 
 function isExcludedLabel(label: HTMLLabelElement) {
@@ -40,14 +65,13 @@ function isExcludedLabel(label: HTMLLabelElement) {
     )
   )
     return true;
-  if (/search|filter|sort|select all|remember|agree|confirm|active/i.test(label.textContent || ""))
-    return true;
   const control = label.querySelector(
     "input, select, textarea",
   ) as HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement | null;
   if (!control) return true;
   if (control instanceof HTMLInputElement && ["checkbox", "radio"].includes(control.type))
     return true;
+  if (isFilterOrSearchControl(label, control)) return true;
   return false;
 }
 
@@ -57,12 +81,18 @@ function addDescriptions(root: ParentNode) {
     if (isExcludedLabel(label)) return;
     const control = label.querySelector("input, select, textarea");
     if (!control || !label.isConnected || !label.contains(control)) return;
+    const text = descriptionFor(label.textContent || "");
+    // Skip if no specific description matched — never show the generic fallback.
+    if (!text) {
+      label.dataset.descriptionAdded = "true"; // mark so we don't re-process
+      return;
+    }
     const heading =
       label.querySelector(":scope > span, :scope > strong, :scope > b") || label.firstChild;
     const description = document.createElement("small");
     description.className = "global-form-field-description";
     description.setAttribute("data-field-description", "true");
-    description.textContent = descriptionFor(label.textContent || "");
+    description.textContent = text;
     try {
       if (
         heading &&

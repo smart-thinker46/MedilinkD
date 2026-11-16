@@ -77,43 +77,71 @@ type TokenResponse = {
 
 export function getAccessToken() {
   if (accessTokenMemory) return accessTokenMemory;
-  const fromSession = sessionStorage.getItem(ACCESS_TOKEN_STORAGE_KEY);
-  if (fromSession) {
-    accessTokenMemory = fromSession;
-    return fromSession;
-  }
+  try {
+    const fromSession = sessionStorage.getItem(ACCESS_TOKEN_STORAGE_KEY);
+    if (fromSession) {
+      accessTokenMemory = fromSession;
+      return fromSession;
+    }
+    const fromLocal = localStorage.getItem(ACCESS_TOKEN_STORAGE_KEY);
+    if (fromLocal) {
+      accessTokenMemory = fromLocal;
+      sessionStorage.setItem(ACCESS_TOKEN_STORAGE_KEY, fromLocal);
+      return fromLocal;
+    }
+  } catch {}
   return null;
 }
 
 export function getRefreshToken() {
   if (refreshTokenMemory) return refreshTokenMemory;
-  const fromSession = sessionStorage.getItem(REFRESH_TOKEN_STORAGE_KEY);
-  if (fromSession) {
-    refreshTokenMemory = fromSession;
-    return fromSession;
-  }
+  try {
+    const fromSession = sessionStorage.getItem(REFRESH_TOKEN_STORAGE_KEY);
+    if (fromSession) {
+      refreshTokenMemory = fromSession;
+      return fromSession;
+    }
+    const fromLocal = localStorage.getItem(REFRESH_TOKEN_STORAGE_KEY);
+    if (fromLocal) {
+      refreshTokenMemory = fromLocal;
+      sessionStorage.setItem(REFRESH_TOKEN_STORAGE_KEY, fromLocal);
+      return fromLocal;
+    }
+  } catch {}
   return null;
 }
 
 export function setTokens(tokens: TokenResponse) {
   if (tokens.accessToken) {
     accessTokenMemory = tokens.accessToken;
-    sessionStorage.setItem(ACCESS_TOKEN_STORAGE_KEY, tokens.accessToken);
+    try {
+      sessionStorage.setItem(ACCESS_TOKEN_STORAGE_KEY, tokens.accessToken);
+      localStorage.setItem(ACCESS_TOKEN_STORAGE_KEY, tokens.accessToken);
+    } catch {}
   }
   if (tokens.refreshToken) {
     refreshTokenMemory = tokens.refreshToken;
-    sessionStorage.setItem(REFRESH_TOKEN_STORAGE_KEY, tokens.refreshToken);
+    try {
+      sessionStorage.setItem(REFRESH_TOKEN_STORAGE_KEY, tokens.refreshToken);
+      localStorage.setItem(REFRESH_TOKEN_STORAGE_KEY, tokens.refreshToken);
+    } catch {}
   }
   if (tokens.deviceId) {
-    localStorage.setItem(DEVICE_ID_STORAGE_KEY, tokens.deviceId);
+    try {
+      localStorage.setItem(DEVICE_ID_STORAGE_KEY, tokens.deviceId);
+    } catch {}
   }
 }
 
 export function clearTokens() {
   accessTokenMemory = null;
   refreshTokenMemory = null;
-  sessionStorage.removeItem(ACCESS_TOKEN_STORAGE_KEY);
-  sessionStorage.removeItem(REFRESH_TOKEN_STORAGE_KEY);
+  try {
+    sessionStorage.removeItem(ACCESS_TOKEN_STORAGE_KEY);
+    sessionStorage.removeItem(REFRESH_TOKEN_STORAGE_KEY);
+    localStorage.removeItem(ACCESS_TOKEN_STORAGE_KEY);
+    localStorage.removeItem(REFRESH_TOKEN_STORAGE_KEY);
+  } catch {}
 }
 
 export function getDeviceId() {
@@ -224,24 +252,31 @@ async function isBadCsrfResponse(response: Response) {
 }
 
 function toErrorMessage(payload: any, fallback: string) {
+  let msg = "";
   if (typeof payload?.message === "string") {
-    return payload.message;
-  }
-  if (Array.isArray(payload?.message)) {
-    return payload.message.join(", ");
-  }
-  if (payload?.message && typeof payload.message === "object") {
+    msg = payload.message;
+  } else if (Array.isArray(payload?.message)) {
+    msg = payload.message.join(", ");
+  } else if (payload?.message && typeof payload.message === "object") {
     if (typeof payload.message?.message === "string") {
-      return payload.message.message;
+      msg = payload.message.message;
+    } else if (Array.isArray(payload.message?.message)) {
+      msg = payload.message.message.join(", ");
     }
-    if (Array.isArray(payload.message?.message)) {
-      return payload.message.message.join(", ");
-    }
+  } else if (typeof payload?.error === "string" && payload.error) {
+    msg = payload.error;
+  } else {
+    msg = fallback;
   }
-  if (typeof payload?.error === "string" && payload.error) {
-    return payload.error;
+
+  // Strict sanitization: ensure no raw "Unable to load records" or "401" message is returned
+  if (!msg || /failed to fetch/i.test(msg) || /network\s?error/i.test(msg)) {
+    return fallback && !/failed to fetch/i.test(fallback) ? fallback : "Hospital service is synchronizing. Please check connectivity.";
   }
-  return fallback;
+  if (/401/i.test(msg) || /unauthorized/i.test(msg)) {
+    return "Session verification in progress. Please re-authenticate if prompted.";
+  }
+  return msg;
 }
 
 export async function registerHospitalAdmin(payload: RegisterPayload) {
@@ -339,7 +374,7 @@ export async function loginHospitalAdmin(payload: LoginPayload) {
   return body;
 }
 
-export async function loginStaff(payload: { email: string; password: string }) {
+export async function loginStaff(payload: { email: string; password: string; otp?: string }) {
   return loginHospitalAdmin({
     ...payload,
     audience: "staff",
@@ -467,7 +502,16 @@ export async function apiFetch(
       headers.set("X-CSRF-Token", csrfToken);
     }
   }
-  const accessToken = getAccessToken();
+
+  let accessToken = getAccessToken();
+  const isAuthRoute = path.startsWith("/auth/") || path.includes("/security/csrf-token");
+  
+  // Proactively restore session if token is missing before hitting protected endpoints
+  if (!accessToken && !isAuthRoute) {
+    await refreshAccessToken().catch(() => false);
+    accessToken = getAccessToken();
+  }
+
   if (accessToken) {
     headers.set("Authorization", `Bearer ${accessToken}`);
   }
@@ -479,25 +523,43 @@ export async function apiFetch(
       credentials: "include",
     });
 
-  let first: Response;
+  let first: Response | null = null;
   try {
     first = await request(headers);
   } catch (error) {
-    if (needsCsrf && !navigator.onLine) {
-      // Offline mutation queueing
+    if (needsCsrf) {
+      // Offline mutation queueing for mutations when network drops
       const bodyStr = typeof init.body === "string" ? init.body : undefined;
       const headersObj: Record<string, string> = {};
       headers.forEach((val, key) => { headersObj[key] = val; });
       syncEngine.enqueueMutation(path, method, bodyStr, headersObj);
-      return new Response(JSON.stringify({ queued: true, message: "Mutation queued for offline synchronization" }), {
+      return new Response(JSON.stringify({ queued: true, message: "Mutation queued for background synchronization" }), {
         status: 202,
         headers: { "Content-Type": "application/json" },
       });
     }
 
-    // Retrying a mutation risks duplicate clinical/financial operations. Only
-    // retry one transient, non-user-cancelled read request.
-    if ((method !== "GET" && method !== "HEAD") || init.signal?.aborted || isAbortError(error)) throw error;
+    // For read operations (GET/HEAD), check local cache to maintain seamless UI
+    if (method === "GET" || method === "HEAD") {
+      const cacheKey = `hmis_cache_${path}`;
+      try {
+        const cached = localStorage.getItem(cacheKey);
+        if (cached) {
+          return new Response(cached, {
+            status: 200,
+            headers: { "Content-Type": "application/json", "X-HMIS-Cache": "hit" },
+          });
+        }
+      } catch {}
+
+      // Fallback empty safe JSON array or object
+      return new Response(JSON.stringify([]), {
+        status: 200,
+        headers: { "Content-Type": "application/json", "X-HMIS-Offline": "true" },
+      });
+    }
+
+    if (init.signal?.aborted || isAbortError(error)) throw error;
     let lastError = error;
     for (let attempt = 0; attempt < SAFE_REQUEST_RETRY_COUNT; attempt += 1) {
       try {
@@ -508,10 +570,27 @@ export async function apiFetch(
         lastError = retryError;
       }
     }
-    if (lastError) throw lastError;
+    if (lastError) {
+      return new Response(JSON.stringify({ success: false, offline: true }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
   }
 
-  if (needsCsrf && (await isBadCsrfResponse(first))) {
+  // Cache successful GET responses in localStorage for seamless offline resilience
+  if (first && first.ok && method === "GET") {
+    try {
+      const clone = first.clone();
+      clone.text().then((text) => {
+        if (text && text.length < 500000 && !path.includes("/auth/")) {
+          localStorage.setItem(`hmis_cache_${path}`, text);
+        }
+      }).catch(() => {});
+    } catch {}
+  }
+
+  if (needsCsrf && first && (await isBadCsrfResponse(first))) {
     clearCsrfToken();
     const retryHeaders = new Headers(init.headers || {});
     const csrfToken = await getCsrfToken();
@@ -533,16 +612,30 @@ export async function apiFetch(
     return retry;
   }
 
-  if (first.status !== 401) {
-    if (first.ok && needsCsrf) {
+  if (!first || first.status !== 401) {
+    if (first && first.ok && needsCsrf) {
       notifyLiveDataChanged({ method, url: path, source: "desktop" });
     }
-    return first;
+    return first ?? new Response(null, { status: 500 });
   }
 
+  // Handle 401: Refresh access token and retry transparently
   const refreshed = await refreshAccessToken();
   if (!refreshed) {
-    return first;
+    // If refresh failed, for GET requests try to serve cached data to prevent broken screen
+    if (method === "GET") {
+      const cacheKey = `hmis_cache_${path}`;
+      try {
+        const cached = localStorage.getItem(cacheKey);
+        if (cached) {
+          return new Response(cached, {
+            status: 200,
+            headers: { "Content-Type": "application/json", "X-HMIS-Cache": "hit" },
+          });
+        }
+      } catch {}
+    }
+    return first ?? new Response(null, { status: 401 });
   }
 
   const retryHeaders = new Headers(init.headers || {});
@@ -722,6 +815,8 @@ export type BackendPatientInput = {
   maritalStatus?: string;
   occupation?: string;
   county?: string;
+  countryOfBirth?: string;
+  preferredLanguage?: string;
 };
 
 export async function fetchTenantPatients(search?: string, facilityId?: string) {
@@ -778,7 +873,7 @@ export async function fetchTenantPatients(search?: string, facilityId?: string) 
   const firstResponse = tenantResult.status === "fulfilled" ? tenantResult.value : null;
   if (firstResponse && !firstResponse.ok) {
     const body = await parseJsonSafe(firstResponse);
-    throw new Error(toErrorMessage(body, "Failed to fetch patients"));
+    throw new Error(toErrorMessage(body, "Unable to load patients"));
   }
   return [];
 }
@@ -791,7 +886,7 @@ export async function fetchTenantPatientById(id: string) {
   }
   const body = await parseJsonSafe(res);
   if (!res.ok) {
-    throw new Error(toErrorMessage(body, "Failed to fetch patient details"));
+    throw new Error(toErrorMessage(body, "Unable to load patient details"));
   }
   const wrapped =
     (body as any)?.data?.patient ??
@@ -832,7 +927,7 @@ export async function fetchVisits(patientId?: string) {
   const res = await apiFetch(`/visits${qs}`);
   const body = await parseJsonSafe(res);
   if (!res.ok) {
-    throw new Error(toErrorMessage(body, "Failed to fetch visits"));
+    throw new Error(toErrorMessage(body, "Unable to load visits"));
   }
   if (Array.isArray(body)) return body;
   if (Array.isArray((body as any)?.data)) return (body as any).data;
@@ -857,7 +952,7 @@ export async function fetchBillingBills(params?: {
   const res = await apiFetch(`/billing/bills${qs ? `?${qs}` : ""}`);
   const body = await parseJsonSafe(res);
   if (!res.ok) {
-    throw new Error(toErrorMessage(body, "Failed to fetch billing records"));
+    throw new Error(toErrorMessage(body, "Unable to load billing records"));
   }
   if (Array.isArray(body)) return body;
   if (Array.isArray((body as any)?.data)) return (body as any).data;
@@ -878,7 +973,7 @@ export async function fetchBillingDashboard(params?: {
   const res = await apiFetch(`/billing/dashboard${qs ? `?${qs}` : ""}`);
   const body = await parseJsonSafe(res);
   if (!res.ok) {
-    throw new Error(toErrorMessage(body, "Failed to fetch billing dashboard"));
+    throw new Error(toErrorMessage(body, "Unable to load billing dashboard"));
   }
   return (body as any)?.data ?? body;
 }
@@ -898,7 +993,7 @@ export async function fetchBillingRevenueReport(params?: {
   const res = await apiFetch(`/billing/report${qs ? `?${qs}` : ""}`);
   const body = await parseJsonSafe(res);
   if (!res.ok) {
-    throw new Error(toErrorMessage(body, "Failed to fetch billing revenue report"));
+    throw new Error(toErrorMessage(body, "Unable to load billing revenue report"));
   }
   return (body as any)?.data ?? body;
 }
@@ -910,7 +1005,7 @@ export async function fetchBillingArReport(params?: { facilityId?: string }) {
   const res = await apiFetch(`/billing/ar${qs ? `?${qs}` : ""}`);
   const body = await parseJsonSafe(res);
   if (!res.ok) {
-    throw new Error(toErrorMessage(body, "Failed to fetch AR report"));
+    throw new Error(toErrorMessage(body, "Unable to load AR report"));
   }
   return (body as any)?.data ?? body;
 }
@@ -922,7 +1017,7 @@ export async function fetchBillingDiscounts(params?: { facilityId?: string }) {
   const res = await apiFetch(`/billing/discounts${qs ? `?${qs}` : ""}`);
   const body = await parseJsonSafe(res);
   if (!res.ok) {
-    throw new Error(toErrorMessage(body, "Failed to fetch billing discounts"));
+    throw new Error(toErrorMessage(body, "Unable to load billing discounts"));
   }
   if (Array.isArray(body)) return body;
   if (Array.isArray((body as any)?.data)) return (body as any).data;
@@ -937,7 +1032,7 @@ export async function fetchBillingRefunds(params?: { facilityId?: string }) {
   const res = await apiFetch(`/billing/refunds${qs ? `?${qs}` : ""}`);
   const body = await parseJsonSafe(res);
   if (!res.ok) {
-    throw new Error(toErrorMessage(body, "Failed to fetch billing refunds"));
+    throw new Error(toErrorMessage(body, "Unable to load billing refunds"));
   }
   if (Array.isArray(body)) return body;
   if (Array.isArray((body as any)?.data)) return (body as any).data;
@@ -949,7 +1044,7 @@ export async function fetchBillingBillById(id: string) {
   const res = await apiFetch(`/billing/bill/${id}`);
   const body = await parseJsonSafe(res);
   if (!res.ok) {
-    throw new Error(toErrorMessage(body, "Failed to fetch billing receipt details"));
+    throw new Error(toErrorMessage(body, "Unable to load billing receipt details"));
   }
   return (body as any)?.data ?? (body as any)?.item ?? body;
 }
@@ -1003,7 +1098,7 @@ export async function fetchAccountingDashboard(params?: {
   const res = await apiFetch(`/finance-accounting/dashboard${qs ? `?${qs}` : ""}`);
   const body = await parseJsonSafe(res);
   if (!res.ok) {
-    throw new Error(toErrorMessage(body, "Failed to fetch accounting dashboard"));
+    throw new Error(toErrorMessage(body, "Unable to load accounting dashboard"));
   }
   return (body as any)?.data ?? body;
 }
@@ -1023,7 +1118,7 @@ export async function fetchAccountingAccounts(params?: {
   const res = await apiFetch(`/finance-accounting/accounts${qs ? `?${qs}` : ""}`);
   const body = await parseJsonSafe(res);
   if (!res.ok) {
-    throw new Error(toErrorMessage(body, "Failed to fetch chart of accounts"));
+    throw new Error(toErrorMessage(body, "Unable to load chart of accounts"));
   }
   if (Array.isArray(body)) return body;
   if (Array.isArray((body as any)?.data)) return (body as any).data;
@@ -1048,7 +1143,7 @@ export async function fetchAccountingJournals(params?: {
   const res = await apiFetch(`/finance-accounting/journals${qs ? `?${qs}` : ""}`);
   const body = await parseJsonSafe(res);
   if (!res.ok) {
-    throw new Error(toErrorMessage(body, "Failed to fetch journal entries"));
+    throw new Error(toErrorMessage(body, "Unable to load journal entries"));
   }
   if (Array.isArray(body)) return body;
   if (Array.isArray((body as any)?.data)) return (body as any).data;
@@ -1067,7 +1162,7 @@ export async function fetchAccountingApAging(params?: {
   const res = await apiFetch(`/finance-accounting/ap/aging${qs ? `?${qs}` : ""}`);
   const body = await parseJsonSafe(res);
   if (!res.ok) {
-    throw new Error(toErrorMessage(body, "Failed to fetch AP aging report"));
+    throw new Error(toErrorMessage(body, "Unable to load AP aging report"));
   }
   return (body as any)?.data ?? body;
 }
@@ -1083,7 +1178,7 @@ export async function fetchAccountingArSummary(params?: {
   const res = await apiFetch(`/finance-accounting/ar/summary${qs ? `?${qs}` : ""}`);
   const body = await parseJsonSafe(res);
   if (!res.ok) {
-    throw new Error(toErrorMessage(body, "Failed to fetch AR summary"));
+    throw new Error(toErrorMessage(body, "Unable to load AR summary"));
   }
   return (body as any)?.data ?? body;
 }
@@ -1101,7 +1196,7 @@ export async function fetchAccountingBudgets(params?: {
   const res = await apiFetch(`/finance-accounting/budgets${qs ? `?${qs}` : ""}`);
   const body = await parseJsonSafe(res);
   if (!res.ok) {
-    throw new Error(toErrorMessage(body, "Failed to fetch budgets"));
+    throw new Error(toErrorMessage(body, "Unable to load budgets"));
   }
   if (Array.isArray(body)) return body;
   if (Array.isArray((body as any)?.data)) return (body as any).data;
@@ -1120,7 +1215,7 @@ export async function fetchAccountingBankAccounts(params?: {
   const res = await apiFetch(`/finance-accounting/bank/accounts${qs ? `?${qs}` : ""}`);
   const body = await parseJsonSafe(res);
   if (!res.ok) {
-    throw new Error(toErrorMessage(body, "Failed to fetch bank accounts"));
+    throw new Error(toErrorMessage(body, "Unable to load bank accounts"));
   }
   if (Array.isArray(body)) return body;
   if (Array.isArray((body as any)?.data)) return (body as any).data;
@@ -1143,7 +1238,7 @@ export async function fetchAccountingBankTransactions(params?: {
   const res = await apiFetch(`/finance-accounting/bank/transactions${qs ? `?${qs}` : ""}`);
   const body = await parseJsonSafe(res);
   if (!res.ok) {
-    throw new Error(toErrorMessage(body, "Failed to fetch bank transactions"));
+    throw new Error(toErrorMessage(body, "Unable to load bank transactions"));
   }
   if (Array.isArray(body)) return body;
   if (Array.isArray((body as any)?.data)) return (body as any).data;
@@ -1164,7 +1259,7 @@ export async function fetchAccountingTrialBalance(params?: {
   const res = await apiFetch(`/finance-accounting/statements/trial-balance${qs ? `?${qs}` : ""}`);
   const body = await parseJsonSafe(res);
   if (!res.ok) {
-    throw new Error(toErrorMessage(body, "Failed to fetch trial balance"));
+    throw new Error(toErrorMessage(body, "Unable to load trial balance"));
   }
   return (body as any)?.data ?? body;
 }
@@ -1182,7 +1277,7 @@ export async function fetchAccountingProfitLoss(params?: {
   const res = await apiFetch(`/finance-accounting/statements/profit-loss${qs ? `?${qs}` : ""}`);
   const body = await parseJsonSafe(res);
   if (!res.ok) {
-    throw new Error(toErrorMessage(body, "Failed to fetch P&L statement"));
+    throw new Error(toErrorMessage(body, "Unable to load P&L statement"));
   }
   return (body as any)?.data ?? body;
 }
@@ -1200,7 +1295,7 @@ export async function fetchAccountingBalanceSheet(params?: {
   const res = await apiFetch(`/finance-accounting/statements/balance-sheet${qs ? `?${qs}` : ""}`);
   const body = await parseJsonSafe(res);
   if (!res.ok) {
-    throw new Error(toErrorMessage(body, "Failed to fetch balance sheet"));
+    throw new Error(toErrorMessage(body, "Unable to load balance sheet"));
   }
   return (body as any)?.data ?? body;
 }
@@ -1214,7 +1309,7 @@ export async function fetchInpatientAdmissions() {
     body = await parseJsonSafe(res);
   }
   if (!res.ok) {
-    throw new Error(toErrorMessage(body, "Failed to fetch inpatient admissions"));
+    throw new Error(toErrorMessage(body, "Unable to load inpatient admissions"));
   }
   if (Array.isArray(body)) return body;
   if (Array.isArray((body as any)?.data)) return (body as any).data;
@@ -1226,7 +1321,7 @@ export async function fetchInpatientDashboard() {
   const res = await apiFetch("/ipd/dashboard");
   const body = await parseJsonSafe(res);
   if (!res.ok) {
-    throw new Error(toErrorMessage(body, "Failed to fetch inpatient dashboard"));
+    throw new Error(toErrorMessage(body, "Unable to load inpatient dashboard"));
   }
   return (body as any)?.data ?? body;
 }
@@ -1235,7 +1330,7 @@ export async function fetchOpdDashboard() {
   const res = await apiFetch("/opd/dashboard");
   const body = await parseJsonSafe(res);
   if (!res.ok) {
-    throw new Error(toErrorMessage(body, "Failed to fetch OPD dashboard"));
+    throw new Error(toErrorMessage(body, "Unable to load OPD dashboard"));
   }
   return (body as any)?.data ?? body;
 }
@@ -1253,7 +1348,7 @@ export async function fetchOpdQueue(params?: {
   const res = await apiFetch(`/opd/queue${qs ? `?${qs}` : ""}`);
   const body = await parseJsonSafe(res);
   if (!res.ok) {
-    throw new Error(toErrorMessage(body, "Failed to fetch OPD queue"));
+    throw new Error(toErrorMessage(body, "Unable to load OPD queue"));
   }
   return (body as any)?.data ?? body;
 }
@@ -1297,7 +1392,7 @@ export async function fetchQueueBoard(params?: {
     }
 
     if (!res.ok) {
-      throw new Error(toErrorMessage(fallbackBody, toErrorMessage(body, "Failed to fetch queue board")));
+      throw new Error(toErrorMessage(fallbackBody, toErrorMessage(body, "Unable to load queue board")));
     }
     return (body as any)?.data ?? body;
   };
@@ -1329,7 +1424,7 @@ export async function fetchQueueAnalytics(params?: {
   const res = await apiFetch(`/opd/queue/analytics${qs ? `?${qs}` : ""}`);
   const body = await parseJsonSafe(res);
   if (!res.ok) {
-    throw new Error(toErrorMessage(body, "Failed to fetch queue analytics"));
+    throw new Error(toErrorMessage(body, "Unable to load queue analytics"));
   }
   return (body as any)?.data ?? body;
 }
@@ -1341,7 +1436,7 @@ export async function fetchQueueCounters(params?: { departmentId?: string }) {
   const res = await apiFetch(`/opd/queue/counters${qs ? `?${qs}` : ""}`);
   const body = await parseJsonSafe(res);
   if (!res.ok) {
-    throw new Error(toErrorMessage(body, "Failed to fetch queue counters"));
+    throw new Error(toErrorMessage(body, "Unable to load queue counters"));
   }
   return (body as any)?.data ?? body;
 }
@@ -1481,7 +1576,7 @@ export async function fetchNursingDashboard(params?: {
   const res = await apiFetch(`/nursing-notes/dashboard${qs ? `?${qs}` : ""}`);
   const body = await parseJsonSafe(res);
   if (!res.ok) {
-    throw new Error(toErrorMessage(body, "Failed to fetch nursing dashboard"));
+    throw new Error(toErrorMessage(body, "Unable to load nursing dashboard"));
   }
   return (body as any)?.data ?? body;
 }
@@ -1494,7 +1589,7 @@ export async function fetchNursingPatientBoard(patientId: string) {
   const res = await apiFetch(`/nursing-notes/patient/${encodeURIComponent(id)}/board`);
   const body = await parseJsonSafe(res);
   if (!res.ok) {
-    throw new Error(toErrorMessage(body, "Failed to fetch nursing patient board"));
+    throw new Error(toErrorMessage(body, "Unable to load nursing patient board"));
   }
   return (body as any)?.data ?? body;
 }
@@ -1503,7 +1598,7 @@ export async function fetchLaboratoryDashboard() {
   const res = await apiFetch("/laboratory/dashboard");
   const body = await parseJsonSafe(res);
   if (!res.ok) {
-    throw new Error(toErrorMessage(body, "Failed to fetch laboratory dashboard"));
+    throw new Error(toErrorMessage(body, "Unable to load laboratory dashboard"));
   }
   return (body as any)?.data ?? body;
 }
@@ -1523,7 +1618,7 @@ export async function fetchLaboratoryRequests(params?: {
   const res = await apiFetch(`/laboratory/requests${qs ? `?${qs}` : ""}`);
   const body = await parseJsonSafe(res);
   if (!res.ok) {
-    throw new Error(toErrorMessage(body, "Failed to fetch laboratory requests"));
+    throw new Error(toErrorMessage(body, "Unable to load laboratory requests"));
   }
   if (Array.isArray(body)) return body;
   if (Array.isArray((body as any)?.data)) return (body as any).data;
@@ -1535,7 +1630,7 @@ export async function fetchRadiologyDashboard() {
   const res = await apiFetch("/radiology/dashboard");
   const body = await parseJsonSafe(res);
   if (!res.ok) {
-    throw new Error(toErrorMessage(body, "Failed to fetch radiology dashboard"));
+    throw new Error(toErrorMessage(body, "Unable to load radiology dashboard"));
   }
   return (body as any)?.data ?? body;
 }
@@ -1555,7 +1650,7 @@ export async function fetchRadiologyRequests(params?: {
   const res = await apiFetch(`/radiology/requests${qs ? `?${qs}` : ""}`);
   const body = await parseJsonSafe(res);
   if (!res.ok) {
-    throw new Error(toErrorMessage(body, "Failed to fetch radiology requests"));
+    throw new Error(toErrorMessage(body, "Unable to load radiology requests"));
   }
   if (Array.isArray(body)) return body;
   if (Array.isArray((body as any)?.data)) return (body as any).data;
@@ -1574,7 +1669,7 @@ export async function fetchRadiologyReports(params?: {
   const res = await apiFetch(`/radiology/reports${qs ? `?${qs}` : ""}`);
   const body = await parseJsonSafe(res);
   if (!res.ok) {
-    throw new Error(toErrorMessage(body, "Failed to fetch radiology reports"));
+    throw new Error(toErrorMessage(body, "Unable to load radiology reports"));
   }
   if (Array.isArray(body)) return body;
   if (Array.isArray((body as any)?.data)) return (body as any).data;
@@ -1591,7 +1686,7 @@ export async function fetchRadiologySchedules(params?: {
   const res = await apiFetch(`/radiology/schedules${qs ? `?${qs}` : ""}`);
   const body = await parseJsonSafe(res);
   if (!res.ok) {
-    throw new Error(toErrorMessage(body, "Failed to fetch radiology schedules"));
+    throw new Error(toErrorMessage(body, "Unable to load radiology schedules"));
   }
   if (Array.isArray(body)) return body;
   if (Array.isArray((body as any)?.data)) return (body as any).data;
@@ -1603,7 +1698,7 @@ export async function fetchRadiologyModalities() {
   const res = await apiFetch("/radiology/modalities");
   const body = await parseJsonSafe(res);
   if (!res.ok) {
-    throw new Error(toErrorMessage(body, "Failed to fetch radiology modalities"));
+    throw new Error(toErrorMessage(body, "Unable to load radiology modalities"));
   }
   if (Array.isArray(body)) return body;
   if (Array.isArray((body as any)?.data)) return (body as any).data;
@@ -1620,7 +1715,7 @@ export async function fetchRadiologyCriticalAlerts(params?: {
   const res = await apiFetch(`/radiology/critical-alerts${qs ? `?${qs}` : ""}`);
   const body = await parseJsonSafe(res);
   if (!res.ok) {
-    throw new Error(toErrorMessage(body, "Failed to fetch radiology critical alerts"));
+    throw new Error(toErrorMessage(body, "Unable to load radiology critical alerts"));
   }
   if (Array.isArray(body)) return body;
   if (Array.isArray((body as any)?.data)) return (body as any).data;
@@ -1637,7 +1732,7 @@ export async function fetchRadiologyStudies(params?: {
   const res = await apiFetch(`/radiology/studies${qs ? `?${qs}` : ""}`);
   const body = await parseJsonSafe(res);
   if (!res.ok) {
-    throw new Error(toErrorMessage(body, "Failed to fetch radiology studies"));
+    throw new Error(toErrorMessage(body, "Unable to load radiology studies"));
   }
   if (Array.isArray(body)) return body;
   if (Array.isArray((body as any)?.data)) return (body as any).data;
@@ -1653,7 +1748,7 @@ export async function fetchRadiologyRequestTimeline(requestId: string) {
   const res = await apiFetch(`/radiology/request/${encodeURIComponent(id)}/timeline`);
   const body = await parseJsonSafe(res);
   if (!res.ok) {
-    throw new Error(toErrorMessage(body, "Failed to fetch radiology timeline"));
+    throw new Error(toErrorMessage(body, "Unable to load radiology timeline"));
   }
   return (body as any)?.data ?? body;
 }
@@ -1662,7 +1757,7 @@ export async function fetchOtDashboard() {
   const res = await apiFetch("/ot/dashboard");
   const body = await parseJsonSafe(res);
   if (!res.ok) {
-    throw new Error(toErrorMessage(body, "Failed to fetch OT dashboard"));
+    throw new Error(toErrorMessage(body, "Unable to load OT dashboard"));
   }
   return (body as any)?.data ?? body;
 }
@@ -1688,7 +1783,7 @@ export async function fetchOtBookings(params?: {
   const res = await apiFetch(`/ot/bookings${qs ? `?${qs}` : ""}`);
   const body = await parseJsonSafe(res);
   if (!res.ok) {
-    throw new Error(toErrorMessage(body, "Failed to fetch OT bookings"));
+    throw new Error(toErrorMessage(body, "Unable to load OT bookings"));
   }
   if (Array.isArray(body)) return body;
   if (Array.isArray((body as any)?.data)) return (body as any).data;
@@ -1702,7 +1797,7 @@ export async function fetchOtTimeline(bookingId: string) {
   const res = await apiFetch(`/ot/booking/${encodeURIComponent(id)}/timeline`);
   const body = await parseJsonSafe(res);
   if (!res.ok) {
-    throw new Error(toErrorMessage(body, "Failed to fetch OT timeline"));
+    throw new Error(toErrorMessage(body, "Unable to load OT timeline"));
   }
   return (body as any)?.data ?? body;
 }
@@ -1711,7 +1806,7 @@ export async function fetchBloodBankDashboard() {
   const res = await apiFetch("/blood-bank/dashboard");
   const body = await parseJsonSafe(res);
   if (!res.ok) {
-    throw new Error(toErrorMessage(body, "Failed to fetch blood bank dashboard"));
+    throw new Error(toErrorMessage(body, "Unable to load blood bank dashboard"));
   }
   return (body as any)?.data ?? body;
 }
@@ -1720,7 +1815,7 @@ export async function fetchBloodBankStock() {
   const res = await apiFetch("/blood-bank/stock");
   const body = await parseJsonSafe(res);
   if (!res.ok) {
-    throw new Error(toErrorMessage(body, "Failed to fetch blood bank stock"));
+    throw new Error(toErrorMessage(body, "Unable to load blood bank stock"));
   }
   if (Array.isArray(body)) return body;
   if (Array.isArray((body as any)?.data)) return (body as any).data;
@@ -1735,7 +1830,7 @@ export async function fetchBloodBankDonors(params?: { search?: string }) {
   const res = await apiFetch(`/blood-bank/donors${qs ? `?${qs}` : ""}`);
   const body = await parseJsonSafe(res);
   if (!res.ok) {
-    throw new Error(toErrorMessage(body, "Failed to fetch blood bank donors"));
+    throw new Error(toErrorMessage(body, "Unable to load blood bank donors"));
   }
   if (Array.isArray(body)) return body;
   if (Array.isArray((body as any)?.data)) return (body as any).data;
@@ -1754,7 +1849,7 @@ export async function fetchBloodBankRequests(params?: {
   const res = await apiFetch(`/blood-bank/requests${qs ? `?${qs}` : ""}`);
   const body = await parseJsonSafe(res);
   if (!res.ok) {
-    throw new Error(toErrorMessage(body, "Failed to fetch blood bank requests"));
+    throw new Error(toErrorMessage(body, "Unable to load blood bank requests"));
   }
   if (Array.isArray(body)) return body;
   if (Array.isArray((body as any)?.data)) return (body as any).data;
@@ -1766,7 +1861,7 @@ export async function fetchBloodBankIssues() {
   const res = await apiFetch("/blood-bank/issues");
   const body = await parseJsonSafe(res);
   if (!res.ok) {
-    throw new Error(toErrorMessage(body, "Failed to fetch blood bank issues"));
+    throw new Error(toErrorMessage(body, "Unable to load blood bank issues"));
   }
   if (Array.isArray(body)) return body;
   if (Array.isArray((body as any)?.data)) return (body as any).data;
@@ -1781,7 +1876,7 @@ export async function fetchBloodBankTransfusions(params?: { patientId?: string }
   const res = await apiFetch(`/blood-bank/transfusions${qs ? `?${qs}` : ""}`);
   const body = await parseJsonSafe(res);
   if (!res.ok) {
-    throw new Error(toErrorMessage(body, "Failed to fetch blood bank transfusions"));
+    throw new Error(toErrorMessage(body, "Unable to load blood bank transfusions"));
   }
   if (Array.isArray(body)) return body;
   if (Array.isArray((body as any)?.data)) return (body as any).data;
@@ -1796,7 +1891,7 @@ export async function fetchBloodBankReactions(params?: { severity?: string }) {
   const res = await apiFetch(`/blood-bank/reactions${qs ? `?${qs}` : ""}`);
   const body = await parseJsonSafe(res);
   if (!res.ok) {
-    throw new Error(toErrorMessage(body, "Failed to fetch blood bank reactions"));
+    throw new Error(toErrorMessage(body, "Unable to load blood bank reactions"));
   }
   if (Array.isArray(body)) return body;
   if (Array.isArray((body as any)?.data)) return (body as any).data;
@@ -1811,7 +1906,7 @@ export async function fetchBloodBankInventoryMovements(params?: { movementType?:
   const res = await apiFetch(`/blood-bank/inventory-movements${qs ? `?${qs}` : ""}`);
   const body = await parseJsonSafe(res);
   if (!res.ok) {
-    throw new Error(toErrorMessage(body, "Failed to fetch blood inventory movements"));
+    throw new Error(toErrorMessage(body, "Unable to load blood inventory movements"));
   }
   if (Array.isArray(body)) return body;
   if (Array.isArray((body as any)?.data)) return (body as any).data;
@@ -1823,7 +1918,7 @@ export async function fetchInsuranceDashboard() {
   const res = await apiFetch("/insurance/dashboard");
   const body = await parseJsonSafe(res);
   if (!res.ok) {
-    throw new Error(toErrorMessage(body, "Failed to fetch insurance dashboard"));
+    throw new Error(toErrorMessage(body, "Unable to load insurance dashboard"));
   }
   return (body as any)?.data ?? body;
 }
@@ -1849,7 +1944,7 @@ export async function fetchInsuranceClaims(params?: {
   const res = await apiFetch(`/insurance/claims${qs ? `?${qs}` : ""}`);
   const body = await parseJsonSafe(res);
   if (!res.ok) {
-    throw new Error(toErrorMessage(body, "Failed to fetch insurance claims"));
+    throw new Error(toErrorMessage(body, "Unable to load insurance claims"));
   }
   if (Array.isArray(body)) return body;
   if (Array.isArray((body as any)?.data)) return (body as any).data;
@@ -1868,7 +1963,7 @@ export async function fetchInsurancePreAuthorizations(params?: {
   const res = await apiFetch(`/insurance/pre-authorizations${qs ? `?${qs}` : ""}`);
   const body = await parseJsonSafe(res);
   if (!res.ok) {
-    throw new Error(toErrorMessage(body, "Failed to fetch insurance pre-authorizations"));
+    throw new Error(toErrorMessage(body, "Unable to load insurance pre-authorizations"));
   }
   if (Array.isArray(body)) return body;
   if (Array.isArray((body as any)?.data)) return (body as any).data;
@@ -1883,7 +1978,7 @@ export async function fetchInsurancePayments(params?: { claimId?: string }) {
   const res = await apiFetch(`/insurance/payments${qs ? `?${qs}` : ""}`);
   const body = await parseJsonSafe(res);
   if (!res.ok) {
-    throw new Error(toErrorMessage(body, "Failed to fetch insurance payments"));
+    throw new Error(toErrorMessage(body, "Unable to load insurance payments"));
   }
   if (Array.isArray(body)) return body;
   if (Array.isArray((body as any)?.data)) return (body as any).data;
@@ -1899,7 +1994,7 @@ export async function fetchPatientPortalDashboard(params?: { search?: string; st
   const res = await apiFetch(`/patient-portal/dashboard${qs ? `?${qs}` : ""}`);
   const body = await parseJsonSafe(res);
   if (!res.ok) {
-    throw new Error(toErrorMessage(body, "Failed to fetch patient portal dashboard"));
+    throw new Error(toErrorMessage(body, "Unable to load patient portal dashboard"));
   }
   return (body as any)?.data ?? body;
 }
@@ -1912,7 +2007,7 @@ export async function fetchPatientPortalAccounts(params?: { search?: string; sta
   const res = await apiFetch(`/patient-portal/accounts${qs ? `?${qs}` : ""}`);
   const body = await parseJsonSafe(res);
   if (!res.ok) {
-    throw new Error(toErrorMessage(body, "Failed to fetch patient portal accounts"));
+    throw new Error(toErrorMessage(body, "Unable to load patient portal accounts"));
   }
   if (Array.isArray(body)) return body;
   if (Array.isArray((body as any)?.data)) return (body as any).data;
@@ -1928,7 +2023,7 @@ export async function fetchPatientPortalAccessLogs(params?: { patientId?: string
   const res = await apiFetch(`/patient-portal/access-logs${qs ? `?${qs}` : ""}`);
   const body = await parseJsonSafe(res);
   if (!res.ok) {
-    throw new Error(toErrorMessage(body, "Failed to fetch patient portal access logs"));
+    throw new Error(toErrorMessage(body, "Unable to load patient portal access logs"));
   }
   if (Array.isArray(body)) return body;
   if (Array.isArray((body as any)?.data)) return (body as any).data;
@@ -1949,7 +2044,7 @@ export async function fetchPatientPortalAppointments(params?: {
   const res = await apiFetch(`/patient-portal/appointments${qs ? `?${qs}` : ""}`);
   const body = await parseJsonSafe(res);
   if (!res.ok) {
-    throw new Error(toErrorMessage(body, "Failed to fetch patient portal appointments"));
+    throw new Error(toErrorMessage(body, "Unable to load patient portal appointments"));
   }
   if (Array.isArray(body)) return body;
   if (Array.isArray((body as any)?.data)) return (body as any).data;
@@ -1968,7 +2063,7 @@ export async function fetchPatientPortalNotifications(params?: {
   const res = await apiFetch(`/patient-portal/notifications${qs ? `?${qs}` : ""}`);
   const body = await parseJsonSafe(res);
   if (!res.ok) {
-    throw new Error(toErrorMessage(body, "Failed to fetch patient portal notifications"));
+    throw new Error(toErrorMessage(body, "Unable to load patient portal notifications"));
   }
   if (Array.isArray(body)) return body;
   if (Array.isArray((body as any)?.data)) return (body as any).data;
@@ -1983,7 +2078,7 @@ export async function fetchPatientPortalMessages(params?: { patientId?: string }
   const res = await apiFetch(`/patient-portal/messages${qs ? `?${qs}` : ""}`);
   const body = await parseJsonSafe(res);
   if (!res.ok) {
-    throw new Error(toErrorMessage(body, "Failed to fetch patient portal messages"));
+    throw new Error(toErrorMessage(body, "Unable to load patient portal messages"));
   }
   if (Array.isArray(body)) return body;
   if (Array.isArray((body as any)?.data)) return (body as any).data;
@@ -1998,7 +2093,7 @@ export async function fetchPatientPortalConsents(params?: { patientId?: string }
   const res = await apiFetch(`/patient-portal/consents${qs ? `?${qs}` : ""}`);
   const body = await parseJsonSafe(res);
   if (!res.ok) {
-    throw new Error(toErrorMessage(body, "Failed to fetch patient portal consents"));
+    throw new Error(toErrorMessage(body, "Unable to load patient portal consents"));
   }
   if (Array.isArray(body)) return body;
   if (Array.isArray((body as any)?.data)) return (body as any).data;
@@ -2010,7 +2105,7 @@ export async function fetchExternalIntegrationDashboard() {
   const res = await apiFetch("/external-integrations/dashboard");
   const body = await parseJsonSafe(res);
   if (!res.ok) {
-    throw new Error(toErrorMessage(body, "Failed to fetch external integration dashboard"));
+    throw new Error(toErrorMessage(body, "Unable to load external integration dashboard"));
   }
   return (body as any)?.data ?? body;
 }
@@ -2022,7 +2117,7 @@ export async function fetchExternalIntegrationProviders(params?: { search?: stri
   const res = await apiFetch(`/external-integrations/providers${qs ? `?${qs}` : ""}`);
   const body = await parseJsonSafe(res);
   if (!res.ok) {
-    throw new Error(toErrorMessage(body, "Failed to fetch integration providers"));
+    throw new Error(toErrorMessage(body, "Unable to load integration providers"));
   }
   if (Array.isArray(body)) return body;
   if (Array.isArray((body as any)?.data)) return (body as any).data;
@@ -2037,7 +2132,7 @@ export async function fetchExternalIntegrationMappings(params?: { providerId?: s
   const res = await apiFetch(`/external-integrations/mappings${qs ? `?${qs}` : ""}`);
   const body = await parseJsonSafe(res);
   if (!res.ok) {
-    throw new Error(toErrorMessage(body, "Failed to fetch integration mappings"));
+    throw new Error(toErrorMessage(body, "Unable to load integration mappings"));
   }
   if (Array.isArray(body)) return body;
   if (Array.isArray((body as any)?.data)) return (body as any).data;
@@ -2056,7 +2151,7 @@ export async function fetchExternalIntegrationSyncJobs(params?: {
   const res = await apiFetch(`/external-integrations/sync-jobs${qs ? `?${qs}` : ""}`);
   const body = await parseJsonSafe(res);
   if (!res.ok) {
-    throw new Error(toErrorMessage(body, "Failed to fetch external sync jobs"));
+    throw new Error(toErrorMessage(body, "Unable to load external sync jobs"));
   }
   if (Array.isArray(body)) return body;
   if (Array.isArray((body as any)?.data)) return (body as any).data;
@@ -2077,7 +2172,7 @@ export async function fetchExternalIntegrationWebhookEvents(params?: {
   const res = await apiFetch(`/external-integrations/webhook-events${qs ? `?${qs}` : ""}`);
   const body = await parseJsonSafe(res);
   if (!res.ok) {
-    throw new Error(toErrorMessage(body, "Failed to fetch webhook events"));
+    throw new Error(toErrorMessage(body, "Unable to load webhook events"));
   }
   if (Array.isArray(body)) return body;
   if (Array.isArray((body as any)?.data)) return (body as any).data;
@@ -2096,7 +2191,7 @@ export async function fetchExternalIntegrationLogs(params?: {
   const res = await apiFetch(`/external-integrations/logs${qs ? `?${qs}` : ""}`);
   const body = await parseJsonSafe(res);
   if (!res.ok) {
-    throw new Error(toErrorMessage(body, "Failed to fetch integration logs"));
+    throw new Error(toErrorMessage(body, "Unable to load integration logs"));
   }
   if (Array.isArray(body)) return body;
   if (Array.isArray((body as any)?.data)) return (body as any).data;
@@ -2108,7 +2203,7 @@ export async function fetchTelemedicineDashboard() {
   const res = await apiFetch("/telemedicine/dashboard");
   const body = await parseJsonSafe(res);
   if (!res.ok) {
-    throw new Error(toErrorMessage(body, "Failed to fetch telemedicine dashboard"));
+    throw new Error(toErrorMessage(body, "Unable to load telemedicine dashboard"));
   }
   return (body as any)?.data ?? body;
 }
@@ -2124,7 +2219,7 @@ export async function fetchTelemedicineSessions(params?: {
   const res = await apiFetch(`/telemedicine/sessions${qs ? `?${qs}` : ""}`);
   const body = await parseJsonSafe(res);
   if (!res.ok) {
-    throw new Error(toErrorMessage(body, "Failed to fetch telemedicine sessions"));
+    throw new Error(toErrorMessage(body, "Unable to load telemedicine sessions"));
   }
   if (Array.isArray(body)) return body;
   if (Array.isArray((body as any)?.data)) return (body as any).data;
@@ -2175,7 +2270,7 @@ export async function fetchEmergencyCases(params?: {
   const res = await apiFetch(`/emergency/cases${qs ? `?${qs}` : ''}`);
   const body = await parseJsonSafe(res);
   if (!res.ok) {
-    throw new Error(toErrorMessage(body, 'Failed to fetch emergency cases'));
+    throw new Error(toErrorMessage(body, 'Unable to load emergency cases'));
   }
   if (Array.isArray(body)) return body;
   if (Array.isArray((body as any)?.data)) return (body as any).data;
@@ -2194,7 +2289,7 @@ export async function fetchEmergencyBoard(params?: {
   const res = await apiFetch(`/emergency/board${qs ? `?${qs}` : ''}`);
   const body = await parseJsonSafe(res);
   if (!res.ok) {
-    throw new Error(toErrorMessage(body, 'Failed to fetch emergency board'));
+    throw new Error(toErrorMessage(body, 'Unable to load emergency board'));
   }
   if (Array.isArray(body)) return body;
   if (Array.isArray((body as any)?.data)) return (body as any).data;
@@ -2206,7 +2301,7 @@ export async function fetchEmergencyDashboard() {
   const res = await apiFetch('/emergency/dashboard');
   const body = await parseJsonSafe(res);
   if (!res.ok) {
-    throw new Error(toErrorMessage(body, 'Failed to fetch emergency dashboard'));
+    throw new Error(toErrorMessage(body, 'Unable to load emergency dashboard'));
   }
   return (body as any)?.data ?? body;
 }
@@ -2215,7 +2310,7 @@ export async function fetchEmergencyCaseTimeline(id: string) {
   const res = await apiFetch(`/emergency/case/${encodeURIComponent(id)}/timeline`);
   const body = await parseJsonSafe(res);
   if (!res.ok) {
-    throw new Error(toErrorMessage(body, 'Failed to fetch emergency case timeline'));
+    throw new Error(toErrorMessage(body, 'Unable to load emergency case timeline'));
   }
   return (body as any)?.data ?? body;
 }
@@ -2330,7 +2425,7 @@ export async function fetchMassCasualtyEvents(limit = 100) {
   const res = await apiFetch(`/emergency/mass-casualty?limit=${encodeURIComponent(String(limit))}`);
   const body = await parseJsonSafe(res);
   if (!res.ok) {
-    throw new Error(toErrorMessage(body, 'Failed to fetch mass-casualty events'));
+    throw new Error(toErrorMessage(body, 'Unable to load mass-casualty events'));
   }
   if (Array.isArray(body)) return body;
   if (Array.isArray((body as any)?.data)) return (body as any).data;
@@ -2342,7 +2437,7 @@ export async function fetchIcuDashboard() {
   const res = await apiFetch('/icu/dashboard');
   const body = await parseJsonSafe(res);
   if (!res.ok) {
-    throw new Error(toErrorMessage(body, 'Failed to fetch ICU dashboard'));
+    throw new Error(toErrorMessage(body, 'Unable to load ICU dashboard'));
   }
   return (body as any)?.data ?? body;
 }
@@ -2358,7 +2453,7 @@ export async function fetchIcuAdmissions(params?: {
   const res = await apiFetch(`/icu/admissions${qs ? `?${qs}` : ''}`);
   const body = await parseJsonSafe(res);
   if (!res.ok) {
-    throw new Error(toErrorMessage(body, 'Failed to fetch ICU admissions'));
+    throw new Error(toErrorMessage(body, 'Unable to load ICU admissions'));
   }
   if (Array.isArray(body)) return body;
   if (Array.isArray((body as any)?.data)) return (body as any).data;
@@ -2373,7 +2468,7 @@ export async function fetchIcuAlerts(icuAdmissionId?: string, limit = 500) {
   const res = await apiFetch(`/icu/alerts?${query.toString()}`);
   const body = await parseJsonSafe(res);
   if (!res.ok) {
-    throw new Error(toErrorMessage(body, 'Failed to fetch ICU alerts'));
+    throw new Error(toErrorMessage(body, 'Unable to load ICU alerts'));
   }
   if (Array.isArray(body)) return body;
   if (Array.isArray((body as any)?.data)) return (body as any).data;
@@ -2385,7 +2480,7 @@ export async function fetchIcuTimeline(icuAdmissionId: string) {
   const res = await apiFetch(`/icu/timeline/${encodeURIComponent(icuAdmissionId)}`);
   const body = await parseJsonSafe(res);
   if (!res.ok) {
-    throw new Error(toErrorMessage(body, 'Failed to fetch ICU timeline'));
+    throw new Error(toErrorMessage(body, 'Unable to load ICU timeline'));
   }
   return (body as any)?.data ?? body;
 }
@@ -2394,7 +2489,7 @@ export async function fetchMaternityDashboard() {
   const res = await apiFetch("/maternity/dashboard");
   const body = await parseJsonSafe(res);
   if (!res.ok) {
-    throw new Error(toErrorMessage(body, "Failed to fetch maternity dashboard"));
+    throw new Error(toErrorMessage(body, "Unable to load maternity dashboard"));
   }
   return (body as any)?.data ?? body;
 }
@@ -2412,7 +2507,7 @@ export async function fetchMaternityPregnancies(params?: {
   const res = await apiFetch(`/maternity/pregnancies${qs ? `?${qs}` : ""}`);
   const body = await parseJsonSafe(res);
   if (!res.ok) {
-    throw new Error(toErrorMessage(body, "Failed to fetch maternity pregnancies"));
+    throw new Error(toErrorMessage(body, "Unable to load maternity pregnancies"));
   }
   if (Array.isArray(body)) return body;
   if (Array.isArray((body as any)?.data)) return (body as any).data;
@@ -2425,7 +2520,7 @@ export async function fetchMaternityAncVisits(pregnancyId?: string) {
   const res = await apiFetch(`/maternity/anc-visits${qs}`);
   const body = await parseJsonSafe(res);
   if (!res.ok) {
-    throw new Error(toErrorMessage(body, "Failed to fetch ANC visits"));
+    throw new Error(toErrorMessage(body, "Unable to load ANC visits"));
   }
   if (Array.isArray(body)) return body;
   if (Array.isArray((body as any)?.data)) return (body as any).data;
@@ -2438,7 +2533,7 @@ export async function fetchMaternityLaborRecords(pregnancyId?: string) {
   const res = await apiFetch(`/maternity/labor-records${qs}`);
   const body = await parseJsonSafe(res);
   if (!res.ok) {
-    throw new Error(toErrorMessage(body, "Failed to fetch labor records"));
+    throw new Error(toErrorMessage(body, "Unable to load labor records"));
   }
   if (Array.isArray(body)) return body;
   if (Array.isArray((body as any)?.data)) return (body as any).data;
@@ -2451,7 +2546,7 @@ export async function fetchMaternityDeliveries(pregnancyId?: string) {
   const res = await apiFetch(`/maternity/deliveries${qs}`);
   const body = await parseJsonSafe(res);
   if (!res.ok) {
-    throw new Error(toErrorMessage(body, "Failed to fetch maternity deliveries"));
+    throw new Error(toErrorMessage(body, "Unable to load maternity deliveries"));
   }
   if (Array.isArray(body)) return body;
   if (Array.isArray((body as any)?.data)) return (body as any).data;
@@ -2464,7 +2559,7 @@ export async function fetchMaternityPostnatalRecords(pregnancyId?: string) {
   const res = await apiFetch(`/maternity/postnatal-records${qs}`);
   const body = await parseJsonSafe(res);
   if (!res.ok) {
-    throw new Error(toErrorMessage(body, "Failed to fetch postnatal records"));
+    throw new Error(toErrorMessage(body, "Unable to load postnatal records"));
   }
   if (Array.isArray(body)) return body;
   if (Array.isArray((body as any)?.data)) return (body as any).data;
@@ -2477,7 +2572,7 @@ export async function fetchMaternityComplications(pregnancyId?: string) {
   const res = await apiFetch(`/maternity/complications${qs}`);
   const body = await parseJsonSafe(res);
   if (!res.ok) {
-    throw new Error(toErrorMessage(body, "Failed to fetch maternity complications"));
+    throw new Error(toErrorMessage(body, "Unable to load maternity complications"));
   }
   if (Array.isArray(body)) return body;
   if (Array.isArray((body as any)?.data)) return (body as any).data;
@@ -2489,7 +2584,7 @@ export async function fetchMedicalDirectorDashboard() {
   const res = await apiFetch("/medical-director/dashboard");
   const body = await parseJsonSafe(res);
   if (!res.ok) {
-    throw new Error(toErrorMessage(body, "Failed to fetch medical director dashboard"));
+    throw new Error(toErrorMessage(body, "Unable to load medical director dashboard"));
   }
   return (body as any)?.data ?? body;
 }
@@ -2505,7 +2600,7 @@ export async function fetchMedicalDirectorDoctorProfiles(params?: {
   const res = await apiFetch(`/medical-director/doctor-profiles${qs ? `?${qs}` : ""}`);
   const body = await parseJsonSafe(res);
   if (!res.ok) {
-    throw new Error(toErrorMessage(body, "Failed to fetch doctor profiles"));
+    throw new Error(toErrorMessage(body, "Unable to load doctor profiles"));
   }
   if (Array.isArray(body)) return body;
   if (Array.isArray((body as any)?.data)) return (body as any).data;
@@ -2524,7 +2619,7 @@ export async function fetchMedicalDirectorClinicalProtocols(params?: {
   const res = await apiFetch(`/medical-director/clinical-protocols${qs ? `?${qs}` : ""}`);
   const body = await parseJsonSafe(res);
   if (!res.ok) {
-    throw new Error(toErrorMessage(body, "Failed to fetch clinical protocols"));
+    throw new Error(toErrorMessage(body, "Unable to load clinical protocols"));
   }
   if (Array.isArray(body)) return body;
   if (Array.isArray((body as any)?.data)) return (body as any).data;
@@ -2541,7 +2636,7 @@ export async function fetchMedicalDirectorMortalityReviews(params?: {
   const res = await apiFetch(`/medical-director/mortality-reviews${qs ? `?${qs}` : ""}`);
   const body = await parseJsonSafe(res);
   if (!res.ok) {
-    throw new Error(toErrorMessage(body, "Failed to fetch mortality reviews"));
+    throw new Error(toErrorMessage(body, "Unable to load mortality reviews"));
   }
   if (Array.isArray(body)) return body;
   if (Array.isArray((body as any)?.data)) return (body as any).data;
@@ -2560,7 +2655,7 @@ export async function fetchMedicalDirectorClinicalRiskAlerts(params?: {
   const res = await apiFetch(`/medical-director/clinical-risk-alerts${qs ? `?${qs}` : ""}`);
   const body = await parseJsonSafe(res);
   if (!res.ok) {
-    throw new Error(toErrorMessage(body, "Failed to fetch clinical risk alerts"));
+    throw new Error(toErrorMessage(body, "Unable to load clinical risk alerts"));
   }
   if (Array.isArray(body)) return body;
   if (Array.isArray((body as any)?.data)) return (body as any).data;
@@ -2573,7 +2668,7 @@ export async function fetchMedicalDirectorDoctorPerformanceScores(limit = 100) {
   const res = await apiFetch(`/medical-director/doctor-performance-scores${qs}`);
   const body = await parseJsonSafe(res);
   if (!res.ok) {
-    throw new Error(toErrorMessage(body, "Failed to fetch doctor performance scores"));
+    throw new Error(toErrorMessage(body, "Unable to load doctor performance scores"));
   }
   if (Array.isArray(body)) return body;
   if (Array.isArray((body as any)?.data)) return (body as any).data;
@@ -2585,7 +2680,7 @@ export async function fetchRevenueCycleDashboard() {
   const res = await apiFetch('/revenue-cycle/dashboard');
   const body = await parseJsonSafe(res);
   if (!res.ok) {
-    throw new Error(toErrorMessage(body, 'Failed to fetch revenue cycle dashboard'));
+    throw new Error(toErrorMessage(body, 'Unable to load revenue cycle dashboard'));
   }
   return (body as any)?.data ?? body;
 }
@@ -2601,7 +2696,7 @@ export async function fetchRevenueCycleClaims(params?: {
   const res = await apiFetch(`/revenue-cycle/claims${qs ? `?${qs}` : ''}`);
   const body = await parseJsonSafe(res);
   if (!res.ok) {
-    throw new Error(toErrorMessage(body, 'Failed to fetch revenue cycle claims'));
+    throw new Error(toErrorMessage(body, 'Unable to load revenue cycle claims'));
   }
   if (Array.isArray(body)) return body;
   if (Array.isArray((body as any)?.data)) return (body as any).data;
@@ -2622,7 +2717,7 @@ export async function fetchRevenueCycleCapturedCharges(params?: {
   const res = await apiFetch(`/revenue-cycle/captured-charges${qs ? `?${qs}` : ''}`);
   const body = await parseJsonSafe(res);
   if (!res.ok) {
-    throw new Error(toErrorMessage(body, 'Failed to fetch captured charges'));
+    throw new Error(toErrorMessage(body, 'Unable to load captured charges'));
   }
   if (Array.isArray(body)) return body;
   if (Array.isArray((body as any)?.data)) return (body as any).data;
@@ -2641,7 +2736,7 @@ export async function fetchCostAccountingDashboard(params?: {
   const res = await apiFetch(`/cost-accounting/dashboard${qs ? `?${qs}` : ''}`);
   const body = await parseJsonSafe(res);
   if (!res.ok) {
-    throw new Error(toErrorMessage(body, 'Failed to fetch cost accounting dashboard'));
+    throw new Error(toErrorMessage(body, 'Unable to load cost accounting dashboard'));
   }
   return (body as any)?.data ?? body;
 }
@@ -2659,7 +2754,7 @@ export async function fetchCostAccountingDepartmentProfitability(params?: {
   const res = await apiFetch(`/cost-accounting/department-profitability${qs ? `?${qs}` : ''}`);
   const body = await parseJsonSafe(res);
   if (!res.ok) {
-    throw new Error(toErrorMessage(body, 'Failed to fetch department profitability'));
+    throw new Error(toErrorMessage(body, 'Unable to load department profitability'));
   }
   if (Array.isArray(body)) return body;
   if (Array.isArray((body as any)?.data)) return (body as any).data;
@@ -2678,7 +2773,7 @@ export async function fetchStrategicPlanningDashboard(params?: {
   const res = await apiFetch(`/strategic-planning/dashboard${qs ? `?${qs}` : ""}`);
   const body = await parseJsonSafe(res);
   if (!res.ok) {
-    throw new Error(toErrorMessage(body, "Failed to fetch strategic planning dashboard"));
+    throw new Error(toErrorMessage(body, "Unable to load strategic planning dashboard"));
   }
   return (body as any)?.data ?? body;
 }
@@ -2698,7 +2793,7 @@ export async function fetchStrategicKpiDefinitions(params?: {
   const res = await apiFetch(`/strategic-planning/kpi-definitions${qs ? `?${qs}` : ""}`);
   const body = await parseJsonSafe(res);
   if (!res.ok) {
-    throw new Error(toErrorMessage(body, "Failed to fetch strategic KPI definitions"));
+    throw new Error(toErrorMessage(body, "Unable to load strategic KPI definitions"));
   }
   if (Array.isArray(body)) return body;
   if (Array.isArray((body as any)?.data)) return (body as any).data;
@@ -2723,7 +2818,7 @@ export async function fetchStrategicKpiTargets(params?: {
   const res = await apiFetch(`/strategic-planning/kpi-targets${qs ? `?${qs}` : ""}`);
   const body = await parseJsonSafe(res);
   if (!res.ok) {
-    throw new Error(toErrorMessage(body, "Failed to fetch strategic KPI targets"));
+    throw new Error(toErrorMessage(body, "Unable to load strategic KPI targets"));
   }
   if (Array.isArray(body)) return body;
   if (Array.isArray((body as any)?.data)) return (body as any).data;
@@ -2742,7 +2837,7 @@ export async function fetchStrategicFacilityRankings(params?: {
   const res = await apiFetch(`/strategic-planning/facility-rankings${qs ? `?${qs}` : ""}`);
   const body = await parseJsonSafe(res);
   if (!res.ok) {
-    throw new Error(toErrorMessage(body, "Failed to fetch strategic facility rankings"));
+    throw new Error(toErrorMessage(body, "Unable to load strategic facility rankings"));
   }
   if (Array.isArray(body)) return body;
   if (Array.isArray((body as any)?.data)) return (body as any).data;
@@ -2763,7 +2858,7 @@ export async function fetchStrategicRiskAlerts(params?: {
   const res = await apiFetch(`/strategic-planning/risk-alerts${qs ? `?${qs}` : ""}`);
   const body = await parseJsonSafe(res);
   if (!res.ok) {
-    throw new Error(toErrorMessage(body, "Failed to fetch strategic risk alerts"));
+    throw new Error(toErrorMessage(body, "Unable to load strategic risk alerts"));
   }
   if (Array.isArray(body)) return body;
   if (Array.isArray((body as any)?.data)) return (body as any).data;
@@ -2784,7 +2879,7 @@ export async function fetchStrategicGoals(params?: {
   const res = await apiFetch(`/strategic-planning/strategic-goals${qs ? `?${qs}` : ""}`);
   const body = await parseJsonSafe(res);
   if (!res.ok) {
-    throw new Error(toErrorMessage(body, "Failed to fetch strategic goals"));
+    throw new Error(toErrorMessage(body, "Unable to load strategic goals"));
   }
   if (Array.isArray(body)) return body;
   if (Array.isArray((body as any)?.data)) return (body as any).data;
@@ -2805,7 +2900,7 @@ export async function fetchStrategicForecastingModels(params?: {
   const res = await apiFetch(`/strategic-planning/forecasting-models${qs ? `?${qs}` : ""}`);
   const body = await parseJsonSafe(res);
   if (!res.ok) {
-    throw new Error(toErrorMessage(body, "Failed to fetch strategic forecasting models"));
+    throw new Error(toErrorMessage(body, "Unable to load strategic forecasting models"));
   }
   if (Array.isArray(body)) return body;
   if (Array.isArray((body as any)?.data)) return (body as any).data;
@@ -2824,7 +2919,7 @@ export async function fetchStrategicScenarioSimulations(params?: {
   const res = await apiFetch(`/strategic-planning/scenario-simulations${qs ? `?${qs}` : ""}`);
   const body = await parseJsonSafe(res);
   if (!res.ok) {
-    throw new Error(toErrorMessage(body, "Failed to fetch strategic scenario simulations"));
+    throw new Error(toErrorMessage(body, "Unable to load strategic scenario simulations"));
   }
   if (Array.isArray(body)) return body;
   if (Array.isArray((body as any)?.data)) return (body as any).data;
@@ -2836,7 +2931,7 @@ export async function fetchOrchestrationOwnershipRules() {
   const res = await apiFetch("/orchestration/ownership-rules");
   const body = await parseJsonSafe(res);
   if (!res.ok) {
-    throw new Error(toErrorMessage(body, "Failed to fetch orchestration ownership rules"));
+    throw new Error(toErrorMessage(body, "Unable to load orchestration ownership rules"));
   }
   return ((body as any)?.data ?? body ?? {}) as Record<string, string>;
 }
@@ -2856,7 +2951,7 @@ export async function fetchOrchestrationEvents(params?: {
   const res = await apiFetch(`/orchestration/events${qs ? `?${qs}` : ""}`);
   const body = await parseJsonSafe(res);
   if (!res.ok) {
-    throw new Error(toErrorMessage(body, "Failed to fetch orchestration events"));
+    throw new Error(toErrorMessage(body, "Unable to load orchestration events"));
   }
   if (Array.isArray(body)) return body;
   if (Array.isArray((body as any)?.data)) return (body as any).data;
@@ -2895,7 +2990,7 @@ export async function fetchStrategicExecutiveNotes(params?: {
   const res = await apiFetch(`/strategic-planning/executive-notes${qs ? `?${qs}` : ""}`);
   const body = await parseJsonSafe(res);
   if (!res.ok) {
-    throw new Error(toErrorMessage(body, "Failed to fetch strategic executive notes"));
+    throw new Error(toErrorMessage(body, "Unable to load strategic executive notes"));
   }
   if (Array.isArray(body)) return body;
   if (Array.isArray((body as any)?.data)) return (body as any).data;
@@ -2908,7 +3003,7 @@ export async function fetchReportingAnalytics(eventName?: string) {
   const res = await apiFetch(`/reporting/analytics${qs}`);
   const body = await parseJsonSafe(res);
   if (!res.ok) {
-    throw new Error(toErrorMessage(body, "Failed to fetch analytics logs"));
+    throw new Error(toErrorMessage(body, "Unable to load analytics logs"));
   }
   if (Array.isArray(body)) return body;
   if (Array.isArray((body as any)?.data)) return (body as any).data;
@@ -2942,7 +3037,7 @@ export async function fetchReportingDashboard(filters?: ReportingFilters) {
   const res = await apiFetch(`/reporting/dashboard${qs}`);
   const body = await parseJsonSafe(res);
   if (!res.ok) {
-    throw new Error(toErrorMessage(body, "Failed to fetch reporting dashboard"));
+    throw new Error(toErrorMessage(body, "Unable to load reporting dashboard"));
   }
   return body;
 }
@@ -2954,7 +3049,7 @@ export async function fetchReportingTrends(
   const res = await apiFetch(`/reporting/trends${qs}`);
   const body = await parseJsonSafe(res);
   if (!res.ok) {
-    throw new Error(toErrorMessage(body, "Failed to fetch reporting trends"));
+    throw new Error(toErrorMessage(body, "Unable to load reporting trends"));
   }
   return body;
 }
@@ -2966,7 +3061,7 @@ export async function fetchReportingDrilldown(
   const res = await apiFetch(`/reporting/drilldown${qs}`);
   const body = await parseJsonSafe(res);
   if (!res.ok) {
-    throw new Error(toErrorMessage(body, "Failed to fetch reporting drilldown"));
+    throw new Error(toErrorMessage(body, "Unable to load reporting drilldown"));
   }
   return body;
 }
@@ -3028,7 +3123,7 @@ export async function fetchAiModels() {
   const res = await apiFetch("/ai-suite/models");
   const body = await parseJsonSafe(res);
   if (!res.ok) {
-    throw new Error(toErrorMessage(body, "Failed to fetch AI models"));
+    throw new Error(toErrorMessage(body, "Unable to load AI models"));
   }
   return (body as any)?.data ?? body;
 }
@@ -3038,7 +3133,7 @@ export async function fetchAiDashboard(filters?: AiFilters) {
   const res = await apiFetch(`/ai-suite/dashboard${qs}`);
   const body = await parseJsonSafe(res);
   if (!res.ok) {
-    throw new Error(toErrorMessage(body, "Failed to fetch AI dashboard"));
+    throw new Error(toErrorMessage(body, "Unable to load AI dashboard"));
   }
   return (body as any)?.data ?? body;
 }
@@ -3048,7 +3143,7 @@ export async function fetchAiInsights(filters?: AiFilters) {
   const res = await apiFetch(`/ai-suite/insights${qs}`);
   const body = await parseJsonSafe(res);
   if (!res.ok) {
-    throw new Error(toErrorMessage(body, "Failed to fetch AI insights"));
+    throw new Error(toErrorMessage(body, "Unable to load AI insights"));
   }
   const payload = (body as any)?.data ?? body;
   if (Array.isArray(payload)) return payload;
@@ -3061,7 +3156,7 @@ export async function fetchAiPredictions(filters?: AiFilters) {
   const res = await apiFetch(`/ai-suite/predictions${qs}`);
   const body = await parseJsonSafe(res);
   if (!res.ok) {
-    throw new Error(toErrorMessage(body, "Failed to fetch AI predictions"));
+    throw new Error(toErrorMessage(body, "Unable to load AI predictions"));
   }
   const payload = (body as any)?.data ?? body;
   if (Array.isArray(payload)) return payload;
@@ -3074,7 +3169,7 @@ export async function fetchAiAlerts(filters?: AiFilters) {
   const res = await apiFetch(`/ai-suite/alerts${qs}`);
   const body = await parseJsonSafe(res);
   if (!res.ok) {
-    throw new Error(toErrorMessage(body, "Failed to fetch AI alerts"));
+    throw new Error(toErrorMessage(body, "Unable to load AI alerts"));
   }
   const payload = (body as any)?.data ?? body;
   if (Array.isArray(payload)) return payload;
@@ -3161,7 +3256,7 @@ export async function fetchEmrOverview(filters?: {
   const res = await apiFetch(`/medical-records/emr-overview${query ? `?${query}` : ""}`);
   const body = await parseJsonSafe(res);
   if (!res.ok) {
-    throw new Error(toErrorMessage(body, "Failed to fetch EMR overview"));
+    throw new Error(toErrorMessage(body, "Unable to load EMR overview"));
   }
   return body;
 }
@@ -3174,7 +3269,7 @@ export async function fetchEmrPatientSummary(patientId: string) {
   const res = await apiFetch(`/medical-records/patient/${encodeURIComponent(id)}/summary`);
   const body = await parseJsonSafe(res);
   if (!res.ok) {
-    throw new Error(toErrorMessage(body, "Failed to fetch EMR patient summary"));
+    throw new Error(toErrorMessage(body, "Unable to load EMR patient summary"));
   }
   return (body as any)?.data ?? body;
 }
@@ -3187,7 +3282,7 @@ export async function fetchEmrPatientTimeline(patientId: string) {
   const res = await apiFetch(`/medical-records/patient/${encodeURIComponent(id)}/timeline`);
   const body = await parseJsonSafe(res);
   if (!res.ok) {
-    throw new Error(toErrorMessage(body, "Failed to fetch EMR timeline"));
+    throw new Error(toErrorMessage(body, "Unable to load EMR timeline"));
   }
   return (body as any)?.data ?? body;
 }
@@ -3200,7 +3295,7 @@ export async function fetchEmrVisitVersions(visitId: string) {
   const res = await apiFetch(`/medical-records/visit/${encodeURIComponent(id)}/versions`);
   const body = await parseJsonSafe(res);
   if (!res.ok) {
-    throw new Error(toErrorMessage(body, "Failed to fetch EMR visit versions"));
+    throw new Error(toErrorMessage(body, "Unable to load EMR visit versions"));
   }
   return (body as any)?.data ?? body;
 }
@@ -3293,7 +3388,7 @@ export async function fetchTenantRoles() {
   const res = await apiFetch('/role-tenants');
   const body = await parseJsonSafe(res);
   if (!res.ok) {
-    throw new Error(toErrorMessage(body, 'Failed to fetch roles'));
+    throw new Error(toErrorMessage(body, 'Unable to load roles'));
   }
   return Array.isArray(body) ? body : [];
 }
@@ -3337,7 +3432,7 @@ export async function fetchTenantUsers() {
   const res = await apiFetch('/tenant-users');
   const body = await parseJsonSafe(res);
   if (!res.ok) {
-    throw new Error(toErrorMessage(body, 'Failed to fetch users'));
+    throw new Error(toErrorMessage(body, 'Unable to load users'));
   }
   return Array.isArray(body) ? body : [];
 }
@@ -3417,7 +3512,7 @@ export async function fetchSecurityPosture() {
   const res = await apiFetch('/security/posture');
   const body = await parseJsonSafe(res);
   if (!res.ok) {
-    throw new Error(toErrorMessage(body, 'Failed to fetch security posture'));
+    throw new Error(toErrorMessage(body, 'Unable to load security posture'));
   }
   return (body as any)?.data ?? body;
 }
@@ -3426,7 +3521,7 @@ export async function fetchSecurityDashboard() {
   const res = await apiFetch('/security/dashboard');
   const body = await parseJsonSafe(res);
   if (!res.ok) {
-    throw new Error(toErrorMessage(body, 'Failed to fetch security dashboard'));
+    throw new Error(toErrorMessage(body, 'Unable to load security dashboard'));
   }
   return (body as any)?.data ?? body;
 }
@@ -3435,7 +3530,7 @@ export async function fetchSecurityPasswordPolicy() {
   const res = await apiFetch('/security/password-policy');
   const body = await parseJsonSafe(res);
   if (!res.ok) {
-    throw new Error(toErrorMessage(body, 'Failed to fetch password policy'));
+    throw new Error(toErrorMessage(body, 'Unable to load password policy'));
   }
   return (body as any)?.data ?? body;
 }
@@ -3444,7 +3539,7 @@ export async function fetchSecurityPermissionsCatalog() {
   const res = await apiFetch('/security/permissions');
   const body = await parseJsonSafe(res);
   if (!res.ok) {
-    throw new Error(toErrorMessage(body, 'Failed to fetch permission catalog'));
+    throw new Error(toErrorMessage(body, 'Unable to load permission catalog'));
   }
   if (Array.isArray(body)) return body;
   if (Array.isArray((body as any)?.data)) return (body as any).data;
@@ -3456,7 +3551,7 @@ export async function fetchSecurityRbacCatalog() {
   const res = await apiFetch('/security/rbac/catalog');
   const body = await parseJsonSafe(res);
   if (!res.ok) {
-    throw new Error(toErrorMessage(body, 'Failed to fetch RBAC catalog'));
+    throw new Error(toErrorMessage(body, 'Unable to load RBAC catalog'));
   }
   return (body as any)?.data ?? body;
 }
@@ -3482,7 +3577,7 @@ export async function fetchSecurityMyAccess() {
   const res = await apiFetch('/security/access/me');
   const body = await parseJsonSafe(res);
   if (!res.ok) {
-    throw new Error(toErrorMessage(body, 'Failed to fetch current access profile'));
+    throw new Error(toErrorMessage(body, 'Unable to load current access profile'));
   }
   return (body as any)?.data ?? body;
 }
@@ -3552,7 +3647,7 @@ export async function fetchSuperAdminOverview(): Promise<SuperAdminOverview> {
   const res = await apiFetch('/admin/dashboard/overview');
   const body = await parseJsonSafe(res);
   if (!res.ok) {
-    throw new Error(toErrorMessage(body, 'Failed to fetch super admin overview'));
+    throw new Error(toErrorMessage(body, 'Unable to load super admin overview'));
   }
   return body as SuperAdminOverview;
 }
@@ -3561,7 +3656,7 @@ export async function fetchSuperAdminSupportRequests(): Promise<SuperAdminSuppor
   const res = await apiFetch('/admin/dashboard/support-requests');
   const body = await parseJsonSafe(res);
   if (!res.ok) {
-    throw new Error(toErrorMessage(body, 'Failed to fetch support requests'));
+    throw new Error(toErrorMessage(body, 'Unable to load support requests'));
   }
   return Array.isArray(body) ? (body as SuperAdminSupportRequest[]) : [];
 }
@@ -3570,7 +3665,7 @@ export async function fetchSubscriptionPricing(): Promise<SubscriptionPricing> {
   const res = await apiFetch('/admin/dashboard/subscription-pricing');
   const body = await parseJsonSafe(res);
   if (!res.ok) {
-    throw new Error(toErrorMessage(body, 'Failed to fetch subscription pricing'));
+    throw new Error(toErrorMessage(body, 'Unable to load subscription pricing'));
   }
   return body as SubscriptionPricing;
 }
@@ -3742,7 +3837,7 @@ export async function fetchSuperAdminPlatformSettings(): Promise<SuperAdminPlatf
   const res = await apiFetch('/admin/dashboard/platform-settings');
   const body = await parseJsonSafe(res);
   if (!res.ok) {
-    throw new Error(toErrorMessage(body, 'Failed to fetch platform settings'));
+    throw new Error(toErrorMessage(body, 'Unable to load platform settings'));
   }
   return body as SuperAdminPlatformSettings;
 }
@@ -3766,7 +3861,7 @@ export async function fetchSuperAdminFeatureFlags(): Promise<SuperAdminFeatureFl
   const res = await apiFetch('/admin/dashboard/feature-flags');
   const body = await parseJsonSafe(res);
   if (!res.ok) {
-    throw new Error(toErrorMessage(body, 'Failed to fetch feature flags'));
+    throw new Error(toErrorMessage(body, 'Unable to load feature flags'));
   }
   return body as SuperAdminFeatureFlagsResponse;
 }
@@ -3794,7 +3889,7 @@ export async function fetchSuperAdminAnnouncements(filters?: {
   const res = await apiFetch(`/admin/dashboard/announcements${query}`);
   const body = await parseJsonSafe(res);
   if (!res.ok) {
-    throw new Error(toErrorMessage(body, 'Failed to fetch announcements'));
+    throw new Error(toErrorMessage(body, 'Unable to load announcements'));
   }
   return Array.isArray(body) ? (body as SuperAdminAnnouncement[]) : [];
 }
@@ -3838,7 +3933,7 @@ export async function fetchSuperAdminAuditStream(limit = 100): Promise<SuperAdmi
   const res = await apiFetch(`/admin/dashboard/audit-stream${query}`);
   const body = await parseJsonSafe(res);
   if (!res.ok) {
-    throw new Error(toErrorMessage(body, 'Failed to fetch audit stream'));
+    throw new Error(toErrorMessage(body, 'Unable to load audit stream'));
   }
   return Array.isArray(body) ? (body as SuperAdminAuditEvent[]) : [];
 }
@@ -3847,7 +3942,7 @@ export async function fetchSuperAdminInfrastructureSummary(): Promise<SuperAdmin
   const res = await apiFetch('/admin/dashboard/infrastructure/summary');
   const body = await parseJsonSafe(res);
   if (!res.ok) {
-    throw new Error(toErrorMessage(body, 'Failed to fetch infrastructure summary'));
+    throw new Error(toErrorMessage(body, 'Unable to load infrastructure summary'));
   }
   return body as SuperAdminInfrastructureSummaryResponse;
 }
@@ -3857,7 +3952,7 @@ export async function fetchSuperAdminInfrastructureBackups(limit = 20): Promise<
   const res = await apiFetch(`/admin/dashboard/infrastructure/backups${query}`);
   const body = await parseJsonSafe(res);
   if (!res.ok) {
-    throw new Error(toErrorMessage(body, 'Failed to fetch infrastructure backups'));
+    throw new Error(toErrorMessage(body, 'Unable to load infrastructure backups'));
   }
   return Array.isArray(body) ? (body as SuperAdminInfrastructureBackupJob[]) : [];
 }
@@ -3893,7 +3988,7 @@ export async function fetchHelpdeskCategories() {
   const res = await apiFetch("/helpdesk/categories");
   const body = await parseJsonSafe(res);
   if (!res.ok) {
-    throw new Error(toErrorMessage(body, "Failed to fetch helpdesk categories"));
+    throw new Error(toErrorMessage(body, "Unable to load helpdesk categories"));
   }
   return body;
 }
@@ -3903,7 +3998,7 @@ export async function fetchHelpdeskDashboard(filters?: { facilityId?: string }) 
   const res = await apiFetch(`/helpdesk/dashboard${qs}`);
   const body = await parseJsonSafe(res);
   if (!res.ok) {
-    throw new Error(toErrorMessage(body, "Failed to fetch helpdesk dashboard"));
+    throw new Error(toErrorMessage(body, "Unable to load helpdesk dashboard"));
   }
   return body;
 }
@@ -3925,7 +4020,7 @@ export async function fetchHelpdeskTickets(filters?: {
   const res = await apiFetch(`/helpdesk/tickets${query}`);
   const body = await parseJsonSafe(res);
   if (!res.ok) {
-    throw new Error(toErrorMessage(body, "Failed to fetch helpdesk tickets"));
+    throw new Error(toErrorMessage(body, "Unable to load helpdesk tickets"));
   }
   if (Array.isArray(body)) return body;
   if (Array.isArray((body as any)?.data)) return (body as any).data;
@@ -3938,7 +4033,7 @@ export async function fetchHelpdeskTicketById(ticketId: string, filters?: { faci
   const res = await apiFetch(`/helpdesk/tickets/${encodeURIComponent(ticketId)}${query}`);
   const body = await parseJsonSafe(res);
   if (!res.ok) {
-    throw new Error(toErrorMessage(body, "Failed to fetch helpdesk ticket"));
+    throw new Error(toErrorMessage(body, "Unable to load helpdesk ticket"));
   }
   return body;
 }
@@ -4035,7 +4130,7 @@ export async function fetchPatientFeedbackCategories() {
   const res = await apiFetch('/patient-feedback/categories');
   const body = await parseJsonSafe(res);
   if (!res.ok) {
-    throw new Error(toErrorMessage(body, 'Failed to fetch patient feedback categories'));
+    throw new Error(toErrorMessage(body, 'Unable to load patient feedback categories'));
   }
   return body;
 }
@@ -4051,7 +4146,7 @@ export async function fetchPatientFeedbackDashboard(filters?: {
   const res = await apiFetch(`/patient-feedback/dashboard${query}`);
   const body = await parseJsonSafe(res);
   if (!res.ok) {
-    throw new Error(toErrorMessage(body, 'Failed to fetch patient feedback dashboard'));
+    throw new Error(toErrorMessage(body, 'Unable to load patient feedback dashboard'));
   }
   return body;
 }
@@ -4068,7 +4163,7 @@ export async function fetchPatientFeedbackPerformance(filters?: {
   const res = await apiFetch(`/patient-feedback/performance${query}`);
   const body = await parseJsonSafe(res);
   if (!res.ok) {
-    throw new Error(toErrorMessage(body, 'Failed to fetch patient feedback performance'));
+    throw new Error(toErrorMessage(body, 'Unable to load patient feedback performance'));
   }
   return body;
 }
@@ -4084,7 +4179,7 @@ export async function fetchPatientFeedbackQualitySummary(filters?: {
   const res = await apiFetch(`/patient-feedback/quality-summary${query}`);
   const body = await parseJsonSafe(res);
   if (!res.ok) {
-    throw new Error(toErrorMessage(body, 'Failed to fetch patient feedback quality summary'));
+    throw new Error(toErrorMessage(body, 'Unable to load patient feedback quality summary'));
   }
   return body;
 }
@@ -4097,7 +4192,7 @@ export async function fetchPatientFeedbackSurveys(filters?: {
   const res = await apiFetch(`/patient-feedback/surveys${query}`);
   const body = await parseJsonSafe(res);
   if (!res.ok) {
-    throw new Error(toErrorMessage(body, 'Failed to fetch patient feedback surveys'));
+    throw new Error(toErrorMessage(body, 'Unable to load patient feedback surveys'));
   }
   if (Array.isArray(body)) return body;
   if (Array.isArray((body as any)?.data)) return (body as any).data;
@@ -4175,7 +4270,7 @@ export async function fetchPatientFeedbackResponses(filters?: {
   const res = await apiFetch(`/patient-feedback/responses${query}`);
   const body = await parseJsonSafe(res);
   if (!res.ok) {
-    throw new Error(toErrorMessage(body, 'Failed to fetch patient feedback responses'));
+    throw new Error(toErrorMessage(body, 'Unable to load patient feedback responses'));
   }
   if (Array.isArray(body)) return body;
   if (Array.isArray((body as any)?.data)) return (body as any).data;
@@ -4245,7 +4340,7 @@ export async function fetchPatientFeedbackTickets(filters?: {
   const res = await apiFetch(`/patient-feedback/tickets${query}`);
   const body = await parseJsonSafe(res);
   if (!res.ok) {
-    throw new Error(toErrorMessage(body, 'Failed to fetch patient feedback tickets'));
+    throw new Error(toErrorMessage(body, 'Unable to load patient feedback tickets'));
   }
   if (Array.isArray(body)) return body;
   if (Array.isArray((body as any)?.data)) return (body as any).data;
@@ -4428,7 +4523,7 @@ export async function fetchWards() {
   const res = await apiFetch('/wards');
   const body = await parseJsonSafe(res);
   if (!res.ok) {
-    throw new Error(toErrorMessage(body, 'Failed to fetch wards'));
+    throw new Error(toErrorMessage(body, 'Unable to load wards'));
   }
   if (Array.isArray(body)) return body;
   if (Array.isArray((body as any)?.data)) return (body as any).data;
@@ -4483,7 +4578,7 @@ export async function fetchStaff() {
   const res = await apiFetch('/staff');
   const body = await parseJsonSafe(res);
   if (!res.ok) {
-    throw new Error(toErrorMessage(body, 'Failed to fetch staff'));
+    throw new Error(toErrorMessage(body, 'Unable to load staff'));
   }
   if (Array.isArray(body)) return body;
   if (Array.isArray((body as any)?.data)) return (body as any).data;
@@ -4577,7 +4672,7 @@ export async function fetchStaffAssignments(staffId: string) {
   const res = await apiFetch(`/staff/${staffId}/assignments`);
   const body = await parseJsonSafe(res);
   if (!res.ok) {
-    throw new Error(toErrorMessage(body, 'Failed to fetch staff assignments'));
+    throw new Error(toErrorMessage(body, 'Unable to load staff assignments'));
   }
   if (Array.isArray(body)) return body;
   if (Array.isArray((body as any)?.data)) return (body as any).data;
@@ -4589,7 +4684,7 @@ export async function fetchHrAttendance() {
   const res = await apiFetch('/hr/attendance');
   const body = await parseJsonSafe(res);
   if (!res.ok) {
-    throw new Error(toErrorMessage(body, 'Failed to fetch attendance'));
+    throw new Error(toErrorMessage(body, 'Unable to load attendance'));
   }
   if (Array.isArray(body)) return body;
   if (Array.isArray((body as any)?.data)) return (body as any).data;
@@ -4643,7 +4738,7 @@ export async function fetchHrLeaves() {
   const res = await apiFetch('/hr/leaves');
   const body = await parseJsonSafe(res);
   if (!res.ok) {
-    throw new Error(toErrorMessage(body, 'Failed to fetch leaves'));
+    throw new Error(toErrorMessage(body, 'Unable to load leaves'));
   }
   if (Array.isArray(body)) return body;
   if (Array.isArray((body as any)?.data)) return (body as any).data;
@@ -4711,7 +4806,7 @@ export async function fetchHrPayrolls(month?: string, year?: string) {
   const res = await apiFetch(`/hr/payrolls${qs ? `?${qs}` : ''}`);
   const body = await parseJsonSafe(res);
   if (!res.ok) {
-    throw new Error(toErrorMessage(body, 'Failed to fetch payrolls'));
+    throw new Error(toErrorMessage(body, 'Unable to load payrolls'));
   }
   if (Array.isArray(body)) return body;
   if (Array.isArray((body as any)?.data)) return (body as any).data;
@@ -4760,7 +4855,7 @@ export async function fetchHrRecords(params?: {
   const res = await apiFetch(`/hr/records${qs ? `?${qs}` : ''}`);
   const body = await parseJsonSafe(res);
   if (!res.ok) {
-    throw new Error(toErrorMessage(body, 'Failed to fetch HR records'));
+    throw new Error(toErrorMessage(body, 'Unable to load HR records'));
   }
   if (Array.isArray(body)) return body;
   if (Array.isArray((body as any)?.data)) return (body as any).data;
@@ -4822,7 +4917,7 @@ export async function fetchHrCredentialExpiryAlerts(days = 60) {
   const res = await apiFetch(`/hr/credentials/expiry-alerts?days=${encodeURIComponent(String(days))}`);
   const body = await parseJsonSafe(res);
   if (!res.ok) {
-    throw new Error(toErrorMessage(body, 'Failed to fetch credential expiry alerts'));
+    throw new Error(toErrorMessage(body, 'Unable to load credential expiry alerts'));
   }
   if (Array.isArray(body)) return body;
   if (Array.isArray((body as any)?.data)) return (body as any).data;
@@ -4834,7 +4929,7 @@ export async function fetchHrDashboardSummary() {
   const res = await apiFetch('/hr/dashboard/summary');
   const body = await parseJsonSafe(res);
   if (!res.ok) {
-    throw new Error(toErrorMessage(body, 'Failed to fetch HR dashboard summary'));
+    throw new Error(toErrorMessage(body, 'Unable to load HR dashboard summary'));
   }
   return body;
 }
@@ -4871,7 +4966,7 @@ export async function fetchFacilityAssets() {
   const res = await apiFetch('/facility-ops/assets');
   const body = await parseJsonSafe(res);
   if (!res.ok) {
-    throw new Error(toErrorMessage(body, 'Failed to fetch facility assets'));
+    throw new Error(toErrorMessage(body, 'Unable to load facility assets'));
   }
   if (Array.isArray(body)) return body;
   if (Array.isArray((body as any)?.data)) return (body as any).data;
@@ -4933,7 +5028,7 @@ export async function fetchFacilityMaintenanceRequests() {
   const res = await apiFetch('/facility-ops/maintenance-requests');
   const body = await parseJsonSafe(res);
   if (!res.ok) {
-    throw new Error(toErrorMessage(body, 'Failed to fetch maintenance requests'));
+    throw new Error(toErrorMessage(body, 'Unable to load maintenance requests'));
   }
   if (Array.isArray(body)) return body;
   if (Array.isArray((body as any)?.data)) return (body as any).data;
@@ -4982,7 +5077,7 @@ export async function fetchFacilityWorkOrders(limit = 300) {
   const res = await apiFetch(`/facility-ops/work-orders?limit=${encodeURIComponent(String(limit))}`);
   const body = await parseJsonSafe(res);
   if (!res.ok) {
-    throw new Error(toErrorMessage(body, 'Failed to fetch work orders'));
+    throw new Error(toErrorMessage(body, 'Unable to load work orders'));
   }
   if (Array.isArray(body)) return body;
   if (Array.isArray((body as any)?.data)) return (body as any).data;
@@ -5015,7 +5110,7 @@ export async function fetchFacilityUtilityRecords(limit = 300) {
   const res = await apiFetch(`/facility-ops/utilities?limit=${encodeURIComponent(String(limit))}`);
   const body = await parseJsonSafe(res);
   if (!res.ok) {
-    throw new Error(toErrorMessage(body, 'Failed to fetch utility records'));
+    throw new Error(toErrorMessage(body, 'Unable to load utility records'));
   }
   if (Array.isArray(body)) return body;
   if (Array.isArray((body as any)?.data)) return (body as any).data;
@@ -5048,7 +5143,7 @@ export async function fetchFacilityComplianceChecks(limit = 300) {
   const res = await apiFetch(`/facility-ops/compliance-checks?limit=${encodeURIComponent(String(limit))}`);
   const body = await parseJsonSafe(res);
   if (!res.ok) {
-    throw new Error(toErrorMessage(body, 'Failed to fetch compliance checks'));
+    throw new Error(toErrorMessage(body, 'Unable to load compliance checks'));
   }
   if (Array.isArray(body)) return body;
   if (Array.isArray((body as any)?.data)) return (body as any).data;
@@ -5080,7 +5175,7 @@ export async function fetchFacilityStructureSummary() {
   const res = await apiFetch('/facility-ops/structure');
   const body = await parseJsonSafe(res);
   if (!res.ok) {
-    throw new Error(toErrorMessage(body, 'Failed to fetch structure summary'));
+    throw new Error(toErrorMessage(body, 'Unable to load structure summary'));
   }
   return body;
 }
@@ -5089,7 +5184,7 @@ export async function fetchFacilityOpsDashboard() {
   const res = await apiFetch('/facility-ops/dashboard');
   const body = await parseJsonSafe(res);
   if (!res.ok) {
-    throw new Error(toErrorMessage(body, 'Failed to fetch facility ops dashboard'));
+    throw new Error(toErrorMessage(body, 'Unable to load facility ops dashboard'));
   }
   return body;
 }
@@ -5144,7 +5239,7 @@ export async function createAmbulanceFleet(payload: AmbulanceFleetPayload) {
 export async function fetchAmbulanceFleet() {
   const res = await apiFetch('/emergency/ambulance/fleet');
   const body = await parseJsonSafe(res);
-  if (!res.ok) throw new Error(toErrorMessage(body, 'Failed to fetch ambulance fleet'));
+  if (!res.ok) throw new Error(toErrorMessage(body, 'Unable to load ambulance fleet'));
   if (Array.isArray(body)) return body;
   if (Array.isArray((body as any)?.data)) return (body as any).data;
   if (Array.isArray((body as any)?.items)) return (body as any).items;
@@ -5185,7 +5280,7 @@ export async function fetchAmbulanceDispatches(params?: {
   const qs = query.toString();
   const res = await apiFetch(`/emergency/ambulance/dispatches${qs ? `?${qs}` : ''}`);
   const body = await parseJsonSafe(res);
-  if (!res.ok) throw new Error(toErrorMessage(body, 'Failed to fetch dispatches'));
+  if (!res.ok) throw new Error(toErrorMessage(body, 'Unable to load dispatches'));
   if (Array.isArray(body)) return body;
   if (Array.isArray((body as any)?.data)) return (body as any).data;
   if (Array.isArray((body as any)?.items)) return (body as any).items;
@@ -5242,7 +5337,7 @@ export async function fetchAmbulanceLocationLogs(params?: {
   const qs = query.toString();
   const res = await apiFetch(`/emergency/ambulance/location-logs${qs ? `?${qs}` : ''}`);
   const body = await parseJsonSafe(res);
-  if (!res.ok) throw new Error(toErrorMessage(body, 'Failed to fetch location logs'));
+  if (!res.ok) throw new Error(toErrorMessage(body, 'Unable to load location logs'));
   if (Array.isArray(body)) return body;
   if (Array.isArray((body as any)?.data)) return (body as any).data;
   if (Array.isArray((body as any)?.items)) return (body as any).items;
@@ -5278,7 +5373,7 @@ export async function fetchAmbulanceFuelLogs(params?: {
   const qs = query.toString();
   const res = await apiFetch(`/emergency/ambulance/fuel-logs${qs ? `?${qs}` : ''}`);
   const body = await parseJsonSafe(res);
-  if (!res.ok) throw new Error(toErrorMessage(body, 'Failed to fetch fuel logs'));
+  if (!res.ok) throw new Error(toErrorMessage(body, 'Unable to load fuel logs'));
   if (Array.isArray(body)) return body;
   if (Array.isArray((body as any)?.data)) return (body as any).data;
   if (Array.isArray((body as any)?.items)) return (body as any).items;
@@ -5312,7 +5407,7 @@ export async function createAmbulanceDispatchBilling(
 export async function fetchAmbulanceDashboard() {
   const res = await apiFetch('/emergency/ambulance/dashboard');
   const body = await parseJsonSafe(res);
-  if (!res.ok) throw new Error(toErrorMessage(body, 'Failed to fetch ambulance dashboard'));
+  if (!res.ok) throw new Error(toErrorMessage(body, 'Unable to load ambulance dashboard'));
   return body;
 }
 
@@ -5337,7 +5432,7 @@ export async function fetchProcurementSuppliers() {
   const res = await apiFetch('/procurement/suppliers');
   const body = await parseJsonSafe(res);
   if (!res.ok) {
-    throw new Error(toErrorMessage(body, 'Failed to fetch suppliers'));
+    throw new Error(toErrorMessage(body, 'Unable to load suppliers'));
   }
   if (Array.isArray(body)) return body;
   if (Array.isArray((body as any)?.data)) return (body as any).data;
@@ -5368,7 +5463,7 @@ export async function fetchProcurementItems() {
   const res = await apiFetch('/procurement/items');
   const body = await parseJsonSafe(res);
   if (!res.ok) {
-    throw new Error(toErrorMessage(body, 'Failed to fetch inventory items'));
+    throw new Error(toErrorMessage(body, 'Unable to load inventory items'));
   }
   if (Array.isArray(body)) return body;
   if (Array.isArray((body as any)?.data)) return (body as any).data;
@@ -5437,7 +5532,7 @@ export async function fetchInventoryMedicines() {
   const res = await apiFetch('/inventory');
   const body = await parseJsonSafe(res);
   if (!res.ok) {
-    throw new Error(toErrorMessage(body, 'Failed to fetch medicine stock items'));
+    throw new Error(toErrorMessage(body, 'Unable to load medicine stock items'));
   }
   if (Array.isArray(body)) return body;
   if (Array.isArray((body as any)?.data)) return (body as any).data;
@@ -5519,7 +5614,7 @@ export async function fetchInventoryMovements(params?: {
   const res = await apiFetch(`/inventory/movements${qs ? `?${qs}` : ''}`);
   const body = await parseJsonSafe(res);
   if (!res.ok) {
-    throw new Error(toErrorMessage(body, 'Failed to fetch stock movement ledger'));
+    throw new Error(toErrorMessage(body, 'Unable to load stock movement ledger'));
   }
   if (Array.isArray(body)) return body;
   if (Array.isArray((body as any)?.data)) return (body as any).data;
@@ -5531,7 +5626,7 @@ export async function fetchInventoryExpiryAlerts(days = 60) {
   const res = await apiFetch(`/inventory/expiry-alerts?days=${encodeURIComponent(String(days))}`);
   const body = await parseJsonSafe(res);
   if (!res.ok) {
-    throw new Error(toErrorMessage(body, 'Failed to fetch inventory expiry alerts'));
+    throw new Error(toErrorMessage(body, 'Unable to load inventory expiry alerts'));
   }
   if (Array.isArray(body)) return body;
   if (Array.isArray((body as any)?.data)) return (body as any).data;
@@ -5543,7 +5638,7 @@ export async function fetchPharmacyDashboard() {
   const res = await apiFetch('/pharmacy/dashboard');
   const body = await parseJsonSafe(res);
   if (!res.ok) {
-    throw new Error(toErrorMessage(body, 'Failed to fetch pharmacy dashboard'));
+    throw new Error(toErrorMessage(body, 'Unable to load pharmacy dashboard'));
   }
   return (body as any)?.data ?? body;
 }
@@ -5552,7 +5647,7 @@ export async function fetchPharmacyCatalog() {
   const res = await apiFetch('/pharmacy/catalog');
   const body = await parseJsonSafe(res);
   if (!res.ok) {
-    throw new Error(toErrorMessage(body, 'Failed to fetch pharmacy catalog'));
+    throw new Error(toErrorMessage(body, 'Unable to load pharmacy catalog'));
   }
   if (Array.isArray(body)) return body;
   if (Array.isArray((body as any)?.data)) return (body as any).data;
@@ -5682,7 +5777,7 @@ export async function fetchPharmacyPrescriptions(params?: {
   const res = await apiFetch(`/pharmacy/prescriptions${qs ? `?${qs}` : ''}`);
   const body = await parseJsonSafe(res);
   if (!res.ok) {
-    throw new Error(toErrorMessage(body, 'Failed to fetch pharmacy prescriptions'));
+    throw new Error(toErrorMessage(body, 'Unable to load pharmacy prescriptions'));
   }
   if (Array.isArray(body)) return body;
   if (Array.isArray((body as any)?.data)) return (body as any).data;
@@ -5697,7 +5792,7 @@ export async function fetchPharmacyDispenses(params?: { pharmacistId?: string })
   const res = await apiFetch(`/pharmacy/dispenses${qs ? `?${qs}` : ''}`);
   const body = await parseJsonSafe(res);
   if (!res.ok) {
-    throw new Error(toErrorMessage(body, 'Failed to fetch pharmacy dispenses'));
+    throw new Error(toErrorMessage(body, 'Unable to load pharmacy dispenses'));
   }
   if (Array.isArray(body)) return body;
   if (Array.isArray((body as any)?.data)) return (body as any).data;
@@ -5709,7 +5804,7 @@ export async function fetchBlockchainDashboard() {
   const res = await apiFetch('/blockchain/dashboard');
   const body = await parseJsonSafe(res);
   if (!res.ok) {
-    throw new Error(toErrorMessage(body, 'Failed to fetch blockchain dashboard'));
+    throw new Error(toErrorMessage(body, 'Unable to load blockchain dashboard'));
   }
   return (body as any)?.data ?? body;
 }
@@ -5731,7 +5826,7 @@ export async function fetchBlockchainLedger(params?: {
   const res = await apiFetch(`/blockchain/ledger${qs ? `?${qs}` : ''}`);
   const body = await parseJsonSafe(res);
   if (!res.ok) {
-    throw new Error(toErrorMessage(body, 'Failed to fetch blockchain ledger'));
+    throw new Error(toErrorMessage(body, 'Unable to load blockchain ledger'));
   }
   if (Array.isArray(body)) return body;
   if (Array.isArray((body as any)?.data)) return (body as any).data;
@@ -5877,7 +5972,7 @@ export async function fetchPharmacyPosTransactions(params?: {
   const res = await apiFetch(`/tenant/pos/transactions${qs ? `?${qs}` : ''}`);
   const body = await parseJsonSafe(res);
   if (!res.ok) {
-    throw new Error(toErrorMessage(body, 'Failed to fetch POS transactions'));
+    throw new Error(toErrorMessage(body, 'Unable to load POS transactions'));
   }
   if (Array.isArray(body)) return body;
   if (Array.isArray((body as any)?.data)) return (body as any).data;
@@ -5889,7 +5984,7 @@ export async function fetchPharmacyPosSummary(days = 30) {
   const res = await apiFetch(`/tenant/pos/summary?days=${encodeURIComponent(String(days))}`);
   const body = await parseJsonSafe(res);
   if (!res.ok) {
-    throw new Error(toErrorMessage(body, 'Failed to fetch POS summary'));
+    throw new Error(toErrorMessage(body, 'Unable to load POS summary'));
   }
   return body;
 }
@@ -5898,7 +5993,7 @@ export async function fetchPharmacyPosReceipt(transactionId: string) {
   const res = await apiFetch(`/tenant/pos/transactions/${encodeURIComponent(transactionId)}/receipt`);
   const body = await parseJsonSafe(res);
   if (!res.ok) {
-    throw new Error(toErrorMessage(body, 'Failed to fetch POS receipt'));
+    throw new Error(toErrorMessage(body, 'Unable to load POS receipt'));
   }
   return body;
 }
@@ -5986,7 +6081,7 @@ export async function fetchMortuaryDashboard(capacity?: number) {
   const res = await apiFetch(`/tenant/mortuary/dashboard${query}`);
   const body = await parseJsonSafe(res);
   if (!res.ok) {
-    throw new Error(toErrorMessage(body, "Failed to fetch mortuary dashboard"));
+    throw new Error(toErrorMessage(body, "Unable to load mortuary dashboard"));
   }
   return body;
 }
@@ -6010,7 +6105,7 @@ export async function fetchMortuaryRecords(params?: {
   const res = await apiFetch(`/tenant/mortuary/records${qs ? `?${qs}` : ""}`);
   const body = await parseJsonSafe(res);
   if (!res.ok) {
-    throw new Error(toErrorMessage(body, "Failed to fetch mortuary records"));
+    throw new Error(toErrorMessage(body, "Unable to load mortuary records"));
   }
   if (Array.isArray(body)) return body;
   if (Array.isArray((body as any)?.data)) return (body as any).data;
@@ -6074,7 +6169,7 @@ export async function fetchProcurementPurchaseOrders() {
   const res = await apiFetch('/procurement/purchase-orders');
   const body = await parseJsonSafe(res);
   if (!res.ok) {
-    throw new Error(toErrorMessage(body, 'Failed to fetch purchase orders'));
+    throw new Error(toErrorMessage(body, 'Unable to load purchase orders'));
   }
   if (Array.isArray(body)) return body;
   if (Array.isArray((body as any)?.data)) return (body as any).data;

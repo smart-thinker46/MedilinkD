@@ -343,65 +343,55 @@ export default function PatientPortalView() {
       )}
 
       {addModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
-          <form onSubmit={handleGrantAccess} className="bg-card p-6 rounded-none border border-border shadow-xl w-full max-w-sm portal-form-shell">
-            <h2 className="portal-form-header text-xl font-bold mb-4 -mx-6 -mt-6 px-6 py-4 text-white flex items-center gap-2">
-               <ModuleIcon name="language" /> {accountForm.password ? "Edit Access" : "Grant Portal Access"}
-            </h2>
-            <p className="text-sm text-muted-foreground mb-4">
-              Authorize a registered patient for digital self-service.
-            </p>
-
-            <div className="space-y-4">
-              <div>
-                <label className="form-label">Patient</label>
-                <select required className="w-full px-4 py-3 bg-background border border-border rounded-xl text-sm mt-1"
-                  value={accountForm.patientId} onChange={(e) => setAccountForm({...accountForm, patientId: e.target.value})}>
-                  <option value="">Select Patient...</option>
-                  {patients.map((p: any) => (
-                    <option key={p.id} value={p.id}>{p.firstName} {p.lastName} ({p.patientCode || p.mrn})</option>
-                  ))}
-                </select>
+        <div className="module-form-overlay" onClick={() => setAddModal(false)}>
+          <form onSubmit={handleGrantAccess} className="module-form-panel modal-panel" onClick={(e) => e.stopPropagation()}>
+            <div className="module-form-header">
+              <div className="module-form-heading">
+                <div className="module-form-icon"><ModuleIcon name="language" /></div>
+                <div>
+                  <div className="module-form-kicker">Patient Portal</div>
+                  <h2 className="module-form-title">{accountForm.password ? "Edit Access" : "Grant Portal Access"}</h2>
+                  <p className="module-form-desc">Authorize a registered patient for digital self-service.</p>
+                </div>
               </div>
-
-              <div>
-                <label className="form-label">Portal Login Email</label>
-                <input required type="email" className="w-full px-4 py-3 bg-background border border-border rounded-xl text-sm mt-1" 
-                  value={accountForm.email} onChange={(e) => setAccountForm({...accountForm, email: e.target.value})} 
-                  placeholder="patient@example.com" />
+              <button type="button" className="modal-close-btn" onClick={() => setAddModal(false)}>x</button>
+            </div>
+            <div className="module-form-body">
+              <div className="module-form-grid">
+                <div className="module-form-field is-wide">
+                  <label className="form-label">Patient</label>
+                  <select required className="module-form-input"
+                    value={accountForm.patientId} onChange={(e) => setAccountForm({...accountForm, patientId: e.target.value})}>
+                    <option value="">Select Patient...</option>
+                    {patients.map((p: any) => (
+                      <option key={p.id} value={p.id}>{p.firstName} {p.lastName} ({p.patientCode || p.mrn})</option>
+                    ))}
+                  </select>
+                </div>
+                <div className="module-form-field is-wide">
+                  <label className="form-label">Portal Login Email</label>
+                  <input required type="email" className="module-form-input" 
+                    value={accountForm.email} onChange={(e) => setAccountForm({...accountForm, email: e.target.value})} 
+                    placeholder="patient@example.com" />
+                </div>
+                <div className="module-form-field is-wide">
+                  <label className="form-label">Password (Leave blank to keep existing)</label>
+                  <input type="password" minLength={6} className="module-form-input" 
+                    value={accountForm.password} onChange={(e) => setAccountForm({...accountForm, password: e.target.value})} />
+                </div>
+                <div className="module-form-field">
+                  <label className="form-label">Status</label>
+                  <select required className="module-form-input"
+                    value={accountForm.status} onChange={(e) => setAccountForm({...accountForm, status: e.target.value})}>
+                    <option value="ACTIVE">Active</option>
+                    <option value="LOCKED">Locked</option>
+                    <option value="SUSPENDED">Suspended</option>
+                  </select>
+                </div>
               </div>
-
-              <div>
-                <label className="form-label">Password (Leave blank to keep existing)</label>
-                <input type="password" minLength={6} className="w-full px-4 py-3 bg-background border border-border rounded-xl text-sm mt-1" 
-                  value={accountForm.password} onChange={(e) => setAccountForm({...accountForm, password: e.target.value})} />
-              </div>
-
-              <div>
-                <label className="form-label">Status</label>
-                <select required className="w-full px-4 py-3 bg-background border border-border rounded-xl text-sm mt-1"
-                  value={accountForm.status} onChange={(e) => setAccountForm({...accountForm, status: e.target.value})}>
-                  <option value="ACTIVE">Active</option>
-                  <option value="LOCKED">Locked</option>
-                  <option value="SUSPENDED">Suspended</option>
-                </select>
-              </div>
-
-              <div className="flex justify-end gap-3 pt-4 border-t mt-4">
-                <button
-                  type="button"
-                  onClick={() => setAddModal(false)}
-                  className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg font-medium"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  disabled={granting}
-                  className="px-4 py-2 bg-[#123f56] hover:bg-[#0d3447] text-white rounded-none font-medium disabled:opacity-50"
-                >
-                  {granting ? "Saving..." : "Save Access"}
-                </button>
+              <div className="module-form-footer">
+                <button type="button" className="form-btn form-btn-cancel" onClick={() => setAddModal(false)}>Cancel</button>
+                <button type="submit" disabled={granting} className="form-btn form-btn-primary module-form-submit">{granting ? "Saving..." : "Save Access"}</button>
               </div>
             </div>
           </form>
@@ -409,99 +399,102 @@ export default function PatientPortalView() {
       )}
 
       {requestModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
-          <form onSubmit={handleRecordRequest} className="bg-card p-6 rounded-none border border-border shadow-xl w-full max-w-lg">
-            <h2 className="portal-form-header text-xl font-bold mb-4 -mx-6 -mt-6 px-6 py-4 text-white flex items-center gap-2">
-              <ModuleIcon name="description" /> Request Medical Records
-            </h2>
-            <p className="text-sm text-muted-foreground mb-4">Submit a patient record request for identity and Medical Records Officer review.</p>
-            <div className="grid gap-4 sm:grid-cols-2">
-              <label className="form-label">Patient
-                <select required className="w-full px-4 py-3 bg-background border border-border rounded-none text-sm mt-1" value={requestForm.patientId} onChange={(e) => setRequestForm({ ...requestForm, patientId: e.target.value })}>
-                  <option value="">Select patient...</option>
-                  {patients.map((p: any) => <option key={p.id} value={p.id}>{p.firstName} {p.lastName} ({p.patientCode || p.mrn})</option>)}
-                </select>
-              </label>
-              <label className="form-label">Date range
-                <input className="w-full px-4 py-3 bg-background border border-border rounded-none text-sm mt-1" placeholder="e.g. Jan 2025 - Mar 2026" value={requestForm.dateRange} onChange={(e) => setRequestForm({ ...requestForm, dateRange: e.target.value })} />
-              </label>
-              <label className="form-label sm:col-span-2">Record categories
-                <input required className="w-full px-4 py-3 bg-background border border-border rounded-none text-sm mt-1" value={requestForm.recordTypes} onChange={(e) => setRequestForm({ ...requestForm, recordTypes: e.target.value })} placeholder="LABORATORY, RADIOLOGY, DISCHARGE_SUMMARY" />
-                <small className="mt-1 block text-xs text-slate-500">Separate categories with commas.</small>
-              </label>
-              <label className="form-label sm:col-span-2">Purpose
-                <textarea required rows={3} className="w-full px-4 py-3 bg-background border border-border rounded-none text-sm mt-1" value={requestForm.purpose} onChange={(e) => setRequestForm({ ...requestForm, purpose: e.target.value })} />
-              </label>
+        <div className="module-form-overlay" onClick={() => setRequestModal(false)}>
+          <form onSubmit={handleRecordRequest} className="module-form-panel modal-panel" onClick={(e) => e.stopPropagation()}>
+            <div className="module-form-header">
+              <div className="module-form-heading">
+                <div className="module-form-icon"><ModuleIcon name="description" /></div>
+                <div>
+                  <div className="module-form-kicker">Patient Portal</div>
+                  <h2 className="module-form-title">Request Medical Records</h2>
+                  <p className="module-form-desc">Submit a patient record request for identity and Medical Records Officer review.</p>
+                </div>
+              </div>
+              <button type="button" className="modal-close-btn" onClick={() => setRequestModal(false)}>x</button>
             </div>
-            <div className="flex justify-end gap-3 pt-4 mt-4 border-t border-border">
-              <button type="button" onClick={() => setRequestModal(false)} className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-none font-medium">Cancel</button>
-              <button type="submit" disabled={requesting} className="px-4 py-2 bg-[#0f766e] hover:bg-[#115e59] text-white rounded-none font-medium disabled:opacity-50">{requesting ? "Submitting..." : "Submit Request"}</button>
+            <div className="module-form-body">
+              <div className="module-form-grid">
+                <div className="module-form-field">
+                  <label className="form-label">Patient</label>
+                  <select required className="module-form-input" value={requestForm.patientId} onChange={(e) => setRequestForm({ ...requestForm, patientId: e.target.value })}>
+                    <option value="">Select patient...</option>
+                    {patients.map((p: any) => <option key={p.id} value={p.id}>{p.firstName} {p.lastName} ({p.patientCode || p.mrn})</option>)}
+                  </select>
+                </div>
+                <div className="module-form-field">
+                  <label className="form-label">Date range</label>
+                  <input className="module-form-input" placeholder="e.g. Jan 2025 - Mar 2026" value={requestForm.dateRange} onChange={(e) => setRequestForm({ ...requestForm, dateRange: e.target.value })} />
+                </div>
+                <div className="module-form-field is-wide">
+                  <label className="form-label">Record categories</label>
+                  <input required className="module-form-input" value={requestForm.recordTypes} onChange={(e) => setRequestForm({ ...requestForm, recordTypes: e.target.value })} placeholder="LABORATORY, RADIOLOGY, DISCHARGE_SUMMARY" />
+                  <small className="mt-1 block text-xs text-slate-500">Separate categories with commas.</small>
+                </div>
+                <div className="module-form-field is-wide">
+                  <label className="form-label">Purpose</label>
+                  <textarea required rows={3} className="module-form-input" value={requestForm.purpose} onChange={(e) => setRequestForm({ ...requestForm, purpose: e.target.value })} />
+                </div>
+              </div>
+              <div className="module-form-footer">
+                <button type="button" className="form-btn form-btn-cancel" onClick={() => setRequestModal(false)}>Cancel</button>
+                <button type="submit" disabled={requesting} className="form-btn form-btn-primary module-form-submit">{requesting ? "Submitting..." : "Submit Request"}</button>
+              </div>
             </div>
           </form>
         </div>
       )}
 
       {apptModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
-          <form onSubmit={handleBookAppointment} className="bg-card p-6 rounded-none border border-border shadow-xl w-full max-w-sm portal-form-shell">
-            <h2 className="portal-form-header text-xl font-bold mb-4 -mx-6 -mt-6 px-6 py-4 text-white flex items-center gap-2">
-               <ModuleIcon name="event" /> Simulate Portal Booking
-            </h2>
-            <p className="text-sm text-muted-foreground mb-4">
-              Test the portal appointment creation flow.
-            </p>
-
-            <div className="space-y-4">
-              <div>
-                <label className="form-label">Patient</label>
-                <select required className="w-full px-4 py-3 bg-background border border-border rounded-xl text-sm mt-1"
-                  value={apptForm.patientId} onChange={(e) => setApptForm({...apptForm, patientId: e.target.value})}>
-                  <option value="">Select Patient...</option>
-                  {patients.map((p: any) => (
-                    <option key={p.id} value={p.id}>{p.firstName} {p.lastName} ({p.patientCode || p.mrn})</option>
-                  ))}
-                </select>
+        <div className="module-form-overlay" onClick={() => setApptModal(false)}>
+          <form onSubmit={handleBookAppointment} className="module-form-panel modal-panel" onClick={(e) => e.stopPropagation()}>
+            <div className="module-form-header">
+              <div className="module-form-heading">
+                <div className="module-form-icon"><ModuleIcon name="event" /></div>
+                <div>
+                  <div className="module-form-kicker">Patient Portal</div>
+                  <h2 className="module-form-title">Simulate Portal Booking</h2>
+                  <p className="module-form-desc">Test the portal appointment creation flow.</p>
+                </div>
               </div>
-
-              <div>
-                <label className="form-label">Preferred Doctor (Optional)</label>
-                <select className="w-full px-4 py-3 bg-background border border-border rounded-xl text-sm mt-1"
-                  value={apptForm.doctorId} onChange={(e) => setApptForm({...apptForm, doctorId: e.target.value})}>
-                  <option value="">Any Available Doctor</option>
-                  {doctors.map((d: any) => (
-                    <option key={d.id} value={d.id}>Dr. {d.firstName} {d.lastName}</option>
-                  ))}
-                </select>
+              <button type="button" className="modal-close-btn" onClick={() => setApptModal(false)}>x</button>
+            </div>
+            <div className="module-form-body">
+              <div className="module-form-grid">
+                <div className="module-form-field is-wide">
+                  <label className="form-label">Patient</label>
+                  <select required className="module-form-input"
+                    value={apptForm.patientId} onChange={(e) => setApptForm({...apptForm, patientId: e.target.value})}>
+                    <option value="">Select Patient...</option>
+                    {patients.map((p: any) => (
+                      <option key={p.id} value={p.id}>{p.firstName} {p.lastName} ({p.patientCode || p.mrn})</option>
+                    ))}
+                  </select>
+                </div>
+                <div className="module-form-field is-wide">
+                  <label className="form-label">Preferred Doctor (Optional)</label>
+                  <select className="module-form-input"
+                    value={apptForm.doctorId} onChange={(e) => setApptForm({...apptForm, doctorId: e.target.value})}>
+                    <option value="">Any Available Doctor</option>
+                    {doctors.map((d: any) => (
+                      <option key={d.id} value={d.id}>Dr. {d.firstName} {d.lastName}</option>
+                    ))}
+                  </select>
+                </div>
+                <div className="module-form-field">
+                  <label className="form-label">Date & Time</label>
+                  <input required type="datetime-local" className="module-form-input" 
+                    value={apptForm.dateTime} onChange={(e) => setApptForm({...apptForm, dateTime: e.target.value})} />
+                </div>
+                <div className="module-form-field is-wide">
+                  <label className="form-label">Chief Complaint / Reason</label>
+                  <textarea className="module-form-input" 
+                    value={apptForm.chiefComplaint} onChange={(e) => setApptForm({...apptForm, chiefComplaint: e.target.value})} 
+                    placeholder="e.g. Fever and chills" rows={2} />
+                </div>
               </div>
-
-              <div>
-                <label className="form-label">Date & Time</label>
-                <input required type="datetime-local" className="w-full px-4 py-3 bg-background border border-border rounded-xl text-sm mt-1" 
-                  value={apptForm.dateTime} onChange={(e) => setApptForm({...apptForm, dateTime: e.target.value})} />
-              </div>
-
-              <div>
-                <label className="form-label">Chief Complaint / Reason</label>
-                <textarea className="w-full px-4 py-3 bg-background border border-border rounded-xl text-sm mt-1" 
-                  value={apptForm.chiefComplaint} onChange={(e) => setApptForm({...apptForm, chiefComplaint: e.target.value})} 
-                  placeholder="e.g. Fever and chills" rows={2} />
-              </div>
-
-              <div className="flex justify-end gap-3 pt-4 border-t mt-4">
-                <button
-                  type="button"
-                  onClick={() => setApptModal(false)}
-                  className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg font-medium"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  disabled={booking}
-                  className="px-4 py-2 bg-[#4c1d95] hover:bg-[#3b0764] text-white rounded-none font-medium disabled:opacity-50"
-                >
-                  {booking ? "Booking..." : "Book Appointment"}
-                </button>
+              <div className="module-form-footer">
+                <button type="button" className="form-btn form-btn-cancel" onClick={() => setApptModal(false)}>Cancel</button>
+                <button type="submit" disabled={booking} className="form-btn form-btn-primary module-form-submit">{booking ? "Booking..." : "Book Appointment"}</button>
               </div>
             </div>
           </form>

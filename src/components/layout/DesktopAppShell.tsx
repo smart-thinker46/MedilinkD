@@ -36,11 +36,16 @@ export function DesktopAppShell({ children, activeModuleId }: DesktopAppShellPro
           : "compact");
       const language = window.localStorage.getItem("hmis.language") || "en";
       const prefersDark = window.matchMedia?.("(prefers-color-scheme: dark)").matches;
-      root.dataset.theme =
-        theme === "system" ? (prefersDark ? "dark" : "light") : theme;
+      const isDark = theme === "system" ? Boolean(prefersDark) : theme === "dark";
+      root.dataset.theme = isDark ? "dark" : "light";
       root.dataset.themePreference = theme;
       root.dataset.density = density;
       root.lang = language;
+      if (isDark) {
+        root.classList.add("dark");
+      } else {
+        root.classList.remove("dark");
+      }
     };
 
     applyPreferences();
@@ -174,7 +179,11 @@ export function DesktopAppShell({ children, activeModuleId }: DesktopAppShellPro
     <>
       <TableInteractionLayer activeModuleId={activeModuleId} />
       <FieldDescriptionLayer />
-      {children}
+      <main id="main-content" className="desktop-main-scroll flex-1 overflow-x-hidden overflow-y-auto p-6 custom-scrollbar">
+        <div className="w-full animate-in fade-in zoom-in-95 duration-300">
+          {children}
+        </div>
+      </main>
       {orderDestination ? (
         <OrderInbox
           destinationModule={orderDestination}

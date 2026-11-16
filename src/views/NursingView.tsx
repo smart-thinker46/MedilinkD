@@ -16,6 +16,7 @@ import {
 } from "lucide-react";
 import { api } from "../lib/api";
 import { ModuleReferenceForms } from "../components/ModuleReferenceForms";
+import "./NursingView.css";
 
 type NursingTab = "assessment" | "vitals" | "care-plan" | "mar" | "handover" | "fluid" | "braden" | "safety";
 
@@ -669,14 +670,20 @@ export default function NursingView() {
       ) : null}
 
       {workflowPopup ? (
-        <div className="nursing-workflow-backdrop" role="presentation" onClick={() => setWorkflowPopup("")}>
-          <section className="nursing-workflow-modal" role="dialog" aria-modal="true" onClick={(event) => event.stopPropagation()}>
-            <header>
-              <div><span>NURSING WORKFLOW</span><h2>{workflowPopup === "monitor" ? "Monitor Patient" : workflowPopup === "waiting" ? "Open Waiting List" : "Queue Patient"}</h2>
-                <p>{workflowPopup === "monitor" ? "Select a patient to open the nursing worklist." : workflowPopup === "waiting" ? "Patients currently queued to the Nursing service point." : "Route a registered patient to the Nursing queue."}</p></div>
-              <button type="button" onClick={() => setWorkflowPopup("")} aria-label="Close workflow popup"><X size={17} /></button>
-            </header>
-            <div className="nursing-workflow-body">
+        <div className="module-form-overlay nursing-workflow-backdrop" role="presentation" onClick={() => setWorkflowPopup("")}>
+          <section className="module-form-panel nursing-workflow-modal" role="dialog" aria-modal="true" onClick={(event) => event.stopPropagation()}>
+            <div className="module-form-header nursing-workflow-header">
+              <div className="module-form-heading">
+                <div className="module-form-icon"><X size={17} /></div>
+                <div>
+                  <div className="module-form-kicker">NURSING WORKFLOW</div>
+                  <h2 className="module-form-title">{workflowPopup === "monitor" ? "Monitor Patient" : workflowPopup === "waiting" ? "Open Waiting List" : "Queue Patient"}</h2>
+                  <p className="module-form-desc">{workflowPopup === "monitor" ? "Select a patient to open the nursing worklist." : workflowPopup === "waiting" ? "Patients currently queued to the Nursing service point." : "Route a registered patient to the Nursing queue."}</p>
+                </div>
+              </div>
+              <button type="button" className="modal-close-btn" onClick={() => setWorkflowPopup("")} aria-label="Close workflow popup"><X size={17} /></button>
+            </div>
+            <div className="module-form-body nursing-workflow-body">
               {workflowPopup === "monitor" ? (
                 <div className="nursing-workflow-list">{patientOptions.length ? patientOptions.slice(0, 50).map((patient) => (
                   <button type="button" key={patient.id} onClick={() => { const visit = activeVisits.find((row) => (row?.patientId || row?.patient?.id) === patient.id); if (visit) setSelectedVisit(visit); setWorkflowPopup(""); }}><strong>{patient.label.split(" · ")[0]}</strong><span>{patient.label.split(" · ")[1]}</span></button>
@@ -686,7 +693,21 @@ export default function NursingView() {
                 <div className="nursing-workflow-list">{workflowLoading ? <p className="nursing-workflow-note">Loading waiting list...</p> : waitingRows.length ? waitingRows.map((row, index) => <div key={row.id || row.tokenId || row.tokenNumber || index}><strong>{row.patientName || row.name || row.patientCode || row.patientId || "Patient"}</strong><span>{row.tokenNumber || "-"} · {row.status || "WAITING"}</span></div>) : <p className="nursing-workflow-note">No patients are waiting for Nursing.</p>}</div>
               ) : null}
               {workflowPopup === "queue" ? (
-                <form className="nursing-workflow-form" onSubmit={queueSelectedPatient}><label><span>Registered patient</span><select value={queuePatientId} onChange={(event) => setQueuePatientId(event.target.value)} required><option value="">Select a patient</option>{patientOptions.map((patient) => <option key={patient.id} value={patient.id}>{patient.label}</option>)}</select></label><footer><button type="button" className="nursing-secondary-btn" onClick={() => setWorkflowPopup("")}>Cancel</button><button type="submit" className="nursing-action-btn" disabled={saving === "queue-patient"}>{saving === "queue-patient" ? "Queueing..." : "Queue Patient"}</button></footer></form>
+                <form className="module-form-content nursing-workflow-form" onSubmit={queueSelectedPatient}>
+                  <div className="module-form-grid">
+                    <label className="module-form-field">
+                      <span className="form-label">Registered patient</span>
+                      <select className="module-form-input" value={queuePatientId} onChange={(event) => setQueuePatientId(event.target.value)} required>
+                        <option value="">Select a patient</option>
+                        {patientOptions.map((patient) => <option key={patient.id} value={patient.id}>{patient.label}</option>)}
+                      </select>
+                    </label>
+                  </div>
+                  <div className="module-form-footer">
+                    <button type="button" className="form-btn form-btn-cancel" onClick={() => setWorkflowPopup("")}>Cancel</button>
+                    <button type="submit" className="form-btn form-btn-primary module-form-submit" disabled={saving === "queue-patient"}>{saving === "queue-patient" ? "Queueing..." : "Queue Patient"}</button>
+                  </div>
+                </form>
               ) : null}
             </div>
           </section>
@@ -778,13 +799,38 @@ export default function NursingView() {
                   <p>Record the patient’s baseline functional, nutritional, skin, mobility, and psychosocial needs.</p>
                 </div>
                 <div className="nursing-form-grid">
-                  <label className="wide"><span>Nursing history</span><textarea value={assessment.nursingHistory} onChange={(e) => setAssessment({ ...assessment, nursingHistory: e.target.value })} placeholder="Functional ability, hygiene, nutrition, elimination, mobility..." /></label>
-                  <label><span>Mobility</span><select value={assessment.mobilityStatus} onChange={(e) => setAssessment({ ...assessment, mobilityStatus: e.target.value })}><option>Independent</option><option>Assisted</option><option>Dependent</option><option>Bedbound</option></select></label>
-                  <label><span>Self-care</span><select value={assessment.selfCareAbility} onChange={(e) => setAssessment({ ...assessment, selfCareAbility: e.target.value })}><option>Independent</option><option>Needs help</option><option>Fully dependent</option></select></label>
-                  <label><span>Nutrition</span><select value={assessment.nutritionalStatus} onChange={(e) => setAssessment({ ...assessment, nutritionalStatus: e.target.value })}><option>Adequate</option><option>At risk</option><option>Malnourished</option></select></label>
-                  <label><span>Skin integrity</span><select value={assessment.skinIntegrity} onChange={(e) => setAssessment({ ...assessment, skinIntegrity: e.target.value })}><option>Intact</option><option>Redness</option><option>Wound</option><option>Pressure injury</option></select></label>
-                  <label><span>Fall risk</span><select value={assessment.fallRisk} onChange={(e) => setAssessment({ ...assessment, fallRisk: e.target.value })}><option>Low</option><option>Moderate</option><option>High</option></select></label>
-                  <label><span>Psychological status</span><input value={assessment.psychologicalStatus} onChange={(e) => setAssessment({ ...assessment, psychologicalStatus: e.target.value })} placeholder="Mood, anxiety, orientation" /></label>
+                  <label className="wide">
+                    <span>Nursing history</span>
+                    <small className="nursing-field-hint">Add the relevant notes and supporting details.</small>
+                    <textarea value={assessment.nursingHistory} onChange={(e) => setAssessment({ ...assessment, nursingHistory: e.target.value })} placeholder="Functional ability, hygiene, nutrition, elimination, mobility..." />
+                  </label>
+                  <label>
+                    <span>Mobility</span>
+                    <select value={assessment.mobilityStatus} onChange={(e) => setAssessment({ ...assessment, mobilityStatus: e.target.value })}><option>Independent</option><option>Assisted</option><option>Dependent</option><option>Bedbound</option></select>
+                  </label>
+                  <label>
+                    <span>Self-care</span>
+                    <select value={assessment.selfCareAbility} onChange={(e) => setAssessment({ ...assessment, selfCareAbility: e.target.value })}><option>Independent</option><option>Needs help</option><option>Fully dependent</option></select>
+                  </label>
+                  <label>
+                    <span>Nutrition</span>
+                    <small className="nursing-field-hint">Choose the appropriate priority or risk level.</small>
+                    <select value={assessment.nutritionalStatus} onChange={(e) => setAssessment({ ...assessment, nutritionalStatus: e.target.value })}><option>Adequate</option><option>At risk</option><option>Malnourished</option></select>
+                  </label>
+                  <label>
+                    <span>Skin integrity</span>
+                    <select value={assessment.skinIntegrity} onChange={(e) => setAssessment({ ...assessment, skinIntegrity: e.target.value })}><option>Intact</option><option>Redness</option><option>Wound</option><option>Pressure injury</option></select>
+                  </label>
+                  <label>
+                    <span>Fall risk</span>
+                    <small className="nursing-field-hint">Choose the appropriate priority or risk level.</small>
+                    <select value={assessment.fallRisk} onChange={(e) => setAssessment({ ...assessment, fallRisk: e.target.value })}><option>Low</option><option>Moderate</option><option>High</option></select>
+                  </label>
+                  <label>
+                    <span>Psychological status</span>
+                    <small className="nursing-field-hint">Choose the current status or outcome.</small>
+                    <input value={assessment.psychologicalStatus} onChange={(e) => setAssessment({ ...assessment, psychologicalStatus: e.target.value })} placeholder="Mood, anxiety, orientation" />
+                  </label>
                 </div>
                 <div className="nursing-card-actions"><button className="nursing-action-btn" type="button" onClick={saveAssessment} disabled={saving === "assessment"}><Save size={15} /> {saving === "assessment" ? "Saving..." : "Save Assessment"}</button></div>
               </div>

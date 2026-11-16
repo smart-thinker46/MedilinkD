@@ -1256,84 +1256,89 @@ export default function BillingView() {
       </div>
 
       {paymentModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
-          <form onSubmit={handleProcessPayment} className="billing-payment-modal bg-card p-6 rounded-2xl border border-border shadow-xl w-full max-w-md">
-            <button
-              type="button"
-              className="billing-modal-x"
-              onClick={() => setPaymentModal(null)}
-              aria-label="Close payment form"
-            >
-              x
-            </button>
-            <h2 className="text-xl font-bold mb-2">Process Payment</h2>
-            <p className="text-sm text-muted-foreground mb-4">
-              Recording payment for Invoice {invoiceNumber(paymentModal)}
-            </p>
-
-            <div className="space-y-4">
-              <div>
-                <label className="form-label">Outstanding Balance</label>
-                <div className="text-xl font-bold text-red-600 mt-1">
-                   {formatKes(paymentModal.outstanding || paymentModal.balance || 0)}
+        <div className="module-form-overlay" onClick={() => setPaymentModal(null)}>
+          <form
+            onSubmit={handleProcessPayment}
+            className="module-form-panel billing-payment-modal has-rail"
+            onClick={(e) => e.stopPropagation()}
+            style={{'--module-form-accent': '#16a34a', '--module-form-accent-dark': '#14532d', '--module-form-accent-soft': 'rgba(22,163,74,0.14)'} as any}
+          >
+            <div className="module-form-rail">
+              <div className="module-form-rail-mark">
+                <div className="module-form-rail-icon">
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
+                </div>
+                <div>
+                  <b>Billing</b>
+                  <small>Process Payment</small>
                 </div>
               </div>
-
-              <div>
-                <label className="form-label">Payment Amount</label>
-                <input
-                  type="number"
-                  required
-                  min="1"
-                  max={paymentModal.outstanding || paymentModal.balance || undefined}
-                  className="w-full px-4 py-3 bg-background border border-border rounded-xl text-sm mt-1"
-                  value={paymentAmount}
-                  onChange={(e) => setPaymentAmount(e.target.value)}
-                />
+              <div className="module-form-rail-rule" />
+              <div className="module-form-rail-steps">
+                <div className="module-form-rail-step active">
+                  <span className="module-form-rail-step-num">1</span>
+                  <div><b>Payment Details</b><small>Amount & method</small></div>
+                </div>
               </div>
-
-              <div>
-                <label className="form-label">Payment Method</label>
-                <select
-                  required
-                  className="w-full px-4 py-3 bg-background border border-border rounded-xl text-sm mt-1"
-                  value={paymentMethod}
-                  onChange={(e) => setPaymentMethod(e.target.value)}
-                >
-                  <option value="CASH">Cash</option>
-                  <option value="CARD">Card / POS</option>
-                  <option value="MOBILE">Mobile Money (M-PESA)</option>
-                  <option value="CHEQUE">Cheque</option>
-                  <option value="INSURANCE">Insurance Cover</option>
-                </select>
+              <div className="module-form-rail-banner">
+                <small>INVOICE</small>
+                <div className="module-form-rail-bname">{invoiceNumber(paymentModal)}</div>
+                <div className="module-form-rail-bmeta">Outstanding: {formatKes(paymentModal.outstanding || paymentModal.balance || 0)}</div>
+                <span className="module-form-rail-chip bad">UNPAID</span>
               </div>
-
-              <div>
-                <label className="form-label">Reference / Transaction ID</label>
-                <input
-                  type="text"
-                  className="w-full px-4 py-3 bg-background border border-border rounded-xl text-sm mt-1"
-                  placeholder="Optional..."
-                  value={paymentRef}
-                  onChange={(e) => setPaymentRef(e.target.value)}
-                />
+            </div>
+            <div className="module-form-main">
+              <div className="module-form-head">
+                <div>
+                  <div className="module-form-kicker">Billing & Payments</div>
+                  <h3 className="module-form-title">Process Payment</h3>
+                  <p className="module-form-desc">Recording payment for Invoice {invoiceNumber(paymentModal)}</p>
+                </div>
+                <button type="button" className="module-form-x-btn" onClick={() => setPaymentModal(null)}>×</button>
               </div>
-
-              <div className="flex justify-end gap-3 pt-4 border-t">
-                <button
-                  type="button"
-                  onClick={() => setPaymentModal(null)}
-                  className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg font-medium"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  disabled={processingPayment}
-                  className="px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg font-medium disabled:opacity-50"
-                >
-                  {processingPayment ? "Processing..." : "Confirm Payment"}
-                </button>
+              <div className="module-form-content">
+                <div className="module-form-body-scroll">
+                  <div className="module-form-grid">
+                    <div className="module-form-field is-wide">
+                      <label className="form-label">Outstanding Balance</label>
+                      <div style={{ fontSize: 20, fontWeight: 700, color: '#dc2626', padding: '6px 0' }}>
+                        {formatKes(paymentModal.outstanding || paymentModal.balance || 0)}
+                      </div>
+                    </div>
+                    <div className="module-form-field is-wide">
+                      <label className="form-label">Payment Amount <span className="module-form-required">*</span></label>
+                      <input
+                        type="number"
+                        required
+                        min="1"
+                        max={paymentModal.outstanding || paymentModal.balance || undefined}
+                        className="module-form-input"
+                        value={paymentAmount}
+                        onChange={(e) => setPaymentAmount(e.target.value)}
+                      />
+                    </div>
+                    <div className="module-form-field is-wide">
+                      <label className="form-label">Payment Method <span className="module-form-required">*</span></label>
+                      <select required className="module-form-input" value={paymentMethod} onChange={(e) => setPaymentMethod(e.target.value)}>
+                        <option value="CASH">Cash</option>
+                        <option value="CARD">Card / POS</option>
+                        <option value="MOBILE">Mobile Money (M-PESA)</option>
+                        <option value="CHEQUE">Cheque</option>
+                        <option value="INSURANCE">Insurance Cover</option>
+                      </select>
+                    </div>
+                    <div className="module-form-field is-wide">
+                      <label className="form-label">Reference / Transaction ID</label>
+                      <input type="text" className="module-form-input" placeholder="Optional..." value={paymentRef} onChange={(e) => setPaymentRef(e.target.value)} />
+                    </div>
+                  </div>
+                </div>
+                <div className="module-form-foot">
+                  <button type="button" onClick={() => setPaymentModal(null)} className="module-form-btn-cancel">Cancel</button>
+                  <button type="submit" disabled={processingPayment} className="module-form-btn-submit">
+                    {processingPayment ? "Processing..." : "Confirm Payment"}
+                  </button>
+                </div>
               </div>
             </div>
           </form>

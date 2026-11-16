@@ -138,26 +138,30 @@ export default function FinanceView() {
       />
 
       {addModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
-          <form onSubmit={handleAddAccount} className="bg-card p-6 rounded-2xl border border-border shadow-xl w-full max-w-sm">
-            <h2 className="text-xl font-bold mb-2 text-sky-700 flex items-center gap-2">
-               <ModuleIcon name="account_balance" /> New Ledger Account
-            </h2>
-            <p className="text-sm text-muted-foreground mb-4">
-              Add a new account to the Chart of Accounts.
-            </p>
-
-            <div className="space-y-4">
-              <div className="grid grid-cols-2 gap-4">
+        <div className="module-form-overlay" onClick={() => setAddModal(false)}>
+          <form onSubmit={handleAddAccount} className="module-form-panel modal-panel" onClick={(e) => e.stopPropagation()}>
+            <div className="module-form-header">
+              <div className="module-form-heading">
+                <div className="module-form-icon"><ModuleIcon name="account_balance" /></div>
                 <div>
+                  <div className="module-form-kicker">Finance & Accounting</div>
+                  <h2 className="module-form-title">New Ledger Account</h2>
+                  <p className="module-form-desc">Add a new account to the Chart of Accounts.</p>
+                </div>
+              </div>
+              <button type="button" className="modal-close-btn" onClick={() => setAddModal(false)}>x</button>
+            </div>
+            <div className="module-form-body">
+              <div className="module-form-grid">
+                <div className="module-form-field">
                   <label className="form-label">Account Code</label>
-                  <input required type="text" className="w-full px-4 py-3 bg-background border border-border rounded-xl text-sm mt-1 uppercase" 
+                  <input required type="text" className="module-form-input uppercase"
                     value={accountForm.accountCode} onChange={(e) => setAccountForm({...accountForm, accountCode: e.target.value.toUpperCase()})} 
                     placeholder="e.g. 4000" />
                 </div>
-                <div>
+                <div className="module-form-field">
                   <label className="form-label">Account Type</label>
-                  <select required className="w-full px-4 py-3 bg-background border border-border rounded-xl text-sm mt-1"
+                  <select required className="module-form-input"
                     value={accountForm.accountType} onChange={(e) => setAccountForm({...accountForm, accountType: e.target.value})}>
                     <option value="REVENUE">Revenue</option>
                     <option value="EXPENSE">Expense</option>
@@ -166,37 +170,22 @@ export default function FinanceView() {
                     <option value="EQUITY">Equity</option>
                   </select>
                 </div>
+                <div className="module-form-field is-wide">
+                  <label className="form-label">Account Name</label>
+                  <input required type="text" className="module-form-input" 
+                    value={accountForm.accountName} onChange={(e) => setAccountForm({...accountForm, accountName: e.target.value})} 
+                    placeholder="e.g. Outpatient Consultation Fees" />
+                </div>
+                <div className="module-form-field is-wide">
+                  <label className="form-label">Cost Center (Optional)</label>
+                  <input type="text" className="module-form-input" 
+                    value={accountForm.costCenter} onChange={(e) => setAccountForm({...accountForm, costCenter: e.target.value})} 
+                    placeholder="e.g. OPD" />
+                </div>
               </div>
-
-              <div>
-                <label className="form-label">Account Name</label>
-                <input required type="text" className="w-full px-4 py-3 bg-background border border-border rounded-xl text-sm mt-1" 
-                  value={accountForm.accountName} onChange={(e) => setAccountForm({...accountForm, accountName: e.target.value})} 
-                  placeholder="e.g. Outpatient Consultation Fees" />
-              </div>
-
-              <div>
-                <label className="form-label">Cost Center (Optional)</label>
-                <input type="text" className="w-full px-4 py-3 bg-background border border-border rounded-xl text-sm mt-1" 
-                  value={accountForm.costCenter} onChange={(e) => setAccountForm({...accountForm, costCenter: e.target.value})} 
-                  placeholder="e.g. OPD" />
-              </div>
-
-              <div className="flex justify-end gap-3 pt-4 border-t mt-4">
-                <button
-                  type="button"
-                  onClick={() => setAddModal(false)}
-                  className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg font-medium"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  disabled={adding}
-                  className="px-4 py-2 bg-sky-600 hover:bg-sky-700 text-white rounded-lg font-medium disabled:opacity-50"
-                >
-                  {adding ? "Saving..." : "Create Account"}
-                </button>
+              <div className="module-form-footer">
+                <button type="button" className="form-btn form-btn-cancel" onClick={() => setAddModal(false)}>Cancel</button>
+                <button type="submit" disabled={adding} className="form-btn form-btn-primary module-form-submit">{adding ? "Saving..." : "Create Account"}</button>
               </div>
             </div>
           </form>

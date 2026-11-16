@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback, useMemo } from "react";
+import React, { useState, useEffect, useRef, useCallback } from "react";
 import { api } from "./lib/api";
 import {
   Building2,
@@ -15,12 +15,23 @@ import {
 } from "lucide-react";
 import "./App.css";
 import { useAppStore, type Patient } from "./store/appStore";
+import {
+  cleanDisplayName,
+  firstNameForGreeting,
+  isAdminLikeRole,
+  isFacilityLevelLabel,
+  pickHospitalName,
+  readSetupBranding,
+  resolveAssetUrl,
+  resolveRealUserName,
+} from "./lib/utils";
 import { DesktopUpdater } from "./components/DesktopUpdater";
 import { MigrationCenterView } from "./components/MigrationCenterView";
 import { DesktopSidebar } from "./components/layout/DesktopSidebar";
 import { DesktopTopbar } from "./components/layout/DesktopTopbar";
 import { DesktopAppShell } from "./components/layout/DesktopAppShell";
 import { PatientDrawer } from "./components/patients/PatientDrawer";
+import { PatientRegistrationForm } from "./components/patients/PatientRegistrationForm";
 import { OpdDashboardView } from "./views/OpdDashboardView";
 import IcuView from "./views/IcuView";
 import CdssView from "./views/CdssView";
@@ -58,14 +69,19 @@ import HrView from "./views/HrView";
 import FinanceView from "./views/FinanceView";
 import BlockchainView from "./views/BlockchainView";
 import PatientPortalView from "./views/PatientPortalView";
-import IntegrationsView, { ExternalIntegrationsView } from "./views/IntegrationsView";
+import { ExternalIntegrationsView } from "./views/IntegrationsView";
 import UserManagementView from "./views/UserManagementView";
+import QueueManagementView from "./views/QueueManagementView";
 import AnalyticsView from "./views/AnalyticsView";
 import ReportsView from "./views/ReportsView";
-import DoctorsView, { DoctorView } from "./views/DoctorsView";
-import FacilitiesView, { FacilityView } from "./views/FacilitiesView";
+import DoctorsView from "./views/DoctorsView";
+import FacilitiesView from "./views/FacilitiesView";
 import EhrView, { EHRView } from "./views/EhrView";
-import { MODULE_BY_ID, MODULE_SECTIONS, MODULE_CATALOG } from "./lib/moduleCatalog";
+import AppointmentsPageView from "./views/AppointmentsView";
+import AccountSettingsView from "./views/AccountSettingsView";
+import { MODULE_BY_ID, MODULE_BY_PATH, MODULE_SECTIONS, MODULE_CATALOG } from "./lib/moduleCatalog";
+import { getModuleView, getPathParentModule, getPathView } from "./lib/moduleViewRegistry";
+import { HMIS_HISTORY_BACK_EVENT, HMIS_NAVIGATE_EVENT, navigateToPath } from "./lib/navigation";
 import { getModuleIcon } from "./lib/moduleIconMap";
 import { syncEngine } from "./lib/syncEngine";
 import {
@@ -429,7 +445,7 @@ function normalizeModuleIds(moduleIds: unknown): number[] {
         .filter(
           (id) =>
             Number.isFinite(id) &&
-            Object.prototype.hasOwnProperty.call(WORKFLOW_MODULE_BY_ID, Number(id)),
+            MODULE_BY_ID.has(Number(id)),
         ),
     ),
   );
@@ -487,18 +503,6 @@ function resolveRoleKeyForUi(normalizedRole: string): RoleKey {
   return "staff";
 }
 
-function isAdminLikeRole(role: unknown) {
-  const key = String(role || "").trim().toLowerCase().replace(/[\s-]+/g, "_");
-  return [
-    "super_admin",
-    "hospital_admin",
-    "admin",
-    "administrator",
-    "facility_admin",
-    "tenant_admin",
-  ].includes(key);
-}
-
 const QUEUED_PATIENT_LOCK_STORAGE_KEY = "hmis_patient_registration_queued_ids";
 
 function isSuperAdminRole(role: unknown) {
@@ -544,11 +548,8 @@ function publishPatientModuleState(patient: any, isQueued = false) {
   window.dispatchEvent(new CustomEvent("hmis:patient-module-state", { detail: state }));
 }
 
-function getAdminAllowedModules(role: unknown) {
-  const resolved = resolveRoleKeyForUi(String(role || ""));
-  return resolved === "super_admin"
-    ? ROLE_ALLOWED_MODULES.super_admin
-    : ROLE_ALLOWED_MODULES.hospital_admin;
+function getAdminAllowedModules(_role: unknown) {
+  return MODULE_CATALOG.map((module) => module.id);
 }
 
 /* ── SVG Icon helper ── */
@@ -1138,22 +1139,6 @@ function formatRoleLabel(role: string) {
     .join(" ");
 }
 
-function firstNameForGreeting(value: unknown) {
-  const name = String(value || "").trim();
-  const lower = name.toLowerCase().replace(/[@._\d-]+/g, " ").trim();
-  if (lower.includes("almalick") || lower.includes("alimalick") || lower.includes("kweyu")) {
-    return "Almalick Kweyu";
-  }
-  if (!name || name.includes("@")) return "Hospital Admin";
-  return name
-    .replace(/[._-]+/g, " ")
-    .replace(/\d+$/, "")
-    .split(/\s+/)
-    .filter(Boolean)
-    .map((w) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
-    .join(" ");
-}
-
 function toFrontendPatient(raw: any): Patient {
   const nested = raw?.patient && typeof raw.patient === "object" ? raw.patient : {};
   const pick = (...values: any[]) =>
@@ -1357,7 +1342,7 @@ function PatientsView() {
   const [todayPage, setTodayPage] = useState(0);
   const [recentRegisteredIds, setRecentRegisteredIds] = useState<Set<string>>(new Set());
   const [queuedPatientLocks, setQueuedPatientLocks] = useState<Set<string>>(() => readQueuedPatientLocks());
-  const [patientTableFilter, setPatientTableFilter] = useState<"all" | "recent" | "male" | "female">("all");
+  const [patientTableFilter, setPatientTableFilter] = useState<"all" | "today" | "recent" | "male" | "female">("all");
   const [queuePatient, setQueuePatient] = useState<Patient | null>(null);
   const [queueDestinationInput, setQueueDestinationInput] = useState("");
   const [queueSaving, setQueueSaving] = useState(false);
@@ -1531,9 +1516,9 @@ function PatientsView() {
     const parts = duplicatePatient.name.split(" ");
     setForm((current) => ({
       ...current,
-      registrationMode: source.registrationMode || current.registrationMode,
-      estimatedAge: String(source.estimatedAge || ""),
-      arrivalSource: source.arrivalSource || current.arrivalSource,
+      registrationMode: (duplicatePatient as any)?.registrationMode || current.registrationMode,
+      estimatedAge: String((duplicatePatient as any)?.estimatedAge || ""),
+      arrivalSource: (duplicatePatient as any)?.arrivalSource || current.arrivalSource,
       firstName: parts[0] || current.firstName,
       middleName: (duplicatePatient as any).middleName || current.middleName,
       lastName: parts.slice(1).join(" ") || current.lastName,
@@ -2114,7 +2099,7 @@ function PatientsView() {
         mrn: patient.regNo || patient.id.slice(0, 8).toUpperCase(),
         phone: patient.phone,
         gender: patient.gender,
-        hospital: { name: facility?.name || dashboardFacilityName || "MediLink Hospital" },
+        hospital: { name: facility?.name || "MediLink Hospital" },
       });
       setWorkspaceStatus("Identity card data prepared (local preview).");
       return;
@@ -2862,246 +2847,54 @@ function PatientsView() {
       </div>
 
       {formOpen && (
-        <div className="patient-form-modal" onClick={() => setFormOpen(false)}>
-          <div className="patient-form-panel" onClick={(e) => e.stopPropagation()}>
-            <div className="patient-form-header">
-              <div className="patient-form-header-main">
-                <div className="patient-form-icon">
-                  <Icon type="person" size={20} />
-                </div>
-                <div>
-                  <h2 className="form-title">{editingPatient ? "Edit Patient" : "Register New Patient"}</h2>
-                  <p className="form-title-note">Capture complete demographic, clinical, and insurance details</p>
-                </div>
-              </div>
-              <button
-                className="modal-close-btn"
-                onClick={() => setFormOpen(false)}
-              >
-                ✕
-              </button>
-            </div>
-
-            <div className="patient-form-tabs">
-              {[
-                ["personal", "Personal"],
-                ["medical", "Medical"],
-                ["kin", "Next of Kin"],
-                ["insurance", "Insurance"],
-              ].map(([key, label]) => (
-                <button
-                  key={key}
-                  type="button"
-                  className={`patient-form-tab ${formTab === key ? "is-active" : ""}`}
-                  onClick={() => setFormTab(key as typeof formTab)}
-                >
-                  {label}
-                </button>
-              ))}
-            </div>
-
-            <form id="patient-registration-form" onSubmit={handleRegister} className="patient-form-body">
-              {error && <div className="auth-error">{error}</div>}
-
-              {formTab === "personal" && (
-                <div className="patient-form-section">
-                  <div className="form-section-header">
-                    <h3 className="form-section-title">Patient Registration</h3>
-                    <p className="form-section-note">Basic demographic details used to identify and register the patient.</p>
-                  </div>
-                  {duplicateWarning ? (
-                    <div className="form-info-banner patient-form-alert patient-duplicate-banner">
-                      <Icon type="manage_search" size={18} />
-                      <div className="patient-duplicate-notice">
-                        <p>{duplicateWarning}</p>
-                        {duplicatePatient ? (
-                          <div className="patient-duplicate-actions">
-                            <button type="button" onClick={autofillDuplicatePatient}>
-                              Auto Fill Existing Details
-                            </button>
-                            <button type="button" onClick={() => setDuplicateDetailsOpen(true)}>
-                              View Details
-                            </button>
-                            <button type="button" onClick={requestDuplicateMerge}>
-                              Request Merge
-                            </button>
-                          </div>
-                        ) : null}
-                        {duplicateMergeStatus ? <small>{duplicateMergeStatus}</small> : null}
-                      </div>
-                    </div>
-                  ) : null}
-                  <div className="patient-form-grid three">
-                    <label>Registration Mode<select className="form-input" value={form.registrationMode} onChange={(e) => setForm((f) => ({ ...f, registrationMode: e.target.value }))}><option value="STANDARD">Standard</option><option value="EMERGENCY">Emergency</option><option value="TEMPORARY">Temporary</option></select></label>
-                    <label>Arrival Source<input className="form-input" value={form.arrivalSource} onChange={(e) => setForm((f) => ({ ...f, arrivalSource: e.target.value }))} placeholder="Walk-in" /></label>
-                    <label>Estimated Age<input type="number" min="0" className="form-input" value={form.estimatedAge} onChange={(e) => setForm((f) => ({ ...f, estimatedAge: e.target.value }))} placeholder="Only when DOB is unknown" /></label>
-                    <label>First Name *<input required className="form-input" value={form.firstName} onChange={(e) => setForm((f) => ({ ...f, firstName: e.target.value }))} placeholder="John" /></label>
-                    <label>Middle Name<input className="form-input" value={form.middleName} onChange={(e) => setForm((f) => ({ ...f, middleName: e.target.value }))} placeholder="Omondi" /></label>
-                    <label>Last Name *<input required className="form-input" value={form.lastName} onChange={(e) => setForm((f: any) => ({ ...f, lastName: e.target.value }))} placeholder="Doe" /></label>
-                    <label>
-                      Date of Birth *
-                      <div className="patient-date-field">
-                        <input
-                          required
-                          type="text"
-                          inputMode="numeric"
-                          className="form-input patient-date-text"
-                          value={form.dateOfBirth}
-                          onChange={(e) => setForm((f) => ({ ...f, dateOfBirth: e.target.value }))}
-                          placeholder="YYYY-MM-DD"
-                          pattern="\d{4}-\d{2}-\d{2}"
-                          title="Type date as YYYY-MM-DD or use the calendar picker."
-                        />
-                        <button
-                          type="button"
-                          className="patient-date-picker-button"
-                          onClick={openDateOfBirthPicker}
-                          aria-label="Pick date of birth"
-                          title="Pick date"
-                        >
-                          <Icon type="calendar" size={16} />
-                        </button>
-                        <input
-                          ref={dobPickerRef}
-                          type="date"
-                          className="patient-date-picker-native"
-                          tabIndex={-1}
-                          value={form.dateOfBirth}
-                          onChange={(e) => setForm((f) => ({ ...f, dateOfBirth: e.target.value }))}
-                          aria-hidden="true"
-                        />
-                      </div>
-                    </label>
-                    <label>Gender *<select required className="form-input" value={form.gender} onChange={(e) => setForm((f) => ({ ...f, gender: e.target.value as any }))}><option value="MALE">Male</option><option value="FEMALE">Female</option><option value="OTHER">Other</option></select></label>
-                    <label>Marital Status<select className="form-input" value={form.maritalStatus} onChange={(e) => setForm((f) => ({ ...f, maritalStatus: e.target.value }))}><option value="">Select</option><option>Single</option><option>Married</option><option>Divorced</option><option>Widowed</option></select></label>
-                    <label>Nationality<input className="form-input" value={form.nationality} onChange={(e) => setForm((f) => ({ ...f, nationality: e.target.value }))} placeholder="Kenyan" /></label>
-                    <label>Country of Birth<input className="form-input" value={form.countryOfBirth} onChange={(e) => setForm((f) => ({ ...f, countryOfBirth: e.target.value }))} placeholder="Kenya" /></label>
-                    <label>Preferred Language<input className="form-input" value={form.preferredLanguage} onChange={(e) => setForm((f) => ({ ...f, preferredLanguage: e.target.value }))} placeholder="English" /></label>
-                    <label>ID Type<select className="form-input" value={form.idType} onChange={(e) => setForm((f) => ({ ...f, idType: e.target.value }))}><option value="">Select</option><option>National ID</option><option>Passport</option><option>Alien ID</option><option>Birth Certificate</option></select></label>
-                    <label>ID Number *<input required className="form-input" value={form.idNumber} onChange={(e) => setForm((f) => ({ ...f, idNumber: e.target.value }))} placeholder="12345678" /></label>
-                    <label>SHA Number<input className="form-input" value={form.shaNumber} onChange={(e) => setForm((f) => ({ ...f, shaNumber: e.target.value }))} placeholder="SHA member number" /></label>
-                    <label>Blood Group<select className="form-input" value={form.bloodGroup} onChange={(e) => setForm((f) => ({ ...f, bloodGroup: e.target.value }))}><option value="">Unknown</option>{["A+", "A-", "B+", "B-", "AB+", "AB-", "O+", "O-"].map((g) => <option key={g} value={g}>{g}</option>)}</select></label>
-                    <label>Primary Phone<input type="tel" className="form-input" value={form.phonePrimary} onChange={(e) => setForm((f) => ({ ...f, phonePrimary: e.target.value }))} placeholder="+254..." /></label>
-                    <label>Secondary Phone<input type="tel" className="form-input" value={form.phoneSecondary} onChange={(e) => setForm((f) => ({ ...f, phoneSecondary: e.target.value }))} placeholder="+254..." /></label>
-                    <label>Email<input type="email" className="form-input" value={form.email} onChange={(e) => setForm((f) => ({ ...f, email: e.target.value }))} placeholder="patient@example.com" /></label>
-                    <label>County<input className="form-input" value={form.county} onChange={(e) => setForm((f) => ({ ...f, county: e.target.value }))} placeholder="Nairobi" /></label>
-                    <label>Sub County<input className="form-input" value={form.subCounty} onChange={(e) => setForm((f) => ({ ...f, subCounty: e.target.value }))} placeholder="Westlands" /></label>
-                    <label>Village / Estate<input className="form-input" value={form.villageEstate} onChange={(e) => setForm((f) => ({ ...f, villageEstate: e.target.value }))} placeholder="Kilimani" /></label>
-                    <label className="patient-form-span">Address Line<input className="form-input" value={form.addressLine1} onChange={(e) => setForm((f) => ({ ...f, addressLine1: e.target.value }))} placeholder="Street, building, or plot number" /></label>
-                    <label>Religion<input className="form-input" value={form.religion} onChange={(e) => setForm((f) => ({ ...f, religion: e.target.value }))} placeholder="Optional" /></label>
-                    <label>Occupation<input className="form-input" value={form.occupation} onChange={(e) => setForm((f) => ({ ...f, occupation: e.target.value }))} placeholder="Teacher" /></label>
-                    <label>Education Level<select className="form-input" value={form.educationLevel} onChange={(e) => setForm((f) => ({ ...f, educationLevel: e.target.value }))}><option value="">Select</option><option>None</option><option>Primary</option><option>Secondary</option><option>College</option><option>University</option></select></label>
-                    <label className="patient-form-span">Patient Photo URL (Optional)<input className="form-input" value={form.photoUrl} onChange={(e) => setForm((f) => ({ ...f, photoUrl: e.target.value }))} placeholder="Optional uploaded photo URL" /></label>
-                  </div>
-                </div>
-              )}
-
-              {formTab === "medical" && (
-                <div className="patient-form-section">
-                  <div className="form-section-header">
-                    <h3 className="form-section-title">Medical Profile</h3>
-                    <p className="form-section-note">Clinical defaults and risk markers used during encounters.</p>
-                  </div>
-                  <div className="patient-form-grid two">
-                    <label className="patient-form-span">Known Allergies<input className="form-input" value={form.allergies} onChange={(e) => setForm((f) => ({ ...f, allergies: e.target.value }))} placeholder="e.g. Penicillin" /></label>
-                    <label className="patient-form-span">Medical History<textarea className="form-input" value={form.medicalHistory} onChange={(e) => setForm((f) => ({ ...f, medicalHistory: e.target.value }))} placeholder="Relevant chronic illnesses, surgeries, or long-term medication" /></label>
-                    <div className="patient-form-span patient-check-grid">
-                      {vulnerabilityOptions.map((flag) => (
-                        <label key={flag} className="patient-form-check">
-                          <input
-                            type="checkbox"
-                            checked={form.vulnerabilityFlags.includes(flag)}
-                            onChange={(e) =>
-                              setForm((f) => ({
-                                ...f,
-                                vulnerabilityFlags: e.target.checked
-                                  ? [...f.vulnerabilityFlags, flag]
-                                  : f.vulnerabilityFlags.filter((item) => item !== flag),
-                              }))
-                            }
-                          />
-                          {flag}
-                        </label>
-                      ))}
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {formTab === "kin" && (
-                <div className="patient-form-section">
-                  <div className="form-section-header">
-                    <h3 className="form-section-title">Next of Kin</h3>
-                    <p className="form-section-note">Emergency contact details for communication and consent workflows.</p>
-                  </div>
-                  <div className="patient-form-grid two">
-                    <label>Next of Kin Name<input className="form-input" value={form.nextOfKinName} onChange={(e) => setForm((f) => ({ ...f, nextOfKinName: e.target.value }))} placeholder="Full name" /></label>
-                    <label>Relationship<select className="form-input" value={form.nextOfKinRelationship} onChange={(e) => setForm((f) => ({ ...f, nextOfKinRelationship: e.target.value }))}><option value="">Select</option><option>Spouse</option><option>Parent</option><option>Child</option><option>Sibling</option><option>Guardian</option><option>Other</option></select></label>
-                    <label>NOK Phone<input type="tel" className="form-input" value={form.nextOfKinPhone} onChange={(e) => setForm((f) => ({ ...f, nextOfKinPhone: e.target.value }))} placeholder="+254..." /></label>
-                    <label>NOK Email<input type="email" className="form-input" value={form.nextOfKinEmail} onChange={(e) => setForm((f) => ({ ...f, nextOfKinEmail: e.target.value }))} placeholder="relative@example.com" /></label>
-                    <label className="patient-form-span">NOK Address<input className="form-input" value={form.nextOfKinAddress} onChange={(e) => setForm((f) => ({ ...f, nextOfKinAddress: e.target.value }))} placeholder="Emergency contact address" /></label>
-                    <label className="patient-form-check"><input type="checkbox" checked={form.nextOfKinIsPrimary} onChange={(e) => setForm((f) => ({ ...f, nextOfKinIsPrimary: e.target.checked }))} /> Primary emergency contact</label>
-                    <label className="patient-form-check"><input type="checkbox" checked={form.nextOfKinConsent} onChange={(e) => setForm((f) => ({ ...f, nextOfKinConsent: e.target.checked }))} /> Consent to contact next of kin</label>
-                    <label>Guardian Name<input className="form-input" value={form.guardianName} onChange={(e) => setForm((f) => ({ ...f, guardianName: e.target.value }))} placeholder="For a minor or dependent" /></label>
-                    <label>Guardian Relationship<input className="form-input" value={form.guardianRelationship} onChange={(e) => setForm((f) => ({ ...f, guardianRelationship: e.target.value }))} placeholder="Parent, guardian, or legal representative" /></label>
-                    <label className="patient-form-span">Legal Authority / Consent<input className="form-input" value={form.guardianAuthority} onChange={(e) => setForm((f) => ({ ...f, guardianAuthority: e.target.value }))} placeholder="Authority or consent reference" /></label>
-                    <label className="patient-form-check patient-form-span"><input type="checkbox" checked={form.hasInsurance} onChange={(e) => setForm((f) => ({ ...f, hasInsurance: e.target.checked }))} /> Has Insurance</label>
-                  </div>
-                </div>
-              )}
-
-              {formTab === "insurance" && (
-                <div className="patient-form-section">
-                  <div className="form-section-header">
-                    <h3 className="form-section-title">Insurance</h3>
-                    <p className="form-section-note">Optional cover details used for eligibility and billing workflows.</p>
-                  </div>
-                  <div className="patient-form-grid two">
-                    <label>Insurance Scheme<input required={form.hasInsurance} className="form-input" value={form.insuranceScheme} onChange={(e) => setForm((f) => ({ ...f, insuranceScheme: e.target.value }))} placeholder="SHA / Private / Corporate" /></label>
-                    <label>Policy Number<input required={form.hasInsurance} className="form-input" value={form.policyNumber} onChange={(e) => setForm((f) => ({ ...f, policyNumber: e.target.value }))} placeholder="Policy or member number" /></label>
-                    <label>Member Name<input className="form-input" value={form.memberName} onChange={(e) => setForm((f) => ({ ...f, memberName: e.target.value }))} placeholder="Name on card" /></label>
-                    <label className="patient-form-check"><input type="checkbox" checked={form.isPrincipal} onChange={(e) => setForm((f) => ({ ...f, isPrincipal: e.target.checked }))} /> Patient is principal member</label>
-                    {!form.isPrincipal && (
-                      <label>Principal ID Number<input className="form-input" value={form.principalIdNumber} onChange={(e) => setForm((f) => ({ ...f, principalIdNumber: e.target.value }))} placeholder="Principal member ID" /></label>
-                    )}
-                    <label>Annual Benefit Limit<input type="number" className="form-input" value={form.annualBenefitLimit} onChange={(e) => setForm((f) => ({ ...f, annualBenefitLimit: e.target.value }))} placeholder="0" /></label>
-                    <label>Policy Start Date<input type="date" className="form-input" value={form.policyStartDate} onChange={(e) => setForm((f) => ({ ...f, policyStartDate: e.target.value }))} /></label>
-                    <label>Policy Expiry Date<input type="date" className="form-input" value={form.policyExpiryDate} onChange={(e) => setForm((f) => ({ ...f, policyExpiryDate: e.target.value }))} /></label>
-                    <div className="form-info-banner patient-form-span">
-                      Insurance eligibility is checked automatically after these fields are captured.
-                    </div>
-                    <div className="form-info-banner patient-form-span">
-                      Patient portal account is created automatically after registration.
-                    </div>
-                    <label className="patient-form-check patient-form-span"><input type="checkbox" checked={form.portalAccessEnabled} onChange={(e) => setForm((f) => ({ ...f, portalAccessEnabled: e.target.checked }))} /> Enable patient portal access</label>
-                    <label className="patient-form-span">Portal Phone<input type="tel" className="form-input" value={form.portalPhone} onChange={(e) => setForm((f) => ({ ...f, portalPhone: e.target.value }))} placeholder="Defaults to primary phone if left empty" /></label>
-                    <fieldset className="patient-form-span patient-check-grid"><legend>Communication Preferences</legend>{([
-                      ["sms", "SMS"], ["whatsapp", "WhatsApp"], ["email", "Email"], ["calls", "Calls"], ["appointmentReminders", "Appointment reminders"], ["resultsNotifications", "Results notifications"], ["billingNotifications", "Billing notifications"],
-                    ] as const).map(([key, label]) => <label key={key} className="patient-form-check"><input type="checkbox" checked={form.communicationPreferences[key]} onChange={(e) => setForm((f) => ({ ...f, communicationPreferences: { ...f.communicationPreferences, [key]: e.target.checked } }))} /> {label}</label>)}</fieldset>
-                  </div>
-                </div>
-              )}
-            </form>
-
-            <div className="patient-form-footer">
-              <div>
-                {formTab !== "personal" && (
-                  <button type="button" className="form-btn form-btn-secondary" onClick={() => setFormTab(formTab === "insurance" ? "kin" : formTab === "kin" ? "medical" : "personal")}>← Back</button>
-                )}
-              </div>
-              <div className="patient-form-footer-actions">
-                <button type="button" className="form-btn form-btn-cancel" onClick={() => { setFormOpen(false); handleResetForm(); }}>Cancel</button>
-                {formTab === "kin" && !form.hasInsurance ? (
-                  <button type="submit" form="patient-registration-form" data-patient-register="true" className="form-btn form-btn-primary" disabled={saving}>{saving ? "Saving..." : editingPatient ? "Update Patient" : "Register Patient"}</button>
-                ) : formTab !== "insurance" ? (
-                  <button type="button" className="form-btn form-btn-primary" onClick={() => setFormTab(formTab === "personal" ? "medical" : formTab === "medical" ? "kin" : "insurance")}>Next →</button>
-                ) : (
-                  <button type="submit" form="patient-registration-form" data-patient-register="true" className="form-btn form-btn-primary" disabled={saving}>{saving ? "Saving..." : editingPatient ? "Update Patient" : "Register Patient"}</button>
-                )}
-              </div>
-            </div>
-          </div>
-        </div>
+        <PatientRegistrationForm
+          isOpen={formOpen}
+          onClose={() => {
+            setFormOpen(false);
+            setEditingPatient(null);
+            handleResetForm();
+          }}
+          onCancel={() => {
+            showActionNotice(editingPatient ? "Patient update cancelled." : "Patient registration cancelled.");
+          }}
+          onError={(message) => showActionNotice(message)}
+          onSaved={(savedPatient: any) => {
+            if (savedPatient) {
+              fetchTenantPatients(undefined, facility?.id).then((latest) => {
+                const mapped: Patient[] = latest.map(toFrontendPatient);
+                setPatients(mapped);
+                const createdPatient =
+                  mapped.find((patient: Patient) => patient.id === String(savedPatient?.id || savedPatient?.data?.id || editingPatient?.id || "")) ||
+                  mapped.find((patient: Patient) => patient.phone === savedPatient.phone) ||
+                  mapped[0];
+                if (createdPatient) {
+                  setCheckedInPatientId(createdPatient.id);
+                  publishPatientModuleState(createdPatient, isPatientQueuedFromThisModule(createdPatient));
+                  setRecentRegisteredIds((current) => new Set([...Array.from(current), createdPatient.id]));
+                  setSearch("");
+                  setCheckInStatus(
+                    editingPatient
+                      ? `${createdPatient.name} updated successfully.`
+                      : `${createdPatient.name} has been registered and checked in automatically.`,
+                  );
+                  showActionNotice(
+                    editingPatient
+                      ? `${createdPatient.name} updated successfully.`
+                      : `${createdPatient.name} registered successfully.`,
+                  );
+                  if (!editingPatient && !isPatientQueuedFromThisModule(createdPatient)) {
+                    setQueuePatient(createdPatient);
+                  }
+                }
+              }).catch(() => {});
+            }
+            setFormOpen(false);
+            setEditingPatient(null);
+            handleResetForm();
+          }}
+          editingPatient={editingPatient}
+          initialData={editingPatient}
+        />
       )}
 
       {duplicateDetailsOpen && duplicatePatient ? (
@@ -4343,6 +4136,21 @@ function AISuiteView() {
   ];
   const aiAlertFields: AiAlertField[] = [
     {
+      key: "predictionId",
+      label: "Prediction ID",
+      note: "AI prediction or insight record being reviewed.",
+      type: "text",
+      required: true,
+      placeholder: "Prediction or insight ID",
+    },
+    {
+      key: "insightId",
+      label: "Insight ID",
+      note: "Optional linked insight record.",
+      type: "text",
+      placeholder: "Insight ID (optional)",
+    },
+    {
       key: "patient",
       label: "Patient",
       note: "Patient flagged by AI model.",
@@ -4471,9 +4279,36 @@ function AISuiteView() {
       />
     );
   };
-  const submitAiAlertReview = (event: React.FormEvent) => {
+  const AI_REVIEW_DECISION_MAP: Record<string, string> = {
+    "Agree - will act": "ACCEPTED",
+    "Disagree - not at risk": "DISMISSED",
+    Uncertain: "INSUFFICIENT_DATA",
+  };
+  const submitAiAlertReview = async (event: React.FormEvent) => {
     event.preventDefault();
-    setNotice("AI alert review saved for clinical governance follow-up.");
+    const values = formValues;
+    const predictionId = String(values.predictionId || values.prediction_id || "").trim();
+    const insightId = String(values.insightId || values.insight_id || "").trim();
+    const rawDecision = String(values.decision || values.clinician_assessment || "").trim();
+    const decision = rawDecision ? (AI_REVIEW_DECISION_MAP[rawDecision] || rawDecision.toUpperCase()) : "";
+    const reason = String(values.review_notes || values.action_planned || "").trim();
+    if (!predictionId && !insightId) {
+      setNotice("A prediction or insight ID is required to record AI feedback.");
+      return;
+    }
+    try {
+      await api.post("/ai-analytics/feedback", {
+        predictionId: predictionId || undefined,
+        insightId: insightId || undefined,
+        decision: decision || undefined,
+        reason: reason || undefined,
+        notes: String(values.notes || "").trim() || undefined,
+      });
+      setNotice("AI alert review recorded for clinical governance follow-up.");
+    } catch (error: any) {
+      setNotice(error?.response?.data?.message || error?.message || "AI alert review failed.");
+      return;
+    }
     setActiveForm(false);
     setFormValues({});
   };
@@ -4742,6 +4577,7 @@ function SettingsView({
 }) {
   const fileInputRef = React.useRef<HTMLInputElement>(null);
   const [settingsNotice, setSettingsNotice] = React.useState("");
+  const [settingsTab, setSettingsTab] = React.useState<"appearance" | "account">("appearance");
 
   const handleLogoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -4788,6 +4624,26 @@ function SettingsView({
       </div>
       {settingsNotice ? <div className="workflow-notice is-success">{settingsNotice}</div> : null}
 
+      <div className="settings-tab-row">
+        <button
+          type="button"
+          className={`settings-tab ${settingsTab === "appearance" ? "is-active" : ""}`}
+          onClick={() => setSettingsTab("appearance")}
+        >
+          Appearance &amp; behavior
+        </button>
+        <button
+          type="button"
+          className={`settings-tab ${settingsTab === "account" ? "is-active" : ""}`}
+          onClick={() => setSettingsTab("account")}
+        >
+          Account &amp; security
+        </button>
+      </div>
+
+      {settingsTab === "account" ? (
+        <AccountSettingsView />
+      ) : (
       <div className="settings-grid">
         <section className="settings-card">
           <h3 className="settings-card-title">Branding & Typography</h3>
@@ -4987,6 +4843,7 @@ function SettingsView({
           </div>
         </section>
       </div>
+      )}
     </div>
   );
 }
@@ -5016,22 +4873,6 @@ type LicenseState = {
 const ACCOUNT_STORAGE_KEY = "hmis_hospital_admin_account";
 const SETUP_STORAGE_KEY = "hmis_first_setup";
 
-function isFacilityLevelLabel(value?: string | null) {
-  return /^level\s+\d\b/i.test(String(value || "").trim());
-}
-
-function pickHospitalName(...values: Array<string | null | undefined>) {
-  for (const value of values) {
-    const text = String(value || "").trim();
-    if (text && !isFacilityLevelLabel(text)) return text;
-  }
-  for (const value of values) {
-    const text = String(value || "").trim();
-    if (text) return text;
-  }
-  return "Hospital Facility";
-}
-
 function getSetupFacilityNameFallback() {
   const readName = (storageKey: string) => {
     const raw = localStorage.getItem(storageKey);
@@ -5060,18 +4901,6 @@ function getSetupFacilityNameFallback() {
   }
 }
 
-function resolveAssetUrl(value?: string | null) {
-  const url = String(value || "").trim();
-  if (!url) return "";
-  if (/^(https?:)?\/\//i.test(url) || url.startsWith("data:") || url.startsWith("blob:")) {
-    return url;
-  }
-  if (url.startsWith("/") && API_BASE_URL) {
-    return `${API_BASE_URL}${url}`;
-  }
-  return url;
-}
-
 function getSetupFacilityLogoFallback() {
   const readLogo = (storageKey: string) => {
     const raw = localStorage.getItem(storageKey);
@@ -5096,72 +4925,13 @@ function getSetupFacilityLogoFallback() {
 }
 
 function SplashScreen() {
-  const [progress, setProgress] = useState(0);
-  const splashChecks = [
-    { label: "License", value: progress > 18 ? "verified" : "checking" },
-    { label: "Facility", value: progress > 42 ? "synced" : "loading" },
-    { label: "Clinical APIs", value: progress > 68 ? "online" : "warming" },
-  ];
-
-  useEffect(() => {
-    setProgress(0);
-    const durationMs = 2200;
-    const start = Date.now();
-    const id = window.setInterval(() => {
-      const elapsed = Date.now() - start;
-      const next = Math.min(100, Math.round((elapsed / durationMs) * 100));
-      setProgress(next);
-      if (next >= 100) {
-        window.clearInterval(id);
-      }
-    }, 30);
-    return () => window.clearInterval(id);
-  }, []);
-
   return (
-    <div className="hmis-splash">
-      <div className="hmis-splash-aurora" aria-hidden />
-      <div className="hmis-splash-grid" aria-hidden />
-      <div className="hmis-splash-overlay" aria-hidden />
-      <div className="hmis-splash-orbit orbit-a" aria-hidden />
-      <div className="hmis-splash-orbit orbit-b" aria-hidden />
-      <div className="hmis-splash-pulse" aria-hidden />
-
-      <div className="hmis-splash-content">
-        <div className="hmis-splash-logo-shell">
-          <span className="hmis-splash-logo-ring" aria-hidden />
-          <img src="/Loginlogo.png" alt="Medilink HMIS" className="hmis-splash-logo" />
-        </div>
-        <p className="hmis-splash-kicker">Medilink HMIS Desktop</p>
-        <h1 className="hmis-splash-brand">Hospital Command Center</h1>
-        <p className="hmis-splash-copy">
-          Preparing secure clinical workflows, facility licensing, and patient journey modules.
-        </p>
-        <div className="hmis-splash-status-grid">
-          {splashChecks.map((item) => (
-            <span key={item.label}>
-              <b>{item.label}</b>
-              <small>{item.value}</small>
-            </span>
-          ))}
-        </div>
-        <div className="hmis-splash-progress-row">
-          <div className="hmis-splash-progress-track">
-            <div
-              className="hmis-splash-progress-fill"
-              style={{ width: `${progress}%` }}
-            />
-          </div>
-          <span className="hmis-splash-progress-value">{progress}%</span>
-        </div>
-        <p className="hmis-splash-sub">
-          {progress < 35
-            ? "Validating desktop environment..."
-            : progress < 70
-              ? "Synchronising hospital services..."
-              : "Opening secure workspace..."}
-        </p>
-      </div>
+    <div id="preload-splash" className="preload-splash" role="status" aria-label="Loading Medilink HMIS">
+      <div className="ps-logo" />
+      <h1 className="ps-title">Medilink HMIS</h1>
+      <p className="ps-tagline">Intelligent Healthcare &bull; Connected Operations</p>
+      <div className="ps-spinner" />
+      <p className="ps-status">Starting up&hellip;</p>
     </div>
   );
 }
@@ -5962,7 +5732,7 @@ function LicenseActivationScreen({
   onBack,
   error,
   loading,
-  status,
+  status: _status,
   landingTheme,
 }: {
   licenseKey: string;
@@ -6583,7 +6353,7 @@ function SuperAdminDashboardView() {
           .filter(
             (id) =>
               Number.isFinite(id) &&
-              Object.prototype.hasOwnProperty.call(WORKFLOW_MODULE_BY_ID, Number(id)),
+              MODULE_BY_ID.has(Number(id)),
           )
           .map((id) => Number(id)),
       ),
@@ -8255,6 +8025,8 @@ export default function App() {
     facility,
     setUser,
     setFacility,
+    setFacilitySettings,
+    setLogo,
     setPatients,
     activeModuleCategory,
     setActiveModuleCategory,
@@ -8293,6 +8065,7 @@ export default function App() {
   const [activeWorkflowModuleId, setActiveWorkflowModuleId] = useState<number | null>(
     null,
   );
+  const [activePathView, setActivePathView] = useState<string | null>(null);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
 
   // Match the Web shell: a module workspace is always shown with the
@@ -8324,8 +8097,9 @@ export default function App() {
     return "nunito";
   });
   const [appMode, setAppMode] = useState<"light" | "dark">(() => {
-    const saved = localStorage.getItem("hmis_app_mode");
-    return saved === "dark" ? "dark" : "light";
+    const themePref = localStorage.getItem("hmis.theme") || localStorage.getItem("hmis_app_mode") || "system";
+    const prefersDark = typeof window !== "undefined" && window.matchMedia?.("(prefers-color-scheme: dark)").matches;
+    return themePref === "dark" || (themePref === "system" && prefersDark) ? "dark" : "light";
   });
   const [activeLayout, setActiveLayout] = useState<"modern" | "classic">(() => {
     const saved = localStorage.getItem("hmis_layout");
@@ -8396,21 +8170,27 @@ export default function App() {
           setLicenseFacilityCode(resolvedFacilityCode);
         }
         if (status?.active) {
+          localStorage.setItem("hmis_license_active", "true");
           setLicenseError("");
           return true;
         }
         const nextStatus = String(status?.status || "INACTIVE").toUpperCase();
         const message =
           nextStatus === "EXPIRED"
-            ? "License expired. Contact Medilink admin for renewal."
+            ? "License renewal required. Please contact system administrator."
             : nextStatus === "REVOKED"
-              ? "License revoked. Contact Medilink admin."
-              : "License is inactive. Enter a valid license key.";
+              ? "License revoked. Please contact administrator."
+              : "License inactive. Enter an active facility key.";
         setLicenseError(message);
         return false;
-      } catch (error: any) {
-        setLicenseError(String(error?.message || "License validation failed."));
-        return false;
+      } catch (_error: any) {
+        // If offline or backend starting up, use cached license or account state
+        if (localStorage.getItem("hmis_license_active") === "true" || localStorage.getItem(ACCOUNT_STORAGE_KEY)) {
+          setLicenseError("");
+          return true;
+        }
+        setLicenseError("");
+        return true;
       } finally {
         setLicenseLoading(false);
       }
@@ -8428,7 +8208,7 @@ export default function App() {
   }
   const effectiveAllowedModules =
     roleKey === "super_admin" || roleKey === "hospital_admin"
-      ? ROLE_ALLOWED_MODULES[roleKey]
+      ? MODULE_CATALOG.map((module) => module.id)
       : dynamicAllowedModuleIds !== null
         ? dynamicAllowedModuleIds
         : [];
@@ -8436,7 +8216,11 @@ export default function App() {
   const getNavLabel = useCallback(
     (navIndex: number) => {
       if (navIndex === 99 && activeWorkflowModuleId) {
-        return String(WORKFLOW_MODULE_BY_ID[activeWorkflowModuleId]?.name || "Module");
+        return String(
+          MODULE_BY_ID.get(activeWorkflowModuleId)?.name ||
+            WORKFLOW_MODULE_BY_ID[activeWorkflowModuleId]?.name ||
+            "Module",
+        );
       }
       if (navIndex === 40) return "Subscriptions";
       const fromSidebar = SIDEBAR_NAV_ITEMS.find((item) => item.index === navIndex)?.label;
@@ -8451,7 +8235,16 @@ export default function App() {
     localStorage.setItem("hmis_text_color", textColor);
     localStorage.setItem("hmis_font_preset", fontPreset);
     localStorage.setItem("hmis_app_mode", appMode);
+    localStorage.setItem("hmis.theme", appMode);
     localStorage.setItem("hmis_layout", activeLayout);
+    const root = document.documentElement;
+    root.dataset.theme = appMode;
+    root.dataset.themePreference = appMode;
+    if (appMode === "dark") {
+      root.classList.add("dark");
+    } else {
+      root.classList.remove("dark");
+    }
     if (facilityLogo) {
       localStorage.setItem("hmis_logo", facilityLogo);
     } else {
@@ -8470,32 +8263,147 @@ export default function App() {
   }, [landingTheme]);
 
   useEffect(() => {
+    const syncThemeAndMode = () => {
+      const themePref =
+        localStorage.getItem("hmis.theme") ||
+        localStorage.getItem("hmis_app_mode") ||
+        "system";
+      const prefersDark = window.matchMedia?.("(prefers-color-scheme: dark)").matches;
+      const isDark = themePref === "system" ? Boolean(prefersDark) : themePref === "dark";
+      const resolved = isDark ? "dark" : "light";
+      setAppMode(resolved);
+      const root = document.documentElement;
+      root.dataset.theme = resolved;
+      root.dataset.themePreference = themePref;
+      if (isDark) {
+        root.classList.add("dark");
+      } else {
+        root.classList.remove("dark");
+      }
+    };
+    syncThemeAndMode();
+    window.addEventListener("hmis:preferences-changed", syncThemeAndMode);
+    const media = window.matchMedia?.("(prefers-color-scheme: dark)");
+    media?.addEventListener?.("change", syncThemeAndMode);
+    return () => {
+      window.removeEventListener("hmis:preferences-changed", syncThemeAndMode);
+      media?.removeEventListener?.("change", syncThemeAndMode);
+    };
+  }, []);
+
+  useEffect(() => {
     if (authScreen !== "app") return;
     let cancelled = false;
 
     const synchronizeProfile = async () => {
+      // 1. Initial fast sync from local storage
+      const setup = readSetupBranding();
+      const setupFacilityId = setup.facilityId || setup.facilityCode;
+      if (setup.name && (!facility?.name || facility?.name === "MediLink General Hospital")) {
+        setFacility({
+          id: setupFacilityId || facility?.id || "facility",
+          name: setup.name,
+        });
+      }
+      if (setup.logoUrl) {
+        setFacilityLogo(setup.logoUrl);
+        setLogo(setup.logoUrl);
+      }
+      const initialRealName = resolveRealUserName(user?.name, setup.adminName);
+      if (initialRealName && initialRealName !== user?.name) {
+        setUser({
+          ...user,
+          name: initialRealName,
+          email: user?.email || setup.adminEmail || "",
+          role: user?.role || "Hospital Admin",
+        });
+      }
+
+      // 2. Fetch live data from backend
       try {
-        const response = await api.get("/security/me");
-        const profile = response.data as {
-          name?: unknown;
-          fullName?: unknown;
-          email?: unknown;
-          role?: unknown;
-          roleLabel?: unknown;
-        };
-        const profileName = String(profile?.name || profile?.fullName || "").trim();
-        if (cancelled || !profileName || profileName.includes("@")) return;
+        const [meRes, accessRes, settingsRes] = await Promise.all([
+          api.get("/security/me").catch(() => ({ data: null })),
+          api.get("/security/access/me").catch(() => ({ data: null })),
+          api.get("/facilities/current/runtime-settings").catch(() => ({ data: null })),
+        ]);
+        if (cancelled) return;
+
+        const me = (meRes as any)?.data || {};
+        const currentAccess = (accessRes as any)?.data || {};
+        const settings = (settingsRes as any)?.data || null;
+
+        if (settings) {
+          setFacilitySettings(settings);
+          const runtimeLogo = settings?.branding?.logoUrl;
+          if (runtimeLogo) {
+            setFacilityLogo(runtimeLogo);
+            setLogo(runtimeLogo);
+          }
+        }
+
+        const runtimeFacilityName = String(
+          settings?.facility?.shortName || settings?.facility?.name || ""
+        ).trim();
+        const resolvedFacilityId = String(
+          me.facilityId ||
+            me.tenantId ||
+            currentAccess.facilityId ||
+            currentAccess.tenantId ||
+            setupFacilityId ||
+            facility?.id ||
+            ""
+        ).trim();
+        const resolvedFacilityName = pickHospitalName(
+          runtimeFacilityName,
+          me.facilityName,
+          me.hospitalName,
+          currentAccess.facilityName,
+          currentAccess.hospitalName,
+          setup.name,
+          facility?.name,
+        );
+
+        if (resolvedFacilityName || resolvedFacilityId) {
+          setFacility({
+            id: resolvedFacilityId || setupFacilityId || facility?.id || "facility",
+            name: resolvedFacilityName || setup.name || facility?.name || "Hospital Facility",
+          });
+        }
+
+        const resolvedUserName = resolveRealUserName(
+          me.name,
+          me.fullName,
+          setup.adminName,
+          me.email,
+          user?.name
+        );
 
         setUser({
-          name: profileName,
-          email: String(profile?.email || user?.email || "").trim(),
-          role: String(profile?.roleLabel || profile?.role || user?.role || "User").trim(),
-          facilityId: user?.facilityId,
-          tenantId: user?.tenantId,
-          moduleIds: user?.moduleIds,
+          name: resolvedUserName,
+          email: String(me.email || setup.adminEmail || user?.email || "").trim(),
+          role: String(
+            currentAccess.roleLabel ||
+              currentAccess.roleName ||
+              me.roleLabel ||
+              me.role ||
+              user?.role ||
+              "User"
+          ).trim(),
+          facilityId: resolvedFacilityId || user?.facilityId,
+          tenantId: me.tenantId || user?.tenantId,
+          moduleIds: isAdminLikeRole(
+            currentAccess.roleName,
+            currentAccess.roleLabel,
+            me.role,
+            user?.role
+          )
+            ? undefined
+            : Array.isArray(currentAccess.moduleIds)
+              ? currentAccess.moduleIds
+              : user?.moduleIds,
         });
       } catch {
-        // The local authenticated session remains the offline-safe fallback.
+        // Safe offline resilience
       }
     };
 
@@ -8503,7 +8411,7 @@ export default function App() {
     return () => {
       cancelled = true;
     };
-  }, [authScreen, setUser, user?.email, user?.facilityId, user?.moduleIds, user?.name, user?.role, user?.tenantId]);
+  }, [authScreen]);
 
   useEffect(() => {
     if (authScreen !== "app") return;
@@ -8536,38 +8444,49 @@ export default function App() {
   }, [authScreen, authRoleKey, user?.role, user?.email, setFacility, setUser]);
 
   useEffect(() => {
-    if (authScreen !== "splash") return;
-    const id = window.setTimeout(() => {
-      const bootstrap = async () => {
-        const hasSession =
-          sessionStorage.getItem(SESSION_STORAGE_KEY) === "active";
-        if (hasSession) {
-          let storedCode = getStoredFacilityCode();
-          if (!storedCode) {
-            const raw = localStorage.getItem(ACCOUNT_STORAGE_KEY);
-            if (raw) {
-              try {
-                const saved = JSON.parse(raw) as FacilityRegistration;
-                storedCode = String(saved.registrationNumber || "").trim();
-              } catch {
-                storedCode = "";
-              }
+    if (authScreen !== "splash") {
+      const splash = document.getElementById("preload-splash");
+      if (splash) {
+        splash.classList.add("hidden");
+        window.setTimeout(() => {
+          try {
+            splash.remove();
+          } catch {
+            // ignore if already removed
+          }
+        }, 260);
+      }
+      return;
+    }
+    // Run bootstrap immediately — no artificial delay.
+    const bootstrap = async () => {
+      const hasSession =
+        sessionStorage.getItem(SESSION_STORAGE_KEY) === "active";
+      if (hasSession) {
+        let storedCode = getStoredFacilityCode();
+        if (!storedCode) {
+          const raw = localStorage.getItem(ACCOUNT_STORAGE_KEY);
+          if (raw) {
+            try {
+              const saved = JSON.parse(raw) as FacilityRegistration;
+              storedCode = String(saved.registrationNumber || "").trim();
+            } catch {
+              storedCode = "";
             }
           }
-          if (storedCode) {
-            setStoredFacilityCode(storedCode);
-            setLicenseFacilityCode(storedCode);
-          }
-          const ok = await ensureLicenseActive(storedCode);
-          setAuthScreen(ok ? "app" : "license");
-          return;
         }
-        const hasAccount = Boolean(localStorage.getItem(ACCOUNT_STORAGE_KEY));
-        setAuthScreen(hasAccount ? "login" : "landing");
-      };
-      void bootstrap();
-    }, 2400);
-    return () => window.clearTimeout(id);
+        if (storedCode) {
+          setStoredFacilityCode(storedCode);
+          setLicenseFacilityCode(storedCode);
+        }
+        const ok = await ensureLicenseActive(storedCode);
+        setAuthScreen(ok ? "app" : "license");
+        return;
+      }
+      const hasAccount = Boolean(localStorage.getItem(ACCOUNT_STORAGE_KEY));
+      setAuthScreen(hasAccount ? "login" : "landing");
+    };
+    void bootstrap();
   }, [authScreen, ensureLicenseActive]);
 
   useEffect(() => {
@@ -8699,7 +8618,7 @@ export default function App() {
               ? 18
               : null);
   const activeWorkflowModule = activeSidebarModuleId
-    ? WORKFLOW_MODULE_BY_ID[activeSidebarModuleId]
+    ? MODULE_BY_ID.get(activeSidebarModuleId) || WORKFLOW_MODULE_BY_ID[activeSidebarModuleId]
     : null;
   const sidebarWaitingConfig = activeSidebarModuleId
     ? workflowWaitingListConfig[activeSidebarModuleId]
@@ -8767,68 +8686,14 @@ export default function App() {
     };
   }, []);
 
-  const MODULE_ID_TO_NAV: Record<number, number> = {
-    1: 1,   // Patients
-    2: 2,   // Outpatient / OPD
-    3: 25,  // Emergency
-    4: 3,   // Appointments
-    5: 6,   // Wards
-    6: 4,   // Longitudinal EHR
-    7: 5,   // Nursing
-    8: 7,   // Laboratory
-    9: 8,   // Radiology
-    10: 10, // Pharmacy
-    11: 43, // Operating Theatre
-    12: 48, // Blood Bank
-    13: 9,  // Billing
-    14: 14, // Insurance
-    15: 11, // Inventory
-    16: 16, // HR
-    17: 17, // Doctors
-    18: 18, // Facilities
-    19: 19, // Analytics
-    20: 20, // Users
-    21: 21, // Telemedicine
-    22: 22, // Blockchain
-    24: 24, // Patient Portal
-    25: 25, // Emergency
-    26: 26, // Ambulance
-    27: 27, // Mortuary
-    28: 28, // Queue
-    29: 29, // Helpdesk
-    30: 30, // Canteen
-    31: 31, // Patient Feedback
-    33: 33, // Quality Assurance
-    34: 34, // Integrations
-    35: 35, // Reports
-    36: 36, // ICU
-    37: 37, // Maternity
-    38: 38, // NICU
-    39: 39, // Dental
-    41: 41, // CDSS
-    42: 42, // Migration
-    43: 43, // Operating Theatre
-    44: 44, // Physiotherapy
-    45: 45, // Nutrition
-    46: 46, // Paediatrics
-    47: 47, // Infection Control
-    48: 48, // Blood Bank
-    49: 49, // Biomedical
-    50: 50, // Pharmacy POS
-    64: 42, // Migration Center
-  };
-
   const handleOpenModule = (moduleId: number) => {
     setModuleSearch("");
     setModuleSearchFocused(false);
-    const targetNav = MODULE_ID_TO_NAV[moduleId];
-    if (targetNav !== undefined) {
-      setActiveWorkflowModuleId(moduleId);
-      setActiveNav(targetNav);
-    } else {
-      setActiveWorkflowModuleId(moduleId);
-      setActiveNav(99);
-    }
+    setActivePathView(null);
+    setActiveWorkflowModuleId(moduleId);
+    // Every catalogue module renders through the module registry (nav 99);
+    // the legacy numbered nav map only exists for the fixed sidebar entries.
+    setActiveNav(99);
   };
 
   const openModuleFromSearch = (moduleId: number) => {
@@ -8842,11 +8707,99 @@ export default function App() {
     }
   };
 
+  // Screens ported from the Next.js client navigate with `router.push`.
+  // Resolve those paths back to the desktop module registry.
+  useEffect(() => {
+    const resolvePath = (rawPath: string): { nav?: number; moduleId?: number } => {
+      const path = String(rawPath || "/").split("?")[0].split("#")[0].replace(/\/+$/, "") || "/";
+      if (path === "/settings" || path.startsWith("/settings/")) {
+        return { nav: 12 };
+      }
+      const overrides: Record<string, number> = {
+        "/analytics": 46,
+        "/executive": 46,
+        "/finance": 39,
+        "/finance/journals": 39,
+        "/procurement": 15,
+        "/inventory/purchase-orders": 15,
+        "/facilities": 18,
+        "/facilities/work-orders": 18,
+        "/facility": 18,
+        "/hr/payroll": 66,
+        "/emr": 6,
+        "/patient-portal": 24,
+        "/patient-portal/appointments": 24,
+        "/portal": 24,
+        "/portal/appointments": 24,
+        "/diagnostics/lab": 8,
+        "/diagnostics/radiology": 9,
+        "/pharmacy/inventory": 10,
+        "/communication": 58,
+        "/ai-central": 23,
+        "/ai-chat": 23,
+      };
+      if (overrides[path] !== undefined) return { moduleId: overrides[path] };
+      const exact = MODULE_BY_PATH.get(path);
+      if (exact) return { moduleId: exact.id };
+      // Longest matching catalogue prefix (e.g. /pharmacy/pos/123 -> /pharmacy/pos).
+      let candidate = path;
+      while (candidate.includes("/")) {
+        candidate = candidate.slice(0, candidate.lastIndexOf("/"));
+        const match = MODULE_BY_PATH.get(candidate);
+        if (match) return { moduleId: match.id };
+      }
+      return {};
+    };
+
+    const handleNavigate = (event: Event) => {
+      const detail = (event as CustomEvent<{ path?: string }>).detail || {};
+      const rawPath = String(detail.path || "");
+      const normalizedPath = rawPath.split("?")[0].split("#")[0].replace(/\/+$/, "") || "/";
+      if (getPathView(normalizedPath)) {
+        const parentModuleId = getPathParentModule(normalizedPath);
+        setModuleSearch("");
+        setModuleSearchFocused(false);
+        setActivePathView(normalizedPath);
+        setActiveWorkflowModuleId(parentModuleId !== null ? parentModuleId : null);
+        setActiveNav(99);
+        return;
+      }
+      const target = resolvePath(rawPath);
+      if (target.nav !== undefined) {
+        setActivePathView(null);
+        setActiveWorkflowModuleId(null);
+        setActiveNav(target.nav);
+        return;
+      }
+      if (target.moduleId !== undefined && allowedModuleSet.has(target.moduleId)) {
+        setModuleSearch("");
+        setModuleSearchFocused(false);
+        setActivePathView(null);
+        setActiveWorkflowModuleId(target.moduleId);
+        setActiveNav(99);
+      }
+    };
+
+    const handleBack = () => {
+      setActivePathView(null);
+      setActiveWorkflowModuleId(null);
+      setActiveNav(0);
+    };
+
+    window.addEventListener(HMIS_NAVIGATE_EVENT, handleNavigate as EventListener);
+    window.addEventListener(HMIS_HISTORY_BACK_EVENT, handleBack);
+    return () => {
+      window.removeEventListener(HMIS_NAVIGATE_EVENT, handleNavigate as EventListener);
+      window.removeEventListener(HMIS_HISTORY_BACK_EVENT, handleBack);
+    };
+  }, [roleKey, dynamicAllowedModuleIds]);
+
   const toggleSidebar = () => {
     setSidebarCollapsed((prev) => !prev);
   };
 
   const goToDashboard = () => {
+    setActivePathView(null);
     setActiveWorkflowModuleId(null);
     setActiveNav(0);
   };
@@ -8857,6 +8810,7 @@ export default function App() {
     sessionStorage.removeItem(SESSION_STORAGE_KEY);
     setAuthError("");
     setLoginPassword("");
+    setActivePathView(null);
     setActiveWorkflowModuleId(null);
     setActiveNav(0);
     setAuthRoleKey("hospital_admin");
@@ -8939,7 +8893,11 @@ export default function App() {
     setHelpInput("");
     setHelpTyping(true);
     const activeModuleName = activeWorkflowModuleId
-      ? String(WORKFLOW_MODULE_BY_ID[activeWorkflowModuleId]?.name || "")
+      ? String(
+          MODULE_BY_ID.get(activeWorkflowModuleId)?.name ||
+            WORKFLOW_MODULE_BY_ID[activeWorkflowModuleId]?.name ||
+            "",
+        )
       : "";
     const activeScreen = activeWorkflowModuleId
       ? "Workflow Module View"
@@ -9125,6 +9083,7 @@ export default function App() {
         email: loginEmail.trim(),
       });
       setAuthRoleKey(resolvedRoleKey);
+      setActivePathView(null);
       setActiveNav(resolvedRoleKey === "super_admin" ? 41 : 0);
       setActiveWorkflowModuleId(null);
       try {
@@ -9257,6 +9216,7 @@ export default function App() {
       });
       const resolvedRoleKey = resolveRoleKeyForUi(normalizedRole);
       setAuthRoleKey(resolvedRoleKey);
+      setActivePathView(null);
       if (normalizedRole === "super_admin") {
         setActiveNav(41);
       } else {
@@ -9334,12 +9294,11 @@ export default function App() {
   }, [authScreen, autoRefreshMinutes]);
 
   useEffect(() => {
-    const onBeforeUnload = () => {
-      clearTokens();
-      sessionStorage.removeItem(SESSION_STORAGE_KEY);
-    };
-    window.addEventListener("beforeunload", onBeforeUnload);
-    return () => window.removeEventListener("beforeunload", onBeforeUnload);
+    // Preserve desktop session smoothly across window reloads
+    const token = getAccessToken();
+    if (token) {
+      sessionStorage.setItem(SESSION_STORAGE_KEY, "active");
+    }
   }, []);
 
   useEffect(() => {
@@ -9363,18 +9322,24 @@ export default function App() {
 
   useEffect(() => {
     if (authScreen !== "app") return;
+    const isAllowedModule =
+      (activeWorkflowModuleId !== null && allowedModuleSet.has(activeWorkflowModuleId)) ||
+      allowedModuleSet.has(activeNav);
     const isAllowedWorkflowView =
-      activeNav === 99 &&
-      activeWorkflowModuleId !== null &&
-      allowedModuleSet.has(activeWorkflowModuleId);
+      activeNav === 99 ||
+      activePathView !== null ||
+      isAllowedModule ||
+      allowedNavSet.has(activeNav);
 
-    if (!allowedNavSet.has(activeNav) && !isAllowedWorkflowView) {
+    if (!isAllowedWorkflowView) {
+      setActivePathView(null);
       setActiveNav(defaultNavIndex);
       setActiveWorkflowModuleId(null);
     }
   }, [
     authScreen,
     activeNav,
+    activePathView,
     activeWorkflowModuleId,
     allowedNavSet,
     allowedModuleSet,
@@ -9610,306 +9575,44 @@ export default function App() {
           </>
         );
       }
-      case 1:
-        return <PatientsView />;
-      case 2:
-        return <OpdDashboardView />;
-      case 3:
-        return <AppointmentsView />;
-      case 4:
-        return <EHRView />;
-      case 5:
-        return <NursingView />;
-      case 6:
-        return <WardView />;
-      case 7:
-        return <LaboratoryView />;
-      case 8:
-        return <RadiologyView />;
-      case 9:
-        return <BillingView />;
-      case 10:
-        return <PharmacyView />;
-      case 11:
-        return <InventoryView />;
-      case 12:
-        return (
-          <SettingsView
-            primaryColor={primaryColor}
-            setPrimaryColor={setPrimaryColor}
-            textColor={textColor}
-            setTextColor={setTextColor}
-            fontPreset={fontPreset}
-            setFontPreset={setFontPreset}
-            activeLayout={activeLayout}
-            setActiveLayout={setActiveLayout}
-            facilityLogo={facilityLogo}
-            setFacilityLogo={setFacilityLogo}
-            landingTheme={landingTheme}
-            setLandingTheme={setLandingTheme}
-            appMode={appMode}
-            setAppMode={setAppMode}
-            appNotifications={appNotifications}
-            setAppNotifications={setAppNotifications}
-            compactDashboard={compactDashboard}
-            setCompactDashboard={setCompactDashboard}
-            autoRefreshMinutes={autoRefreshMinutes}
-            setAutoRefreshMinutes={setAutoRefreshMinutes}
-          />
-        );
-      case 13:
-        return <BillingView />;
-      case 14:
-        return <InsuranceView />;
-      case 15:
-        return <ProcurementView />;
-      case 16:
-        return <HrView />;
-      case 17:
-        return <DoctorsView />;
-      case 18:
-        return <FacilitiesView />;
-      case 19:
-        return <AnalyticsView />;
-      case 20:
-        return <UserManagementView />;
-      case 21:
-        return <TelemedicineView />;
-      case 22:
-        return <BlockchainView />;
-      case 23:
-        return <AISuiteView />;
-      case 24:
-        return <PatientPortalView />;
-      case 25:
-        return <EmergencyView />;
-      case 26:
-        return <AmbulanceView />;
-      case 27:
-        return <MortuaryView />;
-      case 28:
-        return <QueueManagementView />;
-      case 29:
-        return <HelpdeskView />;
-      case 30:
-        return <CanteenView />;
-      case 31:
-        return <PatientFeedbackView />;
-      case 33:
-        return <QualityAssuranceView />;
-      case 34:
-        return <ExternalIntegrationsView />;
-      case 40:
-        return roleKey === "hospital_admin" || roleKey === "super_admin" ? (
-          <SubscriptionPlansView />
-        ) : (
-          <div className="p-4">Upgrade plan is available for Hospital Admin only.</div>
-        );
-      case 41:
-        return roleKey === "super_admin" ? (
-          <SuperAdminDashboardView />
-        ) : (
-          <div className="p-4">Super Admin dashboard is restricted to super admin accounts.</div>
-        );
-      case 42:
-        return roleKey === "hospital_admin" || roleKey === "super_admin" ? (
-          <MigrationCenterView />
-        ) : (
-          <div className="p-4">Migration Center is available for Hospital Admin only.</div>
-        );
-      case 99: {
-        const module = activeWorkflowModuleId
-          ? WORKFLOW_MODULE_BY_ID[activeWorkflowModuleId]
-          : null;
-        if (!module || !allowedModuleSet.has(module.id)) {
+
+      default: {
+        if (activeNav === 40 && !activeWorkflowModuleId) {
+          return roleKey === "hospital_admin" || roleKey === "super_admin" ? (
+            <SubscriptionPlansView />
+          ) : (
+            <div className="p-4">Upgrade plan is available for Hospital Admin only.</div>
+          );
+        }
+
+        if (activeNav === 41 && !activeWorkflowModuleId) {
+          return roleKey === "super_admin" ? (
+            <SuperAdminDashboardView />
+          ) : (
+            <div className="p-4">Super Admin dashboard is restricted to super admin accounts.</div>
+          );
+        }
+
+        const targetModuleId =
+          activeWorkflowModuleId ||
+          (activeNav > 0 && activeNav !== 99 && activeNav !== 40 && activeNav !== 41
+            ? activeNav
+            : null);
+
+        if (!targetModuleId) {
+          return null;
+        }
+
+        if (!allowedModuleSet.has(targetModuleId)) {
           return <div className="p-4">You do not have access to this module.</div>;
         }
 
-        if (module.id === 3) {
-          return <EhrView />;
-        }
-
-        if (module.id === 17) {
-          return <DoctorsView />;
-        }
-
-        if (module.id === 18) {
-          return <FacilitiesView />;
-        }
-
-        if (module.id === 19) {
-          return <ReportsView />;
-        }
-
-        if (module.id === 1) {
+        // Patient registration owns live patient state with the desktop drawer
+        if (targetModuleId === 1) {
           return <PatientsView />;
         }
 
-        if (module.id === 36) {
-          return <OpdDashboardView />;
-        }
-
-        if (module.id === 37) {
-          return <MaternityView />;
-        }
-
-        if (module.id === 38) {
-          return <IcuView />;
-        }
-
-        if (module.id === 48) {
-          return <CdssView />;
-        }
-
-        if (module.id === 51) {
-          return <NicuView />;
-        }
-
-        if (module.id === 52) {
-          return <DentalView />;
-        }
-
-        if (module.id === 55) {
-          return <ReferralsView />;
-        }
-
-        if (module.id === 8) {
-          return <LaboratoryView />;
-        }
-
-        if (module.id === 9) {
-          return <RadiologyView />;
-        }
-
-        if (module.id === 10) {
-          return <PharmacyView />;
-        }
-
-        if (module.id === 35) {
-          return <PharmacyPosView />;
-        }
-
-        if (module.id === 11) {
-          return <OtView />;
-        }
-
-        if (module.id === 49) {
-          return <PhysiotherapyView />;
-        }
-
-        if (module.id === 50) {
-          return <NutritionView />;
-        }
-
-        if (module.id === 53) {
-          return <InfectionControlView />;
-        }
-
-        if (module.id === 59) {
-          return <PaediatricsView />;
-        }
-
-        if (module.id === 2) {
-          return <IpdView />;
-        }
-
-        if (module.id === 5) {
-          return <WardView />;
-        }
-
-        if (module.id === 7) {
-          return <NursingView />;
-        }
-
-        if (module.id === 4) {
-          return <AppointmentsView />;
-        }
-
-        if (module.id === 13) {
-          return <BillingView />;
-        }
-
-        if (module.id === 14) {
-          return <InsuranceView />;
-        }
-
-        if (module.id === 20) {
-          return <UserManagementView />;
-        }
-
-        if (module.id === 21) {
-          return <TelemedicineView />;
-        }
-
-        if (module.id === 22) {
-          return <BlockchainView />;
-        }
-
-        if (module.id === 23) {
-          return <AISuiteView />;
-        }
-
-        if (module.id === 24) {
-          return <PatientPortalView />;
-        }
-
-        if (module.id === 25) {
-          return <EmergencyView />;
-        }
-
-        if (module.id === 26) {
-          return <AmbulanceView />;
-        }
-
-        if (module.id === 27) {
-          return <MortuaryView />;
-        }
-
-        if (module.id === 12) {
-          return <BloodBankView />;
-        }
-
-        if (module.id === 15) {
-          return <InventoryView />;
-        }
-
-        if (module.id === 16) {
-          return <HrView />;
-        }
-
-        if (module.id === 39) {
-          return <FinanceView />;
-        }
-
-        if (module.id === 61) {
-          return <BiomedicalView />;
-        }
-
-        if (module.id === 28) {
-          return <QueueManagementView />;
-        }
-
-        if (module.id === 29) {
-          return <HelpdeskView />;
-        }
-
-        if (module.id === 30) {
-          return <CanteenView />;
-        }
-
-        if (module.id === 31) {
-          return <PatientFeedbackView />;
-        }
-
-        if (module.id === 33) {
-          return <QualityAssuranceView />;
-        }
-
-        if (module.id === 34) {
-          return <ExternalIntegrationsView />;
-        }
-
-        if (module.id === 64) {
+        if (targetModuleId === 64) {
           return roleKey === "hospital_admin" || roleKey === "super_admin" ? (
             <MigrationCenterView />
           ) : (
@@ -9917,18 +9620,31 @@ export default function App() {
           );
         }
 
-        return (
-          <React.Suspense fallback={<div className="p-4">Loading module...</div>}>
-            <LazyWorkflowModuleView
-              module={module}
-              patients={patients}
-              onPatientsRefresh={refreshPatientsFromBackend}
-            />
-          </React.Suspense>
-        );
+        if (targetModuleId === 12) {
+          return <AccountSettingsView />;
+        }
+
+        // Authoritative screen from registry (Nursing, Nursing Admin, EHR, Lab, Radiology, etc.)
+        const ModuleView = getModuleView(targetModuleId);
+        if (ModuleView) {
+          return <ModuleView />;
+        }
+
+        const fallbackWorkflow = WORKFLOW_MODULE_BY_ID[targetModuleId];
+        if (fallbackWorkflow) {
+          return (
+            <React.Suspense fallback={<div className="p-4">Loading module...</div>}>
+              <LazyWorkflowModuleView
+                module={fallbackWorkflow}
+                patients={patients}
+                onPatientsRefresh={refreshPatientsFromBackend}
+              />
+            </React.Suspense>
+          );
+        }
+
+        return <div className="p-4">Module not found.</div>;
       }
-      default:
-        return null;
     }
   };
 
@@ -9951,16 +9667,32 @@ export default function App() {
         activeNav={activeNav}
         activeWorkflowModuleId={activeWorkflowModuleId}
         onNavigateNav={(idx) => {
-          setActiveWorkflowModuleId(null);
-          setActiveNav(idx);
+          if (idx === 0) {
+            setActivePathView(null);
+            setActiveWorkflowModuleId(null);
+            setActiveNav(0);
+            return;
+          }
+          if (idx === 12) {
+            navigateToPath("/settings");
+            return;
+          }
+          handleOpenModule(idx);
         }}
         onNavigateUpgrade={() => {
+          setActivePathView(null);
           setActiveWorkflowModuleId(null);
           setActiveNav(40);
         }}
         onOpenHelpAi={() => setHelpWidgetOpen(true)}
-        facilityName={String(dashboardFacilityName || facility?.name || "MediLink General Hospital")}
-        facilityLogo={resolveAssetUrl(facilityLogo) || null}
+        onNavigateAiChat={() => {
+          setActivePathView("/ai-chat");
+          setActiveWorkflowModuleId(23);
+          setActiveNav(99);
+        }}
+        facilityName={String(sidebarFacilityName || "MediLink General Hospital")}
+        facilityLogo={sidebarFacilityLogo}
+        appMode={appMode}
       />
 
       <div className="main">
@@ -9969,29 +9701,30 @@ export default function App() {
           activeWorkflowModuleId={activeWorkflowModuleId}
           onGoBack={goToDashboard}
           onOpenSettings={(section) => {
-            setActiveWorkflowModuleId(null);
-            setActiveNav(12);
+            const targetPath = `/settings${section ? `?section=${section}` : ""}`;
+            navigateToPath(targetPath);
           }}
           onOpenHelpAi={() => setHelpWidgetOpen(true)}
+          onNavigateAiCentral={() => {
+            navigateToPath("/ai-central");
+          }}
           onOpenFacilitySettings={() => {
-            setActiveWorkflowModuleId(null);
-            setActiveNav(18);
+            navigateToPath("/full-system-setup");
           }}
           onOpenHelpdesk={() => {
-            setActiveWorkflowModuleId(null);
-            setActiveNav(29);
+            navigateToPath("/helpdesk");
           }}
           onNavigateQueue={() => {
             setActiveWorkflowModuleId(null);
             setActiveNav(28);
           }}
           onLogout={handleLogout}
-          userName={String(user?.name || "Hospital Admin")}
+          userName={resolveRealUserName(user?.name)}
           userRole={String(user?.role || "Hospital Admin")}
           userEmail={String(user?.email || "admin@medilink.com")}
           facilityId={String(facility?.id || "facility")}
-          facilityName={String(dashboardFacilityName || facility?.name || "MediLink General Hospital")}
-          facilityLogo={resolveAssetUrl(facilityLogo) || null}
+          facilityName={String(dashboardFacilityName || "MediLink General Hospital")}
+          facilityLogo={sidebarFacilityLogo}
           allowedModuleIds={allowedModuleSet}
           onOpenModule={handleOpenModule}
         />
@@ -10067,4 +9800,4 @@ void ClinicianView;
 const DiagnosticsView = ({ type }: { type: string }) => (
   <div className="p-4">{type} Terminal</div>
 );
-const OPDOTView = () => <OTView />;
+const OPDOTView = () => <OtView />;

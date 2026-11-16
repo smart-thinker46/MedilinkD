@@ -1,6 +1,11 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
 import App from "./App";
+import { LoadingProvider } from "./components/loading/LoadingContext";
+import { LoadingOverlay } from "./components/loading/LoadingOverlay";
+import "./App.css";
+import "./tailwind.css";
+import "./components/loading/loading.css";
 
 if (import.meta.env.PROD) {
   const blockedCombo = (event: KeyboardEvent) => {
@@ -15,11 +20,8 @@ if (import.meta.env.PROD) {
       event.stopPropagation();
     }
   };
-
   window.addEventListener("keydown", blockedCombo, { capture: true });
   window.addEventListener("contextmenu", (event) => event.preventDefault());
-
-  // Best effort only: hides production logs from end users.
   const noop = () => undefined;
   window.console.log = noop;
   window.console.info = noop;
@@ -32,8 +34,30 @@ if (import.meta.env.PROD) {
   });
 }
 
-ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
+const rootEl = document.getElementById("root") as HTMLElement;
+
+ReactDOM.createRoot(rootEl).render(
   <React.StrictMode>
-    <App />
-  </React.StrictMode>,
+    <LoadingProvider>
+      <App />
+      <LoadingOverlay />
+    </LoadingProvider>
+  </React.StrictMode>
 );
+
+// The single unified splash screen with App Icon and circular spinner is shown
+// until React finishes bootstrapping and transitions beyond authScreen 'splash'.
+// As a fallback to prevent hanging, hide it after 2 seconds if still visible.
+setTimeout(() => {
+  const splash = document.getElementById("preload-splash");
+  if (splash && !splash.classList.contains("hidden")) {
+    splash.classList.add("hidden");
+    setTimeout(() => {
+      try {
+        splash.remove();
+      } catch {
+        // ignore
+      }
+    }, 260);
+  }
+}, 2000);

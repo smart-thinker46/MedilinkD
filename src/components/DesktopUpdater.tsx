@@ -135,7 +135,7 @@ export function DesktopUpdater() {
   const isMandatory = state.status === "available" && state.classification === "mandatory";
 
   const handleDismiss = () => {
-    if (state.classification !== "mandatory") {
+    if (!('classification' in state) || state.classification !== "mandatory") {
       const snoozeUntil = Date.now() + 1000 * 60 * 60 * 24; // 24h
       localStorage.setItem(SNOOZE_KEY, String(snoozeUntil));
     }

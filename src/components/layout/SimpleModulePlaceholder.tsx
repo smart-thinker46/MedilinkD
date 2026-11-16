@@ -4,8 +4,9 @@ import { ModuleIcon } from "./ModuleIcon";
 import { PatientDrawer } from "../patients/PatientDrawer";
 import { RecordDrawer } from "./RecordDrawer";
 import type { ReactNode } from "react";
-const usePathname = () => (typeof window !== "undefined" ? window.location.pathname : "/");
+import { usePathname } from "../../lib/navigation";
 import { api } from "../../lib/api";
+import { apiFetch } from "../../lib/apiClient";
 import { setPatientQueueStatus } from "../../lib/patientQueueState";
 import { getHmisAutomationActions } from "../../modules/hmisAutomationActions";
 import { useLiveRefresh } from "../../lib/liveRefresh";
@@ -41,6 +42,7 @@ type TableRow = Record<string, TableCellValue>;
 
 type SimpleModulePlaceholderProps = {
   className?: string;
+  moduleKey?: string;
   title: string;
   subtitle?: string;
   icon?: ReactNode;
@@ -179,8 +181,88 @@ const moduleQueueConfig: Record<string, { departmentId: string }> = MODULE_CATAL
     return acc;
   }, {});
 
+const TITLE_TO_MODULE_KEY_MAP: Record<string, string> = {
+  "financial accounting": "accounting",
+  "accounting": "accounting",
+  "ambulance & dispatch": "ambulance",
+  "ambulance": "ambulance",
+  "appointments & schedules": "appointments",
+  "appointments": "appointments",
+  "blood bank": "blood-bank",
+  "telemedicine & communication": "communication",
+  "communication": "communication",
+  "emr & clinical notes": "ehr",
+  "emr": "ehr",
+  "ehr": "ehr",
+  "emergency room (er) board": "emergency",
+  "emergency": "emergency",
+  "facilities & assets": "facilities",
+  "facilities": "facilities",
+  "maintenance work orders": "facilities-work-orders",
+  "finance & accounting": "finance",
+  "finance": "finance",
+  "journal entries & statements": "finance-journals",
+  "purchase orders (po)": "inventory-purchase-orders",
+  "purchase orders": "inventory-purchase-orders",
+  "procurement": "procurement",
+  "inpatient management": "ipd",
+  "inpatient": "ipd",
+  "patient portal administration": "patient-portal",
+  "patient portal": "patient-portal",
+  "portal appointments": "portal-appointments",
+  "payroll & compensation": "payroll",
+  "payroll": "payroll",
+  "patient registration": "patients",
+  "queue management": "queue",
+  "outpatient": "opd",
+  "bed & ward": "wards",
+  "maternity": "maternity",
+  "icu": "icu",
+  "nicu": "nicu",
+  "operating theatre": "ot",
+  "mortuary": "mortuary",
+  "referral management": "referrals",
+  "clinical decision support": "cdss",
+  "nursing": "nursing",
+  "nursing admin": "nursing-admin",
+  "laboratory": "lab",
+  "radiology": "radiology",
+  "pharmacy": "pharmacy",
+  "pharmacy pos": "pharmacy-pos",
+  "clinical research": "clinical-research",
+  "quality assurance": "quality-assurance",
+  "physiotherapy & rehabilitation": "physiotherapy",
+  "nutrition & dietetics": "nutrition",
+  "dental": "dental",
+  "infection control & cssd": "infection-control",
+  "paediatrics": "paediatrics",
+  "billing": "billing",
+  "insurance": "insurance",
+  "revenue cycle": "revenue",
+  "cost accounting": "cost-accounting",
+  "inventory": "inventory",
+  "hr": "hr",
+  "human resources": "hr",
+  "doctors": "doctors",
+  "reports": "reporting",
+  "analytics": "analytics",
+  "ai analytics": "ai-analytics",
+  "telemedicine": "telemedicine",
+  "blockchain": "blockchain",
+  "user management": "security",
+  "ict": "ict",
+  "governance": "governance",
+  "helpdesk": "helpdesk",
+  "operations": "operations",
+  "canteen": "canteen",
+  "medical director": "medical-director",
+  "community health": "community-health",
+  "home care": "home-care",
+};
+
 export function SimpleModulePlaceholder({
   className = "",
+  moduleKey: propModuleKey,
   title,
   subtitle,
   icon,
@@ -198,7 +280,7 @@ export function SimpleModulePlaceholder({
   useProvidedStats = false,
   useProvidedRows = false,
   useProvidedActions = false,
-  onRowClick,
+  onRowClick: _onRowClick,
 }: SimpleModulePlaceholderProps) {
   const pathname = usePathname();
   const { facility } = useAppStore();
@@ -250,11 +332,34 @@ export function SimpleModulePlaceholder({
   }, [toast]);
   const moduleKey = useMemo(
     () => {
-      const parts = pathname?.split("/").filter(Boolean) || [];
-      if (parts[0] === "pharmacy" && parts[1] === "pos") return "pharmacy-pos";
-      return parts[0] || "";
+      if (propModuleKey) return propModuleKey;
+      const cleanPath = pathname?.split("?")[0].replace(/^\//, "");
+      if (cleanPath) {
+        const parts = cleanPath.split("/").filter(Boolean);
+        if (parts[0] === "pharmacy" && parts[1] === "pos") return "pharmacy-pos";
+        if (parts.length > 0 && parts[0] !== "index.html") return parts.join("-");
+      }
+      const lowerTitle = String(title || "").trim().toLowerCase();
+      if (TITLE_TO_MODULE_KEY_MAP[lowerTitle]) return TITLE_TO_MODULE_KEY_MAP[lowerTitle];
+      const directMatch = Object.entries(TITLE_TO_MODULE_KEY_MAP).find(([k]) =>
+        lowerTitle.includes(k) || k.includes(lowerTitle)
+      );
+      if (directMatch) return directMatch[1];
+      if (className) {
+        const lowerClass = className.toLowerCase();
+        if (lowerClass.includes("accounting")) return "accounting";
+        if (lowerClass.includes("payroll")) return "payroll";
+        if (lowerClass.includes("emr") || lowerClass.includes("ehr")) return "ehr";
+        if (lowerClass.includes("ambulance")) return "ambulance";
+        if (lowerClass.includes("emergency")) return "emergency";
+      }
+      const catalogMatch = MODULE_CATALOG.find((m) =>
+        lowerTitle.includes(m.name.toLowerCase()) || m.name.toLowerCase().includes(lowerTitle)
+      );
+      if (catalogMatch) return catalogMatch.path.replace(/^\//, "").replace(/\//g, "-");
+      return "";
     },
-    [pathname],
+    [propModuleKey, pathname, title, className],
   );
   const configuredForms = MODULE_ACTION_FORMS[moduleKey]?.forms ?? [];
   const automationActions = useMemo(
@@ -1151,17 +1256,20 @@ export function SimpleModulePlaceholder({
         : "";
       if (action.label === "ICD-10 Search" && !searchTerm) return;
       setSubmitting(true);
-      const response = await api.request({
-        method: action.method || "post",
-        url: action.endpoint,
-        data: {
-          facilityId: facility?.id,
-          ...(action.payload || {}),
-          ...(searchTerm ? { q: searchTerm } : {}),
-        },
+      const method = (action.method || "POST").toUpperCase();
+      const bodyData = {
+        facilityId: facility?.id,
+        ...(action.payload || {}),
+        ...(searchTerm ? { q: searchTerm } : {}),
+      };
+      const response = await apiFetch(action.endpoint, {
+        method,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(bodyData),
       });
+      const responseData = await response.json().catch(() => null);
       if (action.label === "ICD-10 Search") {
-        setAutomationOutput({ label: action.label, query: searchTerm, data: response.data });
+        setAutomationOutput({ label: action.label, query: searchTerm, data: responseData });
       }
       setToast(`${action.label} completed.`);
       await Promise.all([loadDomainRows(), loadSavedRows()]);
@@ -1976,90 +2084,131 @@ export function SimpleModulePlaceholder({
       ) : null}
 
       {activeForm ? (
-        <div className="module-form-overlay">
+        <div className="module-form-overlay" role="dialog" aria-modal="true" onClick={() => setActiveForm(null)}>
           <div
-            className={`module-form-panel modal-panel module-form-panel-${moduleKey} ${getActiveFormModeClass(activeForm.title)}`}
+            className={`module-form-panel has-rail modal-panel module-form-panel-${moduleKey} ${getActiveFormModeClass(activeForm.title)}`}
             style={{
               "--module-form-accent": activeForm.accentColor || "#16a34a",
-              "--module-form-accent-dark": activeForm.accentColor || "#15803d",
+              "--module-form-accent-dark": `${activeForm.accentColor || "#16a34a"}cc`,
               "--module-form-accent-soft": `${activeForm.accentColor || "#16a34a"}22`,
             } as any}
+            onClick={(e) => e.stopPropagation()}
           >
-            <div className="module-form-header">
-              <div className="module-form-heading">
-                <div className="module-form-icon">
+            {/* Left Rail / Sidebar: Black to button color gradient */}
+            <aside
+              className="module-form-rail"
+              style={{
+                background: `linear-gradient(180deg, #070a0f 0%, #0d1522 35%, ${activeForm.accentColor || "#16a34a"}44 70%, ${activeForm.accentColor || "#16a34a"} 100%)`,
+              }}
+            >
+              <div className="module-form-rail-mark">
+                <div className="module-form-rail-icon">
                   <ModuleIcon name={getActiveFormIcon(activeForm.title)} />
                 </div>
                 <div>
-                  <div className="module-form-kicker">{title}</div>
-                  <h2 className="module-form-title">{activeForm.title}</h2>
+                  <b>Medilink HMIS</b>
+                  <small>{title}</small>
                 </div>
               </div>
-              <div className="module-form-header-actions">
-                <div className="module-form-meta">
-                  <span>{activeForm.fields.length} fields</span>
-                  <span>{requiredFieldCount} required</span>
+
+              <div className="module-form-rail-rule" />
+
+              <div className="module-form-rail-steps">
+                <div className="module-form-rail-step active">
+                  <span className="module-form-rail-step-num">1</span>
+                  <div>
+                    <b>Form Data</b>
+                    <small>{activeForm.fields.length} inputs</small>
+                  </div>
+                </div>
+                {requiredFieldCount > 0 ? (
+                  <div className="module-form-rail-step">
+                    <span className="module-form-rail-step-num">2</span>
+                    <div>
+                      <b>Required Checks</b>
+                      <small>{requiredFieldCount} mandatory</small>
+                    </div>
+                  </div>
+                ) : null}
+              </div>
+
+              <div className="module-form-rail-banner">
+                <small>Active Action</small>
+                <div className="module-form-rail-bname">{activeForm.title}</div>
+                <div className="module-form-rail-bmeta">
+                  {Object.values(formValues).filter((v) => v !== "" && v !== undefined && v !== null && v !== false).length} of {activeForm.fields.length} fields filled
+                </div>
+                <span className="module-form-rail-chip ok">
+                  In Progress
+                </span>
+              </div>
+            </aside>
+
+            {/* Right Main Area */}
+            <div className="module-form-main">
+              <header className="module-form-head">
+                <div>
+                  <small className="module-form-kicker">{title} · Form Terminal</small>
+                  <h2 className="module-form-title">{activeForm.title}</h2>
+                  {activeForm.description ? (
+                    <p className="module-form-desc">{activeForm.description}</p>
+                  ) : null}
                 </div>
                 <button
+                  type="button"
                   onClick={() => setActiveForm(null)}
-                  className="modal-close-btn"
+                  className="module-form-x-btn"
                   aria-label="Close"
                 >
                   ✕
                 </button>
-              </div>
-            </div>
+              </header>
 
-            <div className="module-form-intro">
-              <div>
-                {activeForm.description ? (
-                  <p className="module-form-note">
-                    {activeForm.description}
-                  </p>
-                ) : null}
-              </div>
-            </div>
+              <form onSubmit={handleFormSubmit} className="module-form-content">
+                <div className="module-form-body-scroll">
+                  <div className="module-form-grid">
+                    {activeForm.fields.map((field) => {
+                      const wide =
+                        field.type === "textarea" ||
+                        field.type === "file" ||
+                        ((field.type === "checkbox" || field.type === "radio") &&
+                          Array.isArray(field.options) &&
+                          field.options.length > 0);
+                      return (
+                        <div key={field.name} className={`module-form-field ${wide ? "is-wide" : ""}`}>
+                          <label className="form-label">
+                            {field.label}
+                            {field.required ? <span className="module-form-required">*</span> : null}
+                          </label>
+                          {field.helper ? (
+                            <div className="form-helper">{field.helper}</div>
+                          ) : null}
+                          {renderFieldInput(field)}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
 
-            <form onSubmit={handleFormSubmit} className="module-form-body">
-              <div className="module-form-grid">
-                {activeForm.fields.map((field) => {
-                  const wide =
-                    field.type === "textarea" ||
-                    field.type === "file" ||
-                    ((field.type === "checkbox" || field.type === "radio") &&
-                      Array.isArray(field.options) &&
-                      field.options.length > 0);
-                  return (
-                    <div key={field.name} className={`module-form-field ${wide ? "is-wide" : ""}`}>
-                      <label className="form-label">
-                        {field.label}
-                        {field.required ? <span className="module-form-required">*</span> : null}
-                      </label>
-                      {field.helper ? (
-                        <div className="form-helper">{field.helper}</div>
-                      ) : null}
-                      {renderFieldInput(field)}
-                    </div>
-                  );
-                })}
-              </div>
-              <div className="module-form-footer">
-                <button
-                  type="button"
-                  onClick={() => setActiveForm(null)}
-                  className="form-btn form-btn-cancel"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  className="form-btn form-btn-primary module-form-submit"
-                  disabled={submitting}
-                >
-                  {submitting ? "Saving..." : getSubmitLabel(activeForm.title)}
-                </button>
-              </div>
-            </form>
+                <footer className="module-form-foot">
+                  <button
+                    type="button"
+                    onClick={() => setActiveForm(null)}
+                    className="module-form-btn-cancel"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    className="module-form-btn-submit"
+                    style={{ backgroundColor: activeForm.accentColor || "#16a34a" }}
+                    disabled={submitting}
+                  >
+                    {submitting ? "Saving..." : getSubmitLabel(activeForm.title)}
+                  </button>
+                </footer>
+              </form>
+            </div>
           </div>
         </div>
       ) : null}

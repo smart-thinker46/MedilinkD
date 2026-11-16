@@ -106,3 +106,35 @@ To match `Medilink-Frontend`:
 3. **CSRF Expiry (403):** If `code === 'EBADCSRFTOKEN'`, clear stored CSRF token, re-fetch via `/security/csrf-token`, and replay the failed request.
 4. **Data Isolation:** Clear all memory token variables and active patient state upon logout to prevent cross-tenant data bleed.
 5. **Network safety:** `apiFetch()` applies a 30-second timeout and retries only one interrupted `GET`; it never automatically retries a mutation, preventing duplicate clinical or financial writes.
+
+---
+
+## Module-screen API usage checkpoint — November 14, 2026
+
+The newly wired module screens use the existing Desktop API client and existing backend controllers. No endpoint was invented and no backend source was modified.
+
+| Concern | Contract | Desktop implementation |
+|---|---|---|
+| Request shape | Axios-compatible `{ data }` responses used by the ported Web pages | `src/lib/api.ts` already returns `{ data, status, ok }`; ported calls are unchanged |
+| DELETE with body | The Web `DocumentsView` sends `{ data: { reason } }` on delete | `api.delete(path, { data })` now serialises a JSON body and sets `Content-Type` (previously headers-only) |
+| Authentication | Bearer token, refresh, CSRF, device header | Reused `apiFetch` in `src/lib/apiClient.ts`; no bypass added |
+| Tenant scope | Facility/tenant claims injected by the backend guard | Ported screens call the same tenant-scoped paths as the Web client |
+| Module permissions | Backend `/security/access/me` module ids | Client filters against `MODULE_CATALOG`; backend remains authoritative |
+| Offline/sync | Desktop offline queue and live-refresh events | `useLiveRefresh`, `notifyLiveDataChanged` and the offline queue are untouched |
+
+### Sub-route to controller mapping (examples)
+
+| Ported screen | Example endpoints used |
+|---|---|
+| `RevenueView` | `/revenue-cycle/*` |
+| `AccountingView` | `/finance/*`, `/accounting/*` |
+| `PayrollView` | `/hr/payroll/*` |
+| `FinanceJournalsView` | `/finance/journals` |
+| `InventoryPurchaseOrdersView` | `/inventory/purchase-orders` |
+| `FacilitiesWorkOrdersView` | `/facilities/work-orders` |
+| `PortalView` / `PortalAppointmentsView` | `/portal/*` |
+| `AccountSettingsView` | `/security/me`, `/security/access/me`, `/security/sessions`, `/auth/change-password` |
+| `NursingAdminView` | `/nursing-admin/*` |
+| `FullSystemSetupView` | facility/setup endpoints already used by the Web page |
+
+> Verification status: API contract mapping is source-aligned. Mutating flows still require a synthetic tenant to confirm payload acceptance and RLS isolation.

@@ -17,6 +17,7 @@ import {
   X,
 } from "lucide-react";
 import { api } from "../lib/api";
+import { refreshAccessToken } from "../lib/apiClient";
 import { useLiveRefresh } from "../lib/liveRefresh";
 import { useAppStore } from "../store/appStore";
 
@@ -87,6 +88,7 @@ export default function PharmacyPosView() {
   const [cart, setCart] = useState<any[]>([]);
   const [suspendedSales, setSuspendedSales] = useState<any[]>([]);
   const [saleOpen, setSaleOpen] = useState(false);
+  const [sessionExpired, setSessionExpired] = useState(false);
   const [saleForm, setSaleForm] = useState({
     customerType: "OUTPATIENT",
     patientId: "",
@@ -124,24 +126,44 @@ export default function PharmacyPosView() {
   const load = async (targetDate = cashForm.date) => {
     setLoading(true);
     try {
-      const safeGet = (label: string, request: Promise<any>, fallback: any) => request.catch((error) => ({
+      // A single transparent refresh + retry per source. Avoids counting one
+      // expired session as six separate 401 failures.
+      const authedGet = async (request: () => Promise<any>) => {
+        try {
+          return await request();
+        } catch (error: any) {
+          if (Number(error?.response?.status || 0) === 401) {
+            const restored = await refreshAccessToken().catch(() => false);
+            if (restored) return await request();
+          }
+          throw error;
+        }
+      };
+      const safeGet = (label: string, request: () => Promise<any>, fallback: any) => authedGet(request).catch((error) => ({
         data: fallback,
         __failed: true,
         __label: label,
         __status: error?.response?.status,
       }));
       const [iRes, cRes, sRes, pRes, tRes, rRes] = await Promise.all([
-        safeGet("inventory", api.get("/pharmacy/inventory-batches"), []),
-        safeGet("catalog", api.get("/pharmacy/catalog"), []),
-        safeGet("staff", api.get("/pharmacy/staff"), []),
-        safeGet("patients", api.get("/tenant/patients", { params: { limit: 800 } }), []),
-        safeGet("transactions", api.get("/pharmacy/pos/transactions", { params: { date: targetDate } }), []),
-        safeGet("reconciliation", api.get("/pharmacy/pos/reconciliation", { params: { date: targetDate } }), {}),
+        safeGet("inventory", () => api.get("/pharmacy/inventory-batches"), []),
+        safeGet("catalog", () => api.get("/pharmacy/catalog"), []),
+        safeGet("staff", () => api.get("/pharmacy/staff"), []),
+        safeGet("patients", () => api.get("/tenant/patients", { params: { limit: 800 } }), []),
+        safeGet("transactions", () => api.get("/pharmacy/pos/transactions", { params: { date: targetDate } }), []),
+        safeGet("reconciliation", () => api.get("/pharmacy/pos/reconciliation", { params: { date: targetDate } }), {}),
       ]);
       const failed = [iRes, cRes, sRes, pRes, tRes, rRes].filter((response: any) => response?.__failed);
-      if (failed.length) {
+      const unauthorized = failed.length > 0 && failed.every((response: any) => response.__status === 401);
+      if (unauthorized) {
+        setSessionExpired(true);
+        setToast("POS live data needs an active session. Sign out, sign in again, then press Refresh.");
+      } else if (failed.length) {
+        setSessionExpired(false);
         const details = failed.map((response: any) => `${response.__label}${response.__status ? ` (${response.__status})` : ""}`).join(", ");
         setToast(`${failed.length} POS data source${failed.length === 1 ? "" : "s"} could not be loaded: ${details}.`);
+      } else {
+        setSessionExpired(false);
       }
       setInventory(unwrapRows(iRes.data));
       setCatalog(unwrapRows(cRes.data));
@@ -162,7 +184,10 @@ export default function PharmacyPosView() {
     void load(cashForm.date);
   }, []);
 
-  useLiveRefresh(() => load(cashForm.date), { intervalMs: 45000 });
+  useLiveRefresh(() => {
+    if (sessionExpired) return;
+    return load(cashForm.date);
+  }, { intervalMs: 45000 });
 
   const visibleInventory = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -348,6 +373,17 @@ export default function PharmacyPosView() {
         </div>
       ) : null}
 
+      {sessionExpired ? (
+        <div className="pos-session-banner" role="alert">
+          <AlertTriangle size={16} />
+          <div>
+            <strong>Session expired</strong>
+            <span>Sign out and sign in again to load live stock, patients and transactions, then press Refresh.</span>
+          </div>
+          <button type="button" onClick={() => void load(cashForm.date)} disabled={loading}>{loading ? "Retrying..." : "Retry"}</button>
+        </div>
+      ) : null}
+
       {printing && receipt ? (
         <div className="pos-print-animation" role="status" aria-live="polite">
           <div className="pos-print-scene">
@@ -394,11 +430,21 @@ export default function PharmacyPosView() {
         <section className="nursing-clinical-card pos-reconciliation-panel">
           <h3 className="form-title"><Banknote size={18} /> Daily Cash Reconciliation</h3>
           <form className="pos-form-grid pos-reconcile-form" onSubmit={reconcileCash}>
+            <div className="pos-form-section-title wide">
+              <div>
+                <span>Cash close</span>
+                <strong>Reconcile the dispensing counter</strong>
+              </div>
+              <small>Confirm the counted cash before saving the daily close.</small>
+            </div>
             <label><span>Date</span><input type="date" value={cashForm.date} onChange={(e) => changeReconciliationDate(e.target.value)} /></label>
-            <label><span>Expected cash</span><input value={money(reconciliation?.expectedCash || 0)} readOnly /></label>
+            <label><span>Expected cash</span><input value={money(reconciliation?.expectedCash || 0)} readOnly aria-label="Expected cash" /></label>
             <label><span>Physical cash counted</span><input type="number" value={cashForm.actualCash} onChange={(e) => setCashForm({ ...cashForm, actualCash: e.target.value })} required /></label>
             <label className="wide"><span>Notes</span><textarea value={cashForm.notes} onChange={(e) => setCashForm({ ...cashForm, notes: e.target.value })} /></label>
-            <button type="submit" className="pos-submit-btn pos-reconcile-submit" disabled={Boolean(saving)}><Save size={15} /> Save Reconciliation</button>
+            <div className="pos-form-inline-actions wide">
+              <small>Expected cash is calculated from completed cash sales for the selected date.</small>
+              <button type="submit" className="pos-submit-btn pos-reconcile-submit" disabled={Boolean(saving)}><Save size={15} /> Save Reconciliation</button>
+            </div>
           </form>
           {reconciliation?.latestReconciliation ? <div className="pos-discrepancy"><AlertTriangle size={15} /> Last discrepancy: {money(reconciliation.latestReconciliation.discrepancy)}</div> : null}
         </section>
@@ -406,13 +452,34 @@ export default function PharmacyPosView() {
         {saleOpen ? <div className="pos-sale-modal" role="dialog" aria-modal="true" aria-labelledby="pos-sale-title">
         <div className="pos-sale-modal-backdrop" onClick={() => setSaleOpen(false)} />
         <form className="pos-cart-panel pos-sale-modal-card" onSubmit={submitSale}>
-          <div className="nursing-care-header">
-            <div><span id="pos-sale-title">Retail Sale</span><strong>{cart.length} item(s) | {money(payableTotal)}</strong></div>
-            <span className="pv-badge">{saleForm.paymentMethod}</span>
-            <button type="button" className="pos-modal-close" onClick={() => setSaleOpen(false)} aria-label="Close sale form"><X size={18} /></button>
-          </div>
+          <header className="nursing-care-header pos-sale-rail">
+            <div className="pos-sale-rail-brand">
+              <div className="pos-sale-rail-icon"><ShoppingCart size={21} /></div>
+              <div><b>Medilink HMIS</b><small>Pharmacy POS</small></div>
+            </div>
+            <div className="pos-sale-rail-rule" />
+            <div className="pos-sale-rail-steps" aria-label="Sale progress">
+              <div className="pos-sale-rail-step is-active"><span>1</span><div><b>Sale details</b><small>Customer and payment</small></div></div>
+              <div className="pos-sale-rail-step"><span>2</span><div><b>Dispensing cart</b><small>{cart.length} item{cart.length === 1 ? "" : "s"} selected</small></div></div>
+            </div>
+            <div className="pos-sale-rail-status">
+              <small>Active action</small>
+              <strong id="pos-sale-title">Retail Sale</strong>
+              <span>{cart.length} item(s) | {money(payableTotal)}</span>
+              <em>{saleForm.paymentMethod}</em>
+            </div>
+          </header>
+          <button type="button" className="pos-modal-close" onClick={() => setSaleOpen(false)} aria-label="Close sale form"><X size={18} /></button>
+          <div className="pos-sale-body">
           <p className="pos-form-intro">Capture customer, prescription, payment, and dispensing details.</p>
           <div className="pos-form-grid">
+            <div className="pos-form-section-title wide">
+              <div>
+                <span>Customer and payment</span>
+                <strong>Sale details</strong>
+              </div>
+              <small>Link the customer and select how this sale will be paid.</small>
+            </div>
             <label><span>Customer type</span><select value={saleForm.customerType} onChange={(e) => setSaleForm({ ...saleForm, customerType: e.target.value })}><option>OUTPATIENT</option><option>VISITOR</option><option>STAFF</option><option>INSURANCE</option><option>WALK_IN</option></select></label>
             <label><span>Payment method</span><select value={saleForm.paymentMethod} onChange={(e) => setSaleForm({ ...saleForm, paymentMethod: e.target.value })}><option>CASH</option><option>MPESA</option><option>CARD</option><option>BANK_TRANSFER</option><option>CHEQUE</option><option>CREDIT</option><option>INSURANCE</option><option>PATIENT_ACCOUNT</option><option>VOUCHER</option><option>DEPOSIT</option><option>MIXED</option><option>SALARY_DEDUCTION</option></select></label>
             <label className="wide"><span>Registered patient (optional)</span><select value={saleForm.patientId} onChange={(e) => { const patient = patients.find((row) => row.id === e.target.value); setSaleForm({ ...saleForm, patientId: e.target.value, customerType: e.target.value ? "OUTPATIENT" : saleForm.customerType, customerName: patient ? [patient.firstName, patient.middleName, patient.lastName].filter(Boolean).join(" ") : saleForm.customerName, customerPhone: patient?.phone || patient?.phonePrimary || saleForm.customerPhone }); }}><option value="">Visitor / walk-in customer</option>{patients.slice(0, 800).map((row) => <option key={row.id} value={row.id}>{[row.firstName, row.middleName, row.lastName].filter(Boolean).join(" ") || "Patient"} · {row.patientCode || row.mrn || row.id}</option>)}</select></label>
@@ -423,6 +490,10 @@ export default function PharmacyPosView() {
             {saleForm.paymentMethod === "CASH" ? <label><span>Cash received</span><input type="number" value={saleForm.cashReceived} onChange={(e) => setSaleForm({ ...saleForm, cashReceived: e.target.value })} placeholder={String(cartTotal)} /></label> : null}
             <label><span>Approved discount</span><input type="number" min="0" max={cartTotal} value={saleForm.discountAmount} onChange={(e) => setSaleForm({ ...saleForm, discountAmount: e.target.value })} placeholder="0.00" /></label>
             <label><span>Linked prescription/order</span><input value={saleForm.prescriptionId} onChange={(e) => setSaleForm({ ...saleForm, prescriptionId: e.target.value })} placeholder="Required for Rx-only drugs" /></label>
+          </div>
+          <div className="pos-cart-section-heading">
+            <div><span>Dispensing cart</span><strong>Items for this sale</strong></div>
+            <small>{cart.length} item{cart.length === 1 ? "" : "s"} selected</small>
           </div>
           <div className="pos-cart-list">
             {cart.map((row) => (
@@ -443,7 +514,7 @@ export default function PharmacyPosView() {
             {saleForm.paymentMethod === "CASH" ? <span>Change <strong>{money(cashChange)}</strong></span> : null}
           </div>
           <div className="pos-cart-actions">
-            <button type="button" className="pos-secondary-btn" onClick={suspendSale} disabled={!cart.length || Boolean(saving)}>
+            <button type="button" className="module-form-btn-cancel pos-secondary-btn" onClick={suspendSale} disabled={!cart.length || Boolean(saving)}>
               <PauseCircle size={15} /> Suspend Sale
             </button>
             {suspendedSales.length ? (
@@ -459,7 +530,11 @@ export default function PharmacyPosView() {
               </details>
             ) : null}
           </div>
-          <button type="submit" className="pos-submit-btn" disabled={Boolean(saving)}><ShoppingCart size={16} /> {saving === "sale" ? "Completing..." : "Complete Sale"}</button>
+          </div>
+          <div className="pos-sale-footer">
+            <span className="pos-sale-footer-meta">Total payable <strong>{money(payableTotal)}</strong></span>
+            <button type="submit" className="module-form-btn-submit pos-submit-btn" disabled={Boolean(saving)}><ShoppingCart size={16} /> {saving === "sale" ? "Completing..." : "Complete Sale"}</button>
+          </div>
         </form>
         </div> : null}
       </div>
